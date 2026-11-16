@@ -1,7 +1,9 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { spawn } from 'node:child_process'
 import { makeRepoWithDev } from '../helpers/repo.ts'
 import { initProject } from '../../src/core/project.ts'
 import { openDb } from '../../src/core/db.ts'
@@ -16,7 +18,7 @@ import { doneTask } from '../../src/core/done.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
 import { commitTask } from '../../src/core/git/commit.ts'
 import { mergeStage } from '../../src/core/git/merge.ts'
-import { cleanFeature, sweepBranches } from '../../src/core/git/clean.ts'
+import { cleanFeature, cleanWorktree, sweepBranches } from '../../src/core/git/clean.ts'
 import { branchExists, runGit } from '../../src/core/git/git.ts'
 
 function cancelledFixture() {
@@ -177,6 +179,43 @@ test('грязный каталог отменённой фичи спасает
   assert.match(last, /остатки/)
 })
 
+test('каталог, снятый с учёта git, удаляется напрямую', () => {
+  const { root, db, config, feature } = cancelledFixture()
+  const plain = mkdtempSync(join(tmpdir(), 'al-plain-'))
+  writeFileSync(join(plain, 'note.txt'), 'остаток')
+  db.prepare('update features set worktree = ? where id = ?').run(plain, feature.id)
+
+  const result = cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
+
+  assert.equal(result.removed, true)
+  assert.equal(existsSync(plain), false)
+})
+
+test('занятый каталог остаётся и объясняет, что делать', () => {
+  const { root, db, feature } = cancelledFixture()
+  const plain = mkdtempSync(join(tmpdir(), 'al-busy-'))
+  writeFileSync(join(plain, 'hold.txt'), 'x')
+  db.prepare('update features set worktree = ? where id = ?').run(plain, feature.id)
+
+  // чужой процесс держит каталог текущим: Windows не даст его удалить
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], {
+    cwd: plain,
+    stdio: 'ignore',
+  })
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400)
+
+  let result
+  try {
+    result = cleanWorktree(db, { featureId: feature.id, root, actor: 'owner' })
+  } finally {
+    child.kill()
+  }
+
+  assert.equal(result.removed, false)
+  assert.match(result.reason ?? '', /Закройте процесс/)
+  assert.equal(existsSync(plain), true)
+})
+
 test('ветка с новым коммитом после слияния не считается влитой', () => {
   const { root, db, config, feature } = mergedFixture()
   const branch = getFeature(db, feature.id)!.branch!
@@ -201,3 +240,5 @@ test('ветка с новым коммитом после слияния не �
   assert.ok(result.kept.includes(branch))
   assert.equal(branchExists(root, branch), true)
 })
+
+
