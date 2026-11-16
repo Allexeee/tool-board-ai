@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
@@ -111,6 +111,45 @@ export function checkVersions(root: string, options: { from?: string } = {}): Ve
   return { current, available, source: available.length ? 'git' : 'none', latest: available[0] ?? null }
 }
 
+export interface JournalEntry {
+  from: string
+  to: string
+  schemaFrom: number
+  schemaTo: number
+  backup: string
+  files: string[]
+  now?: Date
+}
+
+export function writeUpgradeJournal(root: string, entry: JournalEntry): string {
+  const stamp = (entry.now ?? new Date()).toISOString().replace(/[:.]/g, '-')
+  const dir = join(root, '.toolbox-al', 'upgrades')
+  mkdirSync(dir, { recursive: true })
+
+  const path = join(dir, `${stamp}.md`)
+  const lines = [
+    `# Обновление ${stamp}`,
+    '',
+    `версия: ${entry.from} → ${entry.to}`,
+    `схема: ${entry.schemaFrom} → ${entry.schemaTo}`,
+    `копия базы: \`${entry.backup}\``,
+    '',
+    '## Обновлённые файлы',
+    '',
+    ...entry.files.map((file) => `- ${file}`),
+    '',
+    '## Откат',
+    '',
+    '1. Остановить работу и скопировать базу из резервной копии.',
+    '2. Выполнить `git checkout` на предыдущий тег проекта.',
+    '3. Запустить `toolbox-al doctor` и проверить, что схема совпадает.',
+    '',
+  ]
+
+  writeFileSync(path, lines.join('\n'), 'utf8')
+  return path
+}
+
 export interface UpgradePlan {
   current: VersionCheck
   schemaFrom: number
@@ -164,6 +203,17 @@ export function applyUpgrade(
   copyFileSync(input.dbPath, backup)
 
   migrate(db)
+
+  const journal = writeUpgradeJournal(input.root, {
+    from: plan.current.current,
+    to: plan.current.latest ?? plan.current.current,
+    schemaFrom: plan.schemaFrom,
+    schemaTo: plan.schemaTo,
+    backup,
+    files: [],
+    now: input.now,
+  })
+  void journal
 
   const target = plan.current.latest ?? plan.current.current
   if (existsSync(input.configPath)) {
