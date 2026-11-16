@@ -6,6 +6,7 @@ import { activateNextStage, getStage, listStages } from '../stages.ts'
 import { createTask, listTasks } from '../tasks.ts'
 import { appendEvent } from '../events.ts'
 import { UserError } from '../../cli/errors.ts'
+import { cleanWorktree } from './clean.ts'
 
 export interface MergeResult {
   merged: boolean
@@ -113,7 +114,6 @@ export function mergeStage(
   const remaining = listStages(db, feature.id).filter((item) => item.status === 'planned')
   if (remaining.length === 0) {
     db.prepare("update features set status = 'done' where id = ?").run(feature.id)
-
     if (feature.requestId) {
       const open = db
         .prepare(
@@ -132,6 +132,9 @@ export function mergeStage(
         })
       }
     }
+
+    // фича закрыта: рабочий каталог больше не нужен, ветка остаётся историей
+    cleanWorktree(db, { featureId: feature.id, root: input.root, actor: 'system' })
   } else {
     activateNextStage(db, feature.id)
   }
@@ -151,3 +154,4 @@ export function mergeStage(
 
   return { merged: true, commit }
 }
+
