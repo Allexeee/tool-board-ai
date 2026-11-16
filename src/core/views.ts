@@ -92,5 +92,11 @@ export function dispatchPlan(db: DatabaseSync): DispatchPlan {
 
   const warnings = [...unstaffed].map((skill) => `навык ${skill} ни у одного исполнителя: задачи стоят`)
 
+  for (const feature of listFeatures(db)) {
+    if (feature.status === 'active' && !feature.worktree) {
+      warnings.push(`фича ${feature.id} активна без рабочего каталога: выполните feature start ${feature.id}`)
+    }
+  }
+
   return { assignments, warnings }
 }
