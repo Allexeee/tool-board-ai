@@ -217,6 +217,7 @@ export function ownerHand(db: DatabaseSync): OwnerItem[] {
     (task) =>
       (task.holder === 'owner' && task.status === 'active') ||
       task.status === 'needs_owner' ||
+      (task.stageId === null && task.status === 'blocked') ||
       (task.status === 'in_review' && task.review === 'owner'),
   )) {
     items.push({ id: task.id, kind: 'task', deadline: null, createdAt: task.createdAt, item: task })
