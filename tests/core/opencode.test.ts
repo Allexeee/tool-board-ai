@@ -4,9 +4,15 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  AGENTS_BEGIN,
+  AGENTS_END,
+  lineDiff,
+  mergeManaged,
   openCodeFilesPresent,
+  planOpenCode,
   pluginSource,
   pluginVersion,
+  refreshOpenCode,
   writeOpenCodeFiles,
 } from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
@@ -86,3 +92,83 @@ test('doctor замечает отсутствие плагина', () => {
     false,
   )
 })
+
+test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
+  const current = `---\nname: x\n---\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nмоя заметка\n`
+  const next = `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`
+
+  const merged = mergeManaged(current, next)!
+
+  assert.match(merged, /новое/)
+  assert.doesNotMatch(merged, /старое/)
+  assert.match(merged, /моя заметка/)
+  assert.match(merged, /name: x/)
+})
+
+test('mergeManaged отказывается, если в файле нет маркеров', () => {
+  assert.equal(mergeManaged('# просто текст\n', `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`), null)
+})
+
+test('refreshOpenCode не затирает файл без маркеров даже с --yes', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+
+  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
+  writeFileSync(path, '# моя версия без маркеров\n', 'utf8')
+
+  const result = refreshOpenCode(root, '9.9.9', { yes: true })
+  const skill = result.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
+
+  assert.equal(skill.status, 'pending')
+  assert.equal(readFileSync(path, 'utf8'), '# моя версия без маркеров\n')
+  assert.match(readFileSync(`${path}.new`, 'utf8'), /toolbox-al/)
+})
+
+test('planOpenCode показывает дифф и ничего не пишет', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+
+  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
+  const original = readFileSync(path, 'utf8')
+  const withNote = original + '\nмоя заметка\n'
+  writeFileSync(path, withNote, 'utf8')
+
+  const items = planOpenCode(root, '9.9.9')
+  const skill = items.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
+
+  assert.equal(skill.status, 'same')
+  assert.equal(readFileSync(path, 'utf8'), withNote)
+})
+
+test('planOpenCode помечает чужой файл как blocked', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
+  writeFileSync(path, '# без маркеров\n', 'utf8')
+
+  const items = planOpenCode(root, '9.9.9')
+  assert.equal(items.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!.status, 'blocked')
+})
+
+test('lineDiff показывает изменённые строки', () => {
+  const diff = lineDiff('старое\nобщее\n', 'новое\nобщее\n')
+  assert.match(diff, /- старое/)
+  assert.match(diff, /\+ новое/)
+  assert.doesNotMatch(diff, /общее/)
+})
+
+test('refreshOpenCode обновляет блок и сохраняет правку вне маркеров', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+
+  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
+  const original = readFileSync(path, 'utf8')
+  writeFileSync(path, original + '\nмоя заметка\n', 'utf8')
+
+  refreshOpenCode(root, '9.9.9', { yes: true })
+  const after = readFileSync(path, 'utf8')
+
+  assert.match(after, /моя заметка/)
+  assert.match(after, /toolbox-al/)
+})
+

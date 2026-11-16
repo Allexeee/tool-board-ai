@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -25,13 +25,13 @@ function sourceWith(version: string): string {
 }
 
 test('без --yes ничего не меняется и копия не создаётся', () => {
-  const { db, dbPath, configPath } = project()
+  const { dir, db, dbPath, configPath } = project()
   const before = readFileSync(configPath, 'utf8')
 
   const result = applyUpgrade(db, {
     dbPath,
     configPath,
-    projectRoot: toolRootPath,
+    projectRoot: dir,
     toolRoot: toolRootPath,
     from: sourceWith('99.0.0'),
     yes: false,
@@ -43,12 +43,12 @@ test('без --yes ничего не меняется и копия не соз�
 })
 
 test('с --yes создаётся копия базы и обновляется закреплённая версия', () => {
-  const { db, dbPath, configPath } = project()
+  const { dir, db, dbPath, configPath } = project()
 
   const result = applyUpgrade(db, {
     dbPath,
     configPath,
-    projectRoot: toolRootPath,
+    projectRoot: dir,
     toolRoot: toolRootPath,
     from: sourceWith('99.0.0'),
     yes: true,
@@ -103,3 +103,4 @@ test('обновление не откатывает версию назад', (
   assert.equal(plan.outdated, false)
   void resolve
 })
+
