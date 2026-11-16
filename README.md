@@ -32,6 +32,13 @@ node bin/toolbox-al.ts done F1.S1-1 --as w1 --summary "вебхук работа
 | `feature start\|abandon` | ветка и рабочий каталог фичи; отмена без слияния |
 | `save id --summary` | черновик в пределах области |
 | `release major\|minor\|patch` | changelog, тег и слияние dev в main |
+| `plan new\|show\|approve\|apply` | версии плана и атомарное создание работы |
+| `idea add\|list\|promote` | идеи без обязательств |
+| `decide add\|list` | журнал решений |
+| `review id --as w2 --verdict ...` | вердикт по задаче |
+| `stage accept\|reject` | приёмка этапа владельцем |
+| `template save\|show\|list` | шаблоны разбиения |
+| `similar "запрос"` | похожие прошлые фичи |
 | `task add\|show\|list` | задачи; без DoD не создаются |
 | `executor add\|list` | исполнители и их навыки |
 | `hand show\|set\|add` | руки исполнителей |
