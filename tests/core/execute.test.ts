@@ -5,6 +5,7 @@ import { addRoutine, addStep } from '../../src/core/routines.ts'
 import { addGate } from '../../src/core/gates.ts'
 import { materialize } from '../../src/core/runs.ts'
 import { executeRun } from '../../src/core/execute.ts'
+import { listTasks } from '../../src/core/tasks.ts'
 import { makeRepo } from '../helpers/repo.ts'
 
 function runWith(db: DatabaseSync, steps: Parameters<typeof addStep>[1][], gate?: 'approval') {
@@ -70,4 +71,17 @@ test('агентский шаг создаёт задачу без этапа', 
 
   assert.equal(result.status, 'done')
   assert.match(result.steps[0].result, /задача/)
+})
+
+test('шаг без DoD не создаёт задачу с заглушкой', () => {
+  const db = openDb(':memory:')
+  const root = makeRepo()
+  runWith(db, [{ title: 'Без критерия', kind: 'agent', skill: 'content', scope: ['content/**'] }])
+
+  const [run] = materialize(db, { now: new Date('2026-11-16T00:00:00') })
+  const result = executeRun(db, { runId: run.id, root })
+
+  assert.equal(result.status, 'partial')
+  assert.match(result.steps[0].result, /DoD/)
+  assert.equal(listTasks(db).length, 0)
 })

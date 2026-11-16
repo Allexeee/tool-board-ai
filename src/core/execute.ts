@@ -66,11 +66,16 @@ export function executeRun(
         }
 
         if (step.onMissing === 'fallback') {
+          if (step.dod.length === 0) {
+            results.push({ step, result: 'пропущено: у шага нет DoD' })
+            outcome = outcome === 'done' ? 'partial' : outcome
+            continue
+          }
           const task = createTask(db, {
             id: `${run.id}-${step.seq}`,
             stageId: null,
             title: `${step.title} (вручную)`,
-            dod: step.dod.length ? step.dod : ['сделано вручную'],
+            dod: step.dod,
             size: 'S',
             skill: step.skill ?? 'general',
             class: 'standard',
@@ -99,11 +104,17 @@ export function executeRun(
         continue
       }
 
+      if (step.dod.length === 0) {
+        results.push({ step, result: 'пропущено: у шага нет DoD' })
+        outcome = outcome === 'done' ? 'partial' : outcome
+        continue
+      }
+
       const task = createTask(db, {
         id: `${run.id}-${step.seq}`,
         stageId: null,
         title: step.title,
-        dod: step.dod.length ? step.dod : ['сделано'],
+        dod: step.dod,
         size: 'S',
         skill: step.skill ?? 'general',
         class: 'standard',
