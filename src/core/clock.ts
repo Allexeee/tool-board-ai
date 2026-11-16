@@ -3,6 +3,7 @@ import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { refreshReady } from './deps.ts'
 import { getExecutor } from './executors.ts'
+import { expireQuestions } from './questions.ts'
 
 export interface AdvanceResult {
   expired: string[]
@@ -49,6 +50,7 @@ export function advanceTime(db: DatabaseSync, now = new Date().toISOString()): A
       appendEvent(db, { type: 'hand.released', actor: 'system', subject: executor, note: 'исполнитель offline' })
     }
 
+    expireQuestions(db, now)
     refreshReady(db)
 
     return { expired: expired.map((task) => task.id), releasedHands }
