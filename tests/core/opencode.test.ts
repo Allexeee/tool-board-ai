@@ -44,6 +44,8 @@ test('плагин объявляет инструменты и вызывает
   assert.match(source, /toolbox-al\.ts/)
   assert.match(source, /tools.*toolbox-al.*bin.*toolbox-al\.ts/s)
   assert.match(source, /Plugin\.define/)
+  assert.match(source, /nodeBin/)
+  assert.doesNotMatch(source, /file: process\.execPath/)
   assert.match(source, /9\.9\.9/)
 })
 
@@ -65,7 +67,7 @@ test('init создаёт файлы OpenCode', () => {
     setupSkill: true,
     agentsBlock: true,
   })
-  assert.equal(pluginVersion(root), '1.0.1')
+  assert.equal(pluginVersion(root), '1.0.2')
 })
 
 test('doctor замечает отсутствие плагина', () => {

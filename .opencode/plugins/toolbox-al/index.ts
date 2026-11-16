@@ -1,4 +1,4 @@
-﻿// toolbox-al-plugin-version: 1.0.1
+﻿// toolbox-al-plugin-version: 1.0.2
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -7,14 +7,17 @@ import { promisify } from 'node:util'
 
 const run = promisify(execFile)
 
+// Внутри OpenCode process.execPath — это сам opencode, а не node.
+const nodeBin = /node(\.exe)?$/i.test(process.execPath) ? process.execPath : 'node'
+
 function resolve(ctx, args) {
   const override = process.env.TOOLBOX_AL_CLI
   const local = join(ctx.location.directory, 'bin', 'toolbox-al.ts')
   const pinned = join(ctx.location.directory, 'tools', 'toolbox-al', 'bin', 'toolbox-al.ts')
 
-  if (override) return { file: process.execPath, args: [override, ...args] }
-  if (existsSync(local)) return { file: process.execPath, args: [local, ...args] }
-  if (existsSync(pinned)) return { file: process.execPath, args: [pinned, ...args] }
+  if (override) return { file: nodeBin, args: [override, ...args] }
+  if (existsSync(local)) return { file: nodeBin, args: [local, ...args] }
+  if (existsSync(pinned)) return { file: nodeBin, args: [pinned, ...args] }
   return { file: 'toolbox-al', args }
 }
 
@@ -24,6 +27,13 @@ async function call(ctx, args) {
     const { stdout } = await run(file, full, { cwd: ctx.location.directory })
     return { content: stdout.trim() || '{}' }
   } catch (error) {
+    if (error.code === 'ENOENT') {
+      return {
+        content:
+          'CLI toolbox-al не найден. Положите инструмент в bin/toolbox-al.ts или tools/toolbox-al/ и перезапустите OpenCode',
+        isError: true,
+      }
+    }
     return { content: String(error.stderr ?? error.message).trim(), isError: true }
   }
 }
