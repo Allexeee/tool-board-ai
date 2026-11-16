@@ -11,9 +11,19 @@ export function poolTasks(db: DatabaseSync): Task[] {
   )
 }
 
+export function lastMovement(db: DatabaseSync, taskId: string): string {
+  const row = db.prepare('select max(at) as at from events where subject = ?').get(taskId) as {
+    at: string | null
+  }
+  if (row.at) return row.at
+
+  const task = getTask(db, taskId)
+  return task?.createdAt ?? new Date(0).toISOString()
+}
+
 export function stalePoolTasks(db: DatabaseSync, days = 7): Task[] {
   const threshold = new Date(Date.now() - days * 86_400_000).toISOString()
-  return poolTasks(db).filter((task) => task.createdAt < threshold)
+  return poolTasks(db).filter((task) => lastMovement(db, task.id) < threshold)
 }
 
 export function removePoolTask(

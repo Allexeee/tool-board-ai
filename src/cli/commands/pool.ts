@@ -1,6 +1,6 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { mergePoolTasks, poolTasks, removePoolTask, stalePoolTasks } from '../../core/pool.ts'
+import { lastMovement, mergePoolTasks, poolTasks, removePoolTask, stalePoolTasks } from '../../core/pool.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -41,10 +41,11 @@ export default async function command(args: ParsedArgs) {
       ? 'пул пуст'
       : tasks
           .map((task) => {
-            const age = Math.floor((Date.now() - Date.parse(task.createdAt)) / 86_400_000)
-            return `${task.id.padEnd(6)} ${task.class.padEnd(11)} ${task.size.padEnd(3)} ${age}д  ${task.title}`
+            const age = Math.floor((Date.now() - Date.parse(lastMovement(db, task.id))) / 86_400_000)
+            return `${task.id.padEnd(6)} ${task.status.padEnd(10)} ${task.class.padEnd(11)} ${task.size.padEnd(3)} ${age}д  ${task.title}`
           })
           .join('\n'),
   )
   return 0
 }
+
