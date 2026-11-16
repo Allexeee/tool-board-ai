@@ -115,6 +115,32 @@ test('запрос без вида печатается как раньше', ()
   assert.doesNotMatch(listed.out, /\(done\)|\(cancelled\)|\(объединён\)/)
 })
 
+test('request show печатает, что запрос в dev', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-land-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'S1', '--goal', 'g', '--appetite', '1 день'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  db.prepare("update stages set status = 'merged', merged_at = ? where id = 'F1.S1'").run(
+    new Date().toISOString(),
+  )
+  db.close()
+
+  const shown = run(dir, ['request', 'show', 'R1'])
+  assert.match(shown.out, /залито: dev/)
+})
+
+test('у запроса без слияний строки о заливке нет', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-land-none-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+
+  const shown = run(dir, ['request', 'show', 'R1'])
+  assert.doesNotMatch(shown.out, /залито:/)
+})
+
 test('у закрытого слиянием запроса строки с причиной нет', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-req-close2-'))
   run(dir, ['init'])

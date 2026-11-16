@@ -1,6 +1,6 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, closeKind, closeRequest, editRequest, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
+import { addRequest, closeKind, closeRequest, editRequest, landState, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
@@ -125,6 +125,8 @@ export default async function command(args: ParsedArgs) {
 
     const lines = [`${request.id}  ${request.title}`, `статус: ${request.status}`]
     if (closedEvent?.note) lines.push(`закрыт: ${closedEvent.note}`)
+    const land = landState(db, request.id)
+    if (land) lines.push(`залито: ${land}`)
     lines.push('', request.body)
 
     lines.push('', '## Фичи')
@@ -191,5 +193,6 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
 
 

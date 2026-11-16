@@ -78,6 +78,37 @@ export function openRequests(db: DatabaseSync): Request[] {
   return listRequests(db).filter((request) => request.status !== 'closed')
 }
 
+export type LandState = 'main' | 'dev'
+
+/** Где код запроса: main — выпущено, dev — слито и ждёт релиза, null — ещё ничего не слито. */
+export function landState(db: DatabaseSync, requestId: string): LandState | null {
+  const features = db
+    .prepare('select status from features where request_id = ?')
+    .all(requestId) as Array<{ status: string }>
+  if (features.length === 0) return null
+
+  const stages = db
+    .prepare(
+      `select s.status as status, s.merged_at as mergedAt
+       from stages s join features f on f.id = s.feature_id
+       where f.request_id = ?`,
+    )
+    .all(requestId) as Array<{ status: string; mergedAt: string | null }>
+
+  const merged = stages.filter((stage) => stage.status === 'merged')
+  if (merged.length === 0) return null
+
+  const lastRelease = db.prepare('select max(at) as at from releases').get() as { at: string | null }
+  const pending = lastRelease.at
+    ? merged.filter((stage) => (stage.mergedAt ?? '') > lastRelease.at!)
+    : merged
+
+  const allFeaturesDone = features.every((feature) => feature.status === 'done')
+  const allStagesMerged = merged.length === stages.length
+
+  return pending.length === 0 && allFeaturesDone && allStagesMerged ? 'main' : 'dev'
+}
+
 export type CloseKind = 'done' | 'cancelled'
 
 export function closeRequest(
