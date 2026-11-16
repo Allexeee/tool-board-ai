@@ -1,6 +1,7 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { fillHand, getHand, setHand } from '../../core/hands.ts'
+import { getHand, setHand } from '../../core/hands.ts'
+import { advanceTime } from '../../core/clock.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -28,7 +29,9 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
-  const hand = args.sub === 'show' || args.sub === null ? fillHand(db, executor) : getHand(db, executor)
+  // показ ничего не резервирует: рука пополняется в dispatch/next, а не при чтении
+  advanceTime(db)
+  const hand = getHand(db, executor)
   ok(hand, hand.length ? hand.map((task) => `${task.id}  ${task.title}`).join('\n') : 'рука пуста')
   return 0
 }

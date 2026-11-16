@@ -2,14 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
-import { addFeature } from '../../src/core/features.ts'
+import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask, getTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
-import { takeTask } from '../../src/core/lease.ts'
+import { takeTask, assertFeatureWorktree } from '../../src/core/lease.ts'
 import { addExecutor } from '../../src/core/executors.ts'
 import { addDep } from '../../src/core/deps.ts'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const plusMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -19,6 +21,7 @@ function seed(db: DatabaseSync): string {
 
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  setFeatureBranch(db, feature.id, 'feat/test', tmpdir())
   const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
   activateNextStage(db, feature.id)
 
@@ -129,3 +132,34 @@ test('задачу пула можно взять без этапа', () => {
   const taken = takeTask(db, { executor: 'w1', taskId: task.id })
   assert.equal(taken.status, 'active')
 })
+
+test('задачу фичи без рабочего каталога взять нельзя', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  activateNextStage(db, feature.id)
+  const task = createTask(db, {
+    stageId: stage.id,
+    title: 'Шаг',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  refreshReady(db)
+
+  assert.throws(() => assertFeatureWorktree(db, task), /рабочего каталога.*feature start/)
+  assert.equal(getTask(db, task.id)!.status, 'ready')
+})
+
+test('задачу фичи с пропавшим каталогом взять нельзя', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update features set worktree = ? where id = 'F1'").run(join(tmpdir(), 'нет-такого-каталога-al'))
+
+  assert.throws(() => assertFeatureWorktree(db, getTask(db, `${stageId}-1`)!), /пропал/)
+})
+

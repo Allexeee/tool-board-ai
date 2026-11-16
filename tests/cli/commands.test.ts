@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/toolbox-al.ts')
 const tmp = () => mkdtempSync(join(tmpdir(), 'tbal-cli-'))
@@ -36,6 +37,34 @@ test('hand show и hand set работают', () => {
   const shown = run(dir, ['hand', 'show', '--as', 'w1'])
   assert.equal(shown.code, 0)
   assert.match(shown.out, /пусто|рука/i)
+})
+
+test('hand show ничего не резервирует', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'сделано', '--skill', 'backend', '--scope', 'src/**'])
+
+  const shown = run(dir, ['hand', 'show', '--as', 'w1'])
+  assert.equal(shown.code, 0)
+  assert.match(shown.out, /рука пуста/)
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  const reserved = db.prepare('select count(*) as c from hand').get() as { c: number }
+  db.close()
+  assert.equal(reserved.c, 0)
+})
+
+test('task show печатает тот же статус, что list', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'сделано', '--skill', 'backend', '--scope', 'src/**'])
+
+  const shown = run(dir, ['task', 'show', 'T1'])
+  const listed = run(dir, ['task', 'list'])
+  assert.equal(shown.code, 0)
+  assert.match(shown.out, /статус: ready/)
+  assert.match(listed.out, /ready/)
 })
 
 test('init --dry-run ничего не создаёт', () => {

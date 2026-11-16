@@ -86,6 +86,8 @@ export default async function command(args: ParsedArgs) {
   }
 
   if (args.sub === 'show') {
+    // статус должен совпадать с list: время пересчитывается и здесь
+    advanceTime(db)
     const task = getTask(db, args.positionals[0] ?? '')
     if (!task) throw new UserError(3, 'задача не найдена')
 
