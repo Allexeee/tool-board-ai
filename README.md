@@ -4,6 +4,27 @@
 
 Требуется Node 26. Внешних зависимостей нет.
 
+## Установка
+
+Клонировать один раз и положить в `PATH`:
+
+```powershell
+git clone https://github.com/Allexeee/toolbox-al.git "$env:USERPROFILE\tools\toolbox-al"
+$env:Path += ";$env:USERPROFILE\tools\toolbox-al"
+```
+
+Дальше в любом проекте: `toolbox-al init`.
+
+`npm install` из git **не работает**: Node отказывается обрабатывать TypeScript внутри `node_modules`. Запуск идёт из обычного каталога.
+
+Если нужна фиксированная версия внутри проекта — git submodule и переменная `TOOLBOX_AL_CLI`:
+
+```bash
+git submodule add https://github.com/Allexeee/toolbox-al.git .toolbox-al/tool
+git -C .toolbox-al/tool checkout v0.1.0
+set TOOLBOX_AL_CLI=.toolbox-al/tool/bin/toolbox-al.ts
+```
+
 ## Быстрый старт
 
 ```bash
