@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
+﻿import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
-import { getFeature, type Feature } from '../features.ts'
+import { getFeature, listFeatures, type Feature } from '../features.ts'
 import { appendEvent } from '../events.ts'
 import { branchExists, resolveBranches, runGit } from './git.ts'
 import { UserError } from '../../cli/errors.ts'
@@ -93,6 +93,54 @@ export function cleanWorktree(
   return { removed: true, rescued, tag }
 }
 
+export interface SweepResult {
+  deleted: string[]
+  kept: string[]
+}
+
+interface SweepConfig {
+  branches: { main: string; dev: string }
+  branchRetentionDays?: number
+}
+
+/** Убирает слитые ветки, которым уже нечего терять: они целиком в dev и старые. */
+export function sweepBranches(
+  db: DatabaseSync,
+  input: { root: string; config: SweepConfig; actor: string; now?: Date },
+): SweepResult {
+  const result: SweepResult = { deleted: [], kept: [] }
+  const { dev } = resolveBranches(input.root, input.config)
+  const retentionMs = (input.config.branchRetentionDays ?? 30) * 86_400_000
+  const now = (input.now ?? new Date()).getTime()
+
+  for (const feature of listFeatures(db)) {
+    if (!feature.branch || feature.status !== 'done') continue
+
+    const branch = feature.branch
+    if (!branchExists(input.root, branch)) continue
+
+    const merged = isMergedInto(input.root, branch, dev)
+    const last = Date.parse(runGit(input.root, ['log', '-1', '--format=%cI', branch]))
+
+    if (!merged || Number.isNaN(last) || now - last < retentionMs) {
+      result.kept.push(branch)
+      continue
+    }
+
+    runGit(input.root, ['branch', '-D', branch])
+    db.prepare('update features set branch = null where id = ?').run(feature.id)
+    appendEvent(db, {
+      type: 'feature.branch_deleted',
+      actor: input.actor,
+      subject: feature.id,
+      after: { branch, reason: 'merged-retention' },
+    })
+    result.deleted.push(branch)
+  }
+
+  return result
+}
+
 function isMergedInto(root: string, branch: string, dev: string): boolean {
   const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], { cwd: root, stdio: 'ignore' })
   return result.status === 0
@@ -145,3 +193,4 @@ export function cleanFeature(
 
   return { ...cleaned, branchDeleted: true }
 }
+

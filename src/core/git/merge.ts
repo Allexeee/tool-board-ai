@@ -6,7 +6,7 @@ import { activateNextStage, getStage, listStages } from '../stages.ts'
 import { createTask, listTasks } from '../tasks.ts'
 import { appendEvent } from '../events.ts'
 import { UserError } from '../../cli/errors.ts'
-import { cleanWorktree } from './clean.ts'
+import { cleanWorktree, sweepBranches } from './clean.ts'
 
 export interface MergeResult {
   merged: boolean
@@ -28,11 +28,10 @@ function runCheck(cwd: string, command: string): { ok: boolean; output: string }
 
 export function mergeStage(
   db: DatabaseSync,
-  input: { root: string; stageId: string; config: { branches: { main: string; dev: string }; check: string | null } },
+  input: { root: string; stageId: string; config: { branches: { main: string; dev: string }; check: string | null; branchRetentionDays?: number } },
 ): MergeResult {
   const stage = getStage(db, input.stageId)
   if (!stage) throw new UserError(3, `этап ${input.stageId} не найден`)
-
   if (!isRepo(input.root)) throw new UserError(3, `не git-репозиторий: ${input.root}`)
 
   const feature = getFeature(db, stage.featureId)
@@ -139,6 +138,9 @@ export function mergeStage(
     activateNextStage(db, feature.id)
   }
 
+  // любой следующий merge — повод прибрать слитые ветки, которым уже нечего терять
+  sweepBranches(db, { root: input.root, config: input.config, actor: 'system' })
+
   if (original && original !== dev) {
     try {
       runGit(input.root, ['checkout', original])
@@ -154,4 +156,5 @@ export function mergeStage(
 
   return { merged: true, commit }
 }
+
 
