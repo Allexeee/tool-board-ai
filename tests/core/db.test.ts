@@ -5,8 +5,8 @@ import { appendEvent, listEvents } from '../../src/core/events.ts'
 
 test('миграция идемпотентна и создаёт таблицы', () => {
   const db = openDb(':memory:')
-  assert.equal(migrate(db), 3)
-  assert.equal(migrate(db), 3)
+  assert.equal(migrate(db), 4)
+  assert.equal(migrate(db), 4)
   const names = (db.prepare("select name from sqlite_master where type='table'").all() as Array<{ name: string }>).map(r => r.name)
   for (const t of ['meta', 'events', 'executors', 'requests', 'features', 'stages', 'tasks', 'deps', 'hand', 'questions'])
     assert.ok(names.includes(t), t)

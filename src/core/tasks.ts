@@ -34,6 +34,7 @@ export interface Task {
   leaseUntil: string | null
   attempts: number
   reason: string | null
+  review: 'none' | 'agent' | 'owner'
   createdAt: string
 }
 
@@ -54,6 +55,7 @@ interface Row {
   lease_until: string | null
   attempts: number
   reason: string | null
+  review: 'none' | 'agent' | 'owner'
   created_at: string
 }
 
@@ -74,6 +76,7 @@ const toTask = (row: Row): Task => ({
   leaseUntil: row.lease_until,
   attempts: row.attempts,
   reason: row.reason,
+  review: (row.review as 'none' | 'agent' | 'owner') ?? 'agent',
   createdAt: row.created_at,
 })
 
@@ -112,12 +115,13 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     leaseUntil: null,
     attempts: 0,
     reason: null,
+    review: 'agent',
     createdAt: new Date().toISOString(),
   }
 
   db.prepare(
-    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, created_at) ' +
-      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, review, created_at) ' +
+      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     task.id,
     task.stageId,
@@ -136,6 +140,7 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     null,
     0,
     null,
+    task.review,
     task.createdAt,
   )
 
