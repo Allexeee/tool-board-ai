@@ -100,3 +100,37 @@ export function editRequest(
     return next
   })
 }
+
+export function mergeRequests(
+  db: DatabaseSync,
+  input: { from: string; to: string; actor: string },
+): Request {
+  return tx(db, () => {
+    const source = getRequest(db, input.from)
+    const target = getRequest(db, input.to)
+
+    if (!source) throw new UserError(3, `запрос ${input.from} не найден`)
+    if (!target) throw new UserError(3, `запрос ${input.to} не найден`)
+    if (source.id === target.id) throw new UserError(3, 'нельзя объединить запрос с собой')
+    if (target.status === 'closed') throw new UserError(1, `запрос ${target.id} уже закрыт`)
+
+    const body = `${target.body}\n\n---\nИз ${source.id}: ${source.body}`
+    db.prepare('update requests set body = ? where id = ?').run(body, target.id)
+    db.prepare("update requests set status = 'closed' where id = ?").run(source.id)
+
+    appendEvent(db, {
+      type: 'request.merged',
+      actor: input.actor,
+      subject: source.id,
+      after: { into: target.id },
+    })
+    appendEvent(db, {
+      type: 'request.merged_into',
+      actor: input.actor,
+      subject: target.id,
+      after: { from: source.id },
+    })
+
+    return getRequest(db, target.id)!
+  })
+}

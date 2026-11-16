@@ -1,6 +1,6 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, editRequest, getRequest, listRequests } from '../../core/requests.ts'
+import { addRequest, editRequest, getRequest, listRequests, mergeRequests } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { markPlansStale } from '../../core/plans.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
@@ -38,6 +38,16 @@ export default async function command(args: ParsedArgs) {
       request,
       `${request.id}  ${request.title}${stale > 0 ? '\nутверждённый план помечен устаревшим' : ''}`,
     )
+    return 0
+  }
+
+  if (args.sub === 'merge') {
+    const from = args.positionals[0]
+    const to = args.positionals[1]
+    if (!from || !to) throw new UserError(3, 'использование: request merge R2 R1 — R2 вливается в R1')
+
+    const request = mergeRequests(db, { from, to, actor })
+    ok(request, `${from} объединён с ${to}`)
     return 0
   }
 
