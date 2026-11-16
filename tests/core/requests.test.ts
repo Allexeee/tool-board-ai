@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { addRequest, editRequest, mergeRequests, getRequest, removeRequest, splitRequest } from '../../src/core/requests.ts'
+import { addRequest, editRequest, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addPlan, approvePlan } from '../../src/core/plans.ts'
 
@@ -88,4 +88,19 @@ test('remove отвергается, если у запроса есть фич�
   addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
 
   assert.throws(() => removeRequest(db, { id: request.id, actor: 'owner' }), /фичи/)
+})
+
+test('later требует дату и reopen возвращает в inbox', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+
+  assert.throws(() => laterRequest(db, { id: request.id, until: ' ', actor: 'owner' }), /дата/)
+
+  const later = laterRequest(db, { id: request.id, until: '2026-12-01', actor: 'owner' })
+  assert.equal(later.status, 'later')
+  assert.equal(later.reviewAt, '2026-12-01')
+
+  const reopened = reopenRequest(db, { id: request.id, actor: 'owner' })
+  assert.equal(reopened.status, 'inbox')
+  assert.equal(reopened.reviewAt, null)
 })

@@ -135,6 +135,44 @@ export function mergeRequests(
   })
 }
 
+export function laterRequest(
+  db: DatabaseSync,
+  input: { id: string; until: string; actor: string },
+): Request {
+  if (!input.until?.trim()) throw new UserError(3, 'нужна дата пересмотра: --until YYYY-MM-DD')
+
+  return tx(db, () => {
+    const request = getRequest(db, input.id)
+    if (!request) throw new UserError(3, `запрос ${input.id} не найден`)
+
+    db.prepare("update requests set status = 'later', review_at = ? where id = ?").run(input.until, request.id)
+    appendEvent(db, {
+      type: 'request.later',
+      actor: input.actor,
+      subject: request.id,
+      after: { until: input.until },
+    })
+
+    return getRequest(db, request.id)!
+  })
+}
+
+export function reopenRequest(
+  db: DatabaseSync,
+  input: { id: string; actor: string },
+): Request {
+  return tx(db, () => {
+    const request = getRequest(db, input.id)
+    if (!request) throw new UserError(3, `запрос ${input.id} не найден`)
+    if (request.status === 'inbox') throw new UserError(1, `запрос ${request.id} уже в inbox`)
+
+    db.prepare("update requests set status = 'inbox', review_at = null where id = ?").run(request.id)
+    appendEvent(db, { type: 'request.reopened', actor: input.actor, subject: request.id })
+
+    return getRequest(db, request.id)!
+  })
+}
+
 export function removeRequest(db: DatabaseSync, input: { id: string; actor: string }): void {
   return tx(db, () => {
     const request = getRequest(db, input.id)
