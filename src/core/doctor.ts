@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION } from './schema.ts'
 import { listExecutors } from './executors.ts'
 import { listTasks } from './tasks.ts'
@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { hookInstalled } from './git/hooks.ts'
 import { branchExists, isRepo } from './git/git.ts'
 import { openCodeFilesPresent } from './opencode.ts'
+import { stalePoolTasks } from './pool.ts'
 
 export interface Check {
   name: string
@@ -110,6 +111,13 @@ export function doctorReport(
         : 'нет .opencode/plugins/toolbox-al — выполните init',
     })
   }
+
+  const stale = stalePoolTasks(db, 7)
+  checks.push({
+    name: 'пул',
+    ok: stale.length === 0,
+    detail: stale.length === 0 ? 'зависших нет' : `зависло ${stale.length}: ${stale.map((task) => task.id).join(', ')}`,
+  })
 
   const routines = (db.prepare('select count(*) as c from routines').get() as { c: number }).c
   if (routines > 0) {
