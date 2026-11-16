@@ -196,6 +196,92 @@ export function listTasks(
   return (db.prepare(sql).all(...params) as unknown as Row[]).map(toTask)
 }
 
+export type EditableTask = Partial<{
+  title: string
+  kind: TaskKind
+  severity: TaskSeverity | null
+  dod: string[]
+  checkCmd: string | null
+  size: TaskSize
+  sizeReason: string | null
+  skill: string
+  class: TaskClass
+  scope: TaskScope
+}>
+
+export function editTask(
+  db: DatabaseSync,
+  input: { id: string; actor: string; patch: EditableTask },
+): Task {
+  return tx(db, () => {
+    const current = getTask(db, input.id)
+    if (!current) throw new UserError(3, `задача ${input.id} не найдена`)
+
+    // активную задачу правит тот, кто её держит; оркестратор и владелец — поверх очереди
+    if (current.status === 'active' && current.holder !== input.actor) {
+      const allowed = input.actor === 'orchestrator' || input.actor === 'owner'
+      if (!allowed) {
+        throw new UserError(
+          1,
+          `задачу ${current.id} держит ${current.holder}: править может держатель, orchestrator или owner`,
+        )
+      }
+    }
+
+    const merged = {
+      stageId: current.stageId,
+      title: input.patch.title ?? current.title,
+      kind: input.patch.kind ?? current.kind,
+      severity: (input.patch.severity ?? current.severity ?? undefined) as TaskSeverity | undefined,
+      dod: input.patch.dod ?? current.dod,
+      checkCmd: input.patch.checkCmd ?? current.checkCmd ?? undefined,
+      size: input.patch.size ?? current.size,
+      sizeReason: input.patch.sizeReason ?? current.sizeReason ?? undefined,
+      skill: input.patch.skill ?? current.skill,
+      class: input.patch.class ?? current.class,
+      scope: input.patch.scope ?? current.scope,
+    }
+
+    const { errors } = validateTaskInput(merged)
+    if (errors.length > 0) {
+      throw new UserError(3, 'задача не изменена:\n  ' + errors.join('\n  '))
+    }
+
+    const keys = (Object.keys(input.patch) as Array<keyof EditableTask>).filter((key) => {
+      const patch = input.patch[key]
+      if (patch === undefined) return false
+      return JSON.stringify(patch) !== JSON.stringify((current as unknown as Record<string, unknown>)[key])
+    })
+    if (keys.length === 0) return current
+
+    db.prepare(
+      'update tasks set title = ?, kind = ?, severity = ?, dod = ?, check_cmd = ?, size = ?, size_reason = ?, skill = ?, class = ?, scope = ? where id = ?',
+    ).run(
+      merged.title,
+      merged.kind,
+      merged.severity ?? null,
+      JSON.stringify(merged.dod),
+      merged.checkCmd ?? null,
+      merged.size,
+      merged.sizeReason ?? null,
+      merged.skill,
+      merged.class,
+      merged.scope === 'exclusive' ? 'exclusive' : JSON.stringify(merged.scope),
+      current.id,
+    )
+
+    const before: Record<string, unknown> = {}
+    const after: Record<string, unknown> = {}
+    for (const key of keys) {
+      before[key] = (current as unknown as Record<string, unknown>)[key]
+      after[key] = (getTask(db, current.id) as unknown as Record<string, unknown>)[key]
+    }
+
+    appendEvent(db, { type: 'task.edited', actor: input.actor, subject: current.id, before, after })
+    return getTask(db, current.id)!
+  })
+}
+
 export function updateTask(db: DatabaseSync, id: string, patch: Partial<{
   status: TaskStatus
   holder: string | null
