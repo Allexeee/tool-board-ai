@@ -135,6 +135,37 @@ export function mergeRequests(
   })
 }
 
+export function removeRequest(db: DatabaseSync, input: { id: string; actor: string }): void {
+  return tx(db, () => {
+    const request = getRequest(db, input.id)
+    if (!request) throw new UserError(3, `запрос ${input.id} не найден`)
+
+    const features = db
+      .prepare('select count(*) as c from features where request_id = ?')
+      .get(request.id) as { c: number }
+    if (features.c > 0) {
+      throw new UserError(1, `у запроса ${request.id} есть фичи: удалять нельзя`)
+    }
+
+    const applied = db
+      .prepare('select count(*) as c from plans where request_id = ? and applied_at is not null')
+      .get(request.id) as { c: number }
+    if (applied.c > 0) {
+      throw new UserError(1, `запрос ${request.id} уже в работе: удалять нельзя`)
+    }
+
+    db.prepare('delete from plans where request_id = ?').run(request.id)
+    db.prepare('delete from requests where id = ?').run(request.id)
+
+    appendEvent(db, {
+      type: 'request.removed',
+      actor: input.actor,
+      subject: request.id,
+      before: { title: request.title, body: request.body },
+    })
+  })
+}
+
 export function splitRequest(
   db: DatabaseSync,
   input: { id: string; into: string[]; actor: string },
