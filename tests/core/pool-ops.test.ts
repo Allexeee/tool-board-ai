@@ -1,7 +1,8 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { createTask, getTask } from '../../src/core/tasks.ts'
+import { createTask, getTask, updateTask } from '../../src/core/tasks.ts'
+import { addDep, depsOf } from '../../src/core/deps.ts'
 import { mergePoolTasks, poolTasks, removePoolTask, stalePoolTasks } from '../../src/core/pool.ts'
 
 const base = {
@@ -58,3 +59,39 @@ test('merge с собой отвергается', () => {
   createTask(db, { ...base })
   assert.throws(() => mergePoolTasks(db, { from: 'T1', to: 'T1', actor: 'owner' }), /с собой/)
 })
+
+test('merge переносит зависимости источника на цель', () => {
+  const db = openDb(':memory:')
+  createTask(db, { ...base })
+  createTask(db, { ...base, title: 'Цель' })
+  createTask(db, { ...base, title: 'Блокер' })
+
+  addDep(db, 'T1', 'T3')
+  mergePoolTasks(db, { from: 'T1', to: 'T2', actor: 'owner' })
+
+  assert.deepEqual(depsOf(db, 'T2'), ['T3'])
+})
+
+test('merge перенаправляет тех, кто зависел от источника', () => {
+  const db = openDb(':memory:')
+  createTask(db, { ...base })
+  createTask(db, { ...base, title: 'Цель' })
+  createTask(db, { ...base, title: 'Зависящий' })
+
+  addDep(db, 'T3', 'T1')
+  mergePoolTasks(db, { from: 'T1', to: 'T2', actor: 'owner' })
+
+  assert.deepEqual(depsOf(db, 'T3'), ['T2'])
+})
+
+test('merge отвергает задачу в работе', () => {
+  const db = openDb(':memory:')
+  createTask(db, { ...base })
+  createTask(db, { ...base, title: 'Цель' })
+  updateTask(db, 'T1', { status: 'active', holder: 'w1' })
+
+  assert.throws(() => mergePoolTasks(db, { from: 'T1', to: 'T2', actor: 'owner' }), /в работе/)
+  assert.equal(getTask(db, 'T1')!.status, 'active')
+})
+
+
