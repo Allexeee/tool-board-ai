@@ -1,7 +1,7 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { addRequest, closeRequest, editRequest, openRequests, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
+import { addRequest, closeKind, closeRequest, editRequest, openRequests, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addPlan, approvePlan } from '../../src/core/plans.ts'
 
@@ -144,6 +144,39 @@ test('close требует причину', () => {
   assert.throws(() => closeRequest(db, { id: request.id, reason: '  ', actor: 'owner' }), /причина/)
 })
 
+test('close пишет вид закрытия, по умолчанию done', () => {
+  const db = openDb(':memory:')
+  const first = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  const second = addRequest(db, { title: 'Профиль', body: '', author: 'owner' })
+
+  closeRequest(db, { id: first.id, reason: 'сделано', actor: 'owner' })
+  closeRequest(db, { id: second.id, reason: 'передумали', kind: 'cancelled', actor: 'owner' })
+
+  assert.equal(closeKind(db, first.id), 'done')
+  assert.equal(closeKind(db, second.id), 'cancelled')
+})
+
+test('неизвестный вид закрытия отвергается', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+
+  assert.throws(
+    () => closeRequest(db, { id: request.id, reason: 'x', kind: 'later' as never, actor: 'owner' }),
+    /done, cancelled/,
+  )
+})
+
+test('объединённый запрос считается поглощённым', () => {
+  const db = openDb(':memory:')
+  const target = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  const source = addRequest(db, { title: 'Подписка', body: '', author: 'owner' })
+
+  mergeRequests(db, { from: source.id, to: target.id, actor: 'owner' })
+
+  assert.equal(closeKind(db, source.id), 'merged')
+  assert.equal(closeKind(db, target.id), null)
+})
+
 test('запрос с незакрытыми фичами не закрывается и не закрывается дважды', () => {
   const db = openDb(':memory:')
   const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
@@ -165,5 +198,6 @@ test('закрытый запрос не правится и не удаляет
   assert.throws(() => editRequest(db, { id: request.id, title: 'Другое', actor: 'owner' }), /закрыт/)
   assert.throws(() => removeRequest(db, { id: request.id, actor: 'owner' }), /закрыт/)
 })
+
 
 

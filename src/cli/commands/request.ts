@@ -33,7 +33,12 @@ export default async function command(args: ParsedArgs) {
       throw new UserError(3, 'использование: request close R20 --reason "почему закрыт"')
     }
 
-    const request = closeRequest(db, { id, reason, actor })
+    const request = closeRequest(db, {
+      id,
+      reason,
+      kind: stringFlag(args, 'kind') as 'done' | 'cancelled' | undefined,
+      actor,
+    })
     ok(request, `${request.id} закрыт`)
     return 0
   }

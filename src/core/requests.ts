@@ -78,12 +78,19 @@ export function openRequests(db: DatabaseSync): Request[] {
   return listRequests(db).filter((request) => request.status !== 'closed')
 }
 
+export type CloseKind = 'done' | 'cancelled'
+
 export function closeRequest(
   db: DatabaseSync,
-  input: { id: string; reason: string; actor: string },
+  input: { id: string; reason: string; kind?: CloseKind; actor: string },
 ): Request {
   const reason = input.reason?.trim()
   if (!reason) throw new UserError(3, 'нужна причина закрытия: --reason "почему"')
+
+  const kind = input.kind ?? 'done'
+  if (kind !== 'done' && kind !== 'cancelled') {
+    throw new UserError(3, `неизвестный вид закрытия: ${kind}. Допустимые: done, cancelled`)
+  }
 
   return tx(db, () => {
     const request = getRequest(db, input.id)
@@ -102,11 +109,27 @@ export function closeRequest(
       type: 'request.closed',
       actor: input.actor,
       subject: request.id,
+      after: { kind },
       note: reason,
     })
 
     return getRequest(db, request.id)!
   })
+}
+
+export function closeKind(db: DatabaseSync, id: string): CloseKind | 'merged' | null {
+  const merged = db
+    .prepare("select 1 as found from events where type = 'request.merged' and subject = ? limit 1")
+    .get(id)
+  if (merged) return 'merged'
+
+  const row = db
+    .prepare("select after from events where type = 'request.closed' and subject = ? order by id desc limit 1")
+    .get(id) as { after: string | null } | undefined
+  if (!row?.after) return null
+
+  const kind = (JSON.parse(row.after) as { kind?: CloseKind }).kind
+  return kind === 'done' || kind === 'cancelled' ? kind : null
 }
 
 export function editRequest(
