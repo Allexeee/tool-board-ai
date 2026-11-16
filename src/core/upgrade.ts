@@ -1,8 +1,11 @@
-﻿import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
+import { SCHEMA_VERSION, migrate } from './schema.ts'
+import { refreshOpenCode } from './opencode.ts'
+import { UserError } from '../cli/errors.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const toolRoot = join(here, '..', '..')
@@ -107,4 +110,126 @@ export function checkVersions(root: string, options: { from?: string } = {}): Ve
 
   const available = availableVersions(root)
   return { current, available, source: available.length ? 'git' : 'none', latest: available[0] ?? null }
+}
+
+export interface JournalEntry {
+  from: string
+  to: string
+  schemaFrom: number
+  schemaTo: number
+  backup: string
+  files: string[]
+  now?: Date
+}
+
+export function writeUpgradeJournal(root: string, entry: JournalEntry): string {
+  const stamp = (entry.now ?? new Date()).toISOString().replace(/[:.]/g, '-')
+  const dir = join(root, '.toolbox-al', 'upgrades')
+  mkdirSync(dir, { recursive: true })
+
+  const path = join(dir, `${stamp}.md`)
+  const lines = [
+    `# Обновление ${stamp}`,
+    '',
+    `версия: ${entry.from} → ${entry.to}`,
+    `схема: ${entry.schemaFrom} → ${entry.schemaTo}`,
+    `копия базы: \`${entry.backup}\``,
+    '',
+    '## Обновлённые файлы',
+    '',
+    ...entry.files.map((file) => `- ${file}`),
+    '',
+    '## Откат',
+    '',
+    '1. Остановить работу и скопировать базу из резервной копии.',
+    '2. Выполнить `git checkout` на предыдущий тег проекта.',
+    '3. Запустить `toolbox-al doctor` и проверить, что схема совпадает.',
+    '',
+  ]
+
+  writeFileSync(path, lines.join('\n'), 'utf8')
+  return path
+}
+
+export interface UpgradePlan {
+  current: VersionCheck
+  schemaFrom: number
+  schemaTo: number
+  outdated: boolean
+}
+
+export function planUpgrade(db: DatabaseSync, options: { root: string; from?: string }): UpgradePlan {
+  const row = db.prepare("select value from meta where key = 'schemaVersion'").get() as
+    | { value: string }
+    | undefined
+  const schemaFrom = Number(row?.value ?? 0)
+
+  if (schemaFrom > SCHEMA_VERSION) {
+    throw new UserError(
+      3,
+      `схема ${schemaFrom} новее, чем понимает инструмент (${SCHEMA_VERSION}): обновите сам инструмент`,
+    )
+  }
+
+  const current = checkVersions(options.root, { from: options.from })
+  const versionBehind = current.latest !== null && current.current !== current.latest
+
+  return { current, schemaFrom, schemaTo: SCHEMA_VERSION, outdated: schemaFrom < SCHEMA_VERSION || versionBehind }
+}
+
+export interface UpgradeResult {
+  applied: boolean
+  backup?: string
+  plan: UpgradePlan
+}
+
+export function applyUpgrade(
+  db: DatabaseSync,
+  input: {
+    dbPath: string
+    configPath: string
+    root: string
+    from?: string
+    yes: boolean
+    now?: Date
+  },
+): UpgradeResult {
+  const plan = planUpgrade(db, { root: input.root, from: input.from })
+
+  if (!plan.outdated) return { applied: false, plan }
+  if (!input.yes) return { applied: false, plan }
+
+  const stamp = (input.now ?? new Date()).toISOString().replace(/[:.]/g, '-')
+  const backup = `${input.dbPath}.backup-${stamp}`
+  copyFileSync(input.dbPath, backup)
+
+  migrate(db)
+
+  const journal = writeUpgradeJournal(input.root, {
+    from: plan.current.current,
+    to: plan.current.latest ?? plan.current.current,
+    schemaFrom: plan.schemaFrom,
+    schemaTo: plan.schemaTo,
+    backup,
+    files: input.root === toolRoot
+      ? []
+      : refreshOpenCode(input.root, plan.current.latest ?? plan.current.current, { yes: true })
+          .filter((item) => item.status !== 'same')
+          .map((item) => item.path),
+    now: input.now,
+  })
+  void journal
+
+  const target = plan.current.latest ?? plan.current.current
+  if (existsSync(input.configPath)) {
+    const raw = readFileSync(input.configPath, 'utf8').replace(/^\uFEFF/, '')
+    const config = JSON.parse(raw) as Record<string, unknown>
+    writeFileSync(
+      input.configPath,
+      JSON.stringify({ ...config, toolVersion: target, schemaVersion: plan.schemaTo }, null, 2) + '\n',
+      'utf8',
+    )
+  }
+
+  return { applied: true, backup, plan }
 }

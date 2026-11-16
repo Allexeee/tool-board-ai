@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkVersions, versionsFromDirectory } from '../../src/core/upgrade.ts'
+import { checkVersions, versionsFromDirectory, writeUpgradeJournal } from '../../src/core/upgrade.ts'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'al-ver-'))
 
@@ -37,4 +37,23 @@ test('checkVersions без git-тегов возвращает пустой ис
   const result = checkVersions(tmp())
   assert.equal(result.source, 'none')
   assert.equal(result.latest, null)
+})
+
+test('журнал обновления записывает версии, схему и копию базы', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-journal-'))
+  const file = writeUpgradeJournal(root, {
+    from: '1.0.0',
+    to: '1.1.0',
+    schemaFrom: 3,
+    schemaTo: 4,
+    backup: 'tracker.db.backup-x',
+    files: ['src/core/upgrade.ts'],
+    now: new Date('2026-11-17T10:00:00Z'),
+  })
+
+  const text = readFileSync(file, 'utf8')
+  assert.match(text, /1\.0\.0 → 1\.1\.0/)
+  assert.match(text, /3 → 4/)
+  assert.match(text, /tracker\.db\.backup-x/)
+  assert.match(file, /upgrades/)
 })

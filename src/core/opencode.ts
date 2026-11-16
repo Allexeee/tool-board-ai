@@ -112,3 +112,50 @@ export function pluginVersion(root: string): string | null {
   const match = /toolbox-al-plugin-version:\s*(\S+)/.exec(readFileSync(path, 'utf8'))
   return match ? match[1] : null
 }
+
+export interface ManagedUpdate {
+  path: string
+  status: 'same' | 'updated' | 'pending' | 'missing'
+}
+
+export function refreshOpenCode(
+  root: string,
+  toolVersion: string,
+  options: { yes?: boolean } = {},
+): ManagedUpdate[] {
+  const files: Array<[string, string]> = [
+    ['.opencode/plugins/toolbox-al/index.ts', pluginSource(toolVersion)],
+    ['.opencode/skills/toolbox-al/SKILL.md', skillSource()],
+    ['.opencode/skills/toolbox-al-setup/SKILL.md', setupSkillSource()],
+  ]
+
+  const result: ManagedUpdate[] = []
+
+  for (const [relative, next] of files) {
+    const path = join(root, relative)
+
+    if (!existsSync(path)) {
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, next, 'utf8')
+      result.push({ path: relative, status: 'missing' })
+      continue
+    }
+
+    const current = readFileSync(path, 'utf8')
+    if (current === next) {
+      result.push({ path: relative, status: 'same' })
+      continue
+    }
+
+    if (options.yes) {
+      writeFileSync(path, next, 'utf8')
+      result.push({ path: relative, status: 'updated' })
+      continue
+    }
+
+    writeFileSync(`${path}.new`, next, 'utf8')
+    result.push({ path: relative, status: 'pending' })
+  }
+
+  return result
+}
