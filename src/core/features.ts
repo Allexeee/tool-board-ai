@@ -137,3 +137,31 @@ export function setFeatureBranch(db: DatabaseSync, featureId: string, branch: st
   db.prepare('update features set branch = ?, worktree = ? where id = ?').run(branch, worktree, featureId)
   appendEvent(db, { type: 'feature.branch_set', actor: 'system', subject: featureId, after: { branch, worktree } })
 }
+
+export function abandonFeature(
+  db: DatabaseSync,
+  input: { featureId: string; actor: string; reason: string },
+): Feature {
+  return tx(db, () => {
+    const feature = getFeature(db, input.featureId)
+    if (!feature) throw new UserError(3, `фича ${input.featureId} не найдена`)
+
+    const stages = db.prepare('select id from stages where feature_id = ?').all(feature.id) as Array<{ id: string }>
+    for (const stage of stages) {
+      db.prepare(
+        "update tasks set status = 'cancelled', holder = null, lease_until = null where stage_id = ? and status != 'done'",
+      ).run(stage.id)
+      db.prepare("update stages set status = 'abandoned' where id = ?").run(stage.id)
+    }
+    db.prepare("update features set status = 'cancelled' where id = ?").run(feature.id)
+
+    appendEvent(db, {
+      type: 'feature.abandoned',
+      actor: input.actor,
+      subject: feature.id,
+      note: input.reason,
+    })
+
+    return getFeature(db, feature.id)!
+  })
+}
