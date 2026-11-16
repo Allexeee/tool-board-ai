@@ -98,3 +98,23 @@ test('setHand не отбирает задачу, зарезервированн
   fillHand(db, 'w1')
   assert.throws(() => setHand(db, 'w2', [`${stageId}-1`], 'orchestrator'), /зарезервирован/)
 })
+
+test('пул набирается после блока фичи', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  createTask(db, {
+    title: 'Поправить опечатку',
+    dod: ['опечатки нет'],
+    size: 'XS',
+    skill: 'backend',
+    class: 'quick',
+    scope: ['docs/**'],
+  })
+  refreshReady(db)
+
+  const hand = fillHand(db, 'w1')
+  assert.equal(hand[0].id, `${stageId}-1`)
+  assert.ok(hand.some((task) => task.id === 'T1'), 'задача пула попала в руку')
+  assert.equal(hand[hand.length - 1].id, 'T1')
+})
