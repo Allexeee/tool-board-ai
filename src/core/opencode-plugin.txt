@@ -1,17 +1,25 @@
 ﻿// toolbox-al-plugin-version: __VERSION__
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
 
+function resolve(ctx, args) {
+  const override = process.env.TOOLBOX_AL_CLI
+  const local = join(ctx.location.directory, 'bin', 'toolbox-al.ts')
+
+  if (override) return { file: process.execPath, args: [override, ...args] }
+  if (existsSync(local)) return { file: process.execPath, args: [local, ...args] }
+  return { file: 'toolbox-al', args }
+}
+
 async function call(ctx, args) {
-  const cli = join(ctx.location.directory, 'bin', 'toolbox-al.ts')
+  const { file, args: full } = resolve(ctx, [...args, '--json'])
   try {
-    const { stdout } = await run(process.execPath, [cli, ...args, '--json'], {
-      cwd: ctx.location.directory,
-    })
+    const { stdout } = await run(file, full, { cwd: ctx.location.directory })
     return { content: stdout.trim() || '{}' }
   } catch (error) {
     return { content: String(error.stderr ?? error.message).trim(), isError: true }
