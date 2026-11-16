@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+﻿import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
@@ -88,6 +88,12 @@ export function executeRun(
 
       if (step.kind === 'mechanical') {
         const result = runCommand(input.root, step.command ?? '')
+        appendEvent(db, {
+          type: 'run.step',
+          actor: 'system',
+          subject: run.id,
+          note: step.title + ': ' + result.output,
+        })
         results.push({ step, result: result.output })
         if (!result.ok) outcome = outcome === 'done' ? 'partial' : outcome
         continue

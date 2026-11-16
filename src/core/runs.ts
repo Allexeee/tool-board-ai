@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
@@ -48,32 +48,41 @@ export function materialize(
   return tx(db, () => {
     const created: RoutineRun[] = []
 
+    const catchUpFrom = new Date(now.getTime() - 24 * 3_600_000)
+
     for (const routine of listRoutines(db)) {
-      const due = nextRun(parseSchedule(routine.schedule), now)
-      if (due.getTime() > horizon) continue
+      const schedule = parseSchedule(routine.schedule)
+      let due = nextRun(schedule, catchUpFrom)
 
-      const dueAt = due.toISOString()
-      const exists = db
-        .prepare('select 1 as found from routine_runs where routine_id = ? and due_at = ?')
-        .get(routine.id, dueAt)
-      if (exists) continue
+      while (due.getTime() <= horizon) {
+        const dueAt = due.toISOString()
+        const exists = db
+          .prepare('select 1 as found from routine_runs where routine_id = ? and due_at = ?')
+          .get(routine.id, dueAt)
 
-      const run: RoutineRun = {
-        id: allocateId(db, 'run'),
-        routineId: routine.id,
-        dueAt,
-        status: 'planned',
-        startedAt: null,
-        finishedAt: null,
-        note: null,
+        if (!exists) {
+          const run: RoutineRun = {
+            id: allocateId(db, 'run'),
+            routineId: routine.id,
+            dueAt,
+            status: 'planned',
+            startedAt: null,
+            finishedAt: null,
+            note: null,
+          }
+
+          db.prepare(
+            'insert into routine_runs (id, routine_id, due_at, status, started_at, finished_at, note) values (?, ?, ?, ?, ?, ?, ?)',
+          ).run(run.id, run.routineId, run.dueAt, run.status, null, null, null)
+
+          appendEvent(db, { type: 'run.planned', actor: 'system', subject: run.id, after: { dueAt } })
+          created.push(run)
+        }
+
+        const next = nextRun(schedule, due)
+        if (next.getTime() <= due.getTime()) break
+        due = next
       }
-
-      db.prepare(
-        'insert into routine_runs (id, routine_id, due_at, status, started_at, finished_at, note) values (?, ?, ?, ?, ?, ?, ?)',
-      ).run(run.id, run.routineId, run.dueAt, run.status, null, null, null)
-
-      appendEvent(db, { type: 'run.planned', actor: 'system', subject: run.id, after: { dueAt } })
-      created.push(run)
     }
 
     return created

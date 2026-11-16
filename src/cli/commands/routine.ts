@@ -1,4 +1,4 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { addRoutine, addStep, listRoutines, listSteps } from '../../core/routines.ts'
 import { addGate, listGates } from '../../core/gates.ts'
@@ -32,7 +32,7 @@ export default async function command(args: ParsedArgs) {
     const title = args.positionals[1]
     const kind = (stringFlag(args, 'action') ?? 'agent') as 'agent' | 'mechanical'
     if (!routineId || !title) {
-      throw new UserError(3, 'использование: routine step RU1 "Собрать" --action mechanical --command "npm run build"')
+      throw new UserError(3, 'использование: routine step RU1 "Собрать" --action mechanical --cmd "npm run build"')
     }
     const step = addStep(db, {
       routineId,

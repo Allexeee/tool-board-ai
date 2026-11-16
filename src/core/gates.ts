@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+﻿import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
@@ -120,7 +120,7 @@ export function checkGate(db: DatabaseSync, gate: Gate, context: { root: string 
 
   const stage = db.prepare('select status from stages where id = ?').get(gate.name) as { status: string } | undefined
   if (stage) {
-    const ok = stage.status === 'merged' || stage.status === 'accepted'
+    const ok = stage.status === 'merged'
     return ok ? { ok: true } : { ok: false, reason: `этап ${gate.name} ещё не слит` }
   }
 

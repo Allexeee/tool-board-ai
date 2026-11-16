@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
@@ -15,6 +15,7 @@ export interface Routine {
   window: string | null
   timezone: string
   guard: string | null
+  escalatedAt: string | null
   createdAt: string
 }
 
@@ -46,6 +47,7 @@ export function addRoutine(
       window: input.window ?? null,
       timezone: input.timezone ?? 'local',
       guard: input.guard ?? null,
+      escalatedAt: null,
       createdAt: new Date().toISOString(),
     }
 
@@ -127,6 +129,7 @@ interface RoutineRow {
   window: string | null
   timezone: string
   guard: string | null
+  escalated_at: string | null
   created_at: string
 }
 
@@ -137,6 +140,7 @@ const toRoutine = (row: RoutineRow): Routine => ({
   window: row.window,
   timezone: row.timezone,
   guard: row.guard,
+  escalatedAt: row.escalated_at,
   createdAt: row.created_at,
 })
 

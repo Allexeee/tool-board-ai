@@ -1,10 +1,10 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, migrate } from '../../src/core/db.ts'
 
 test('схема v5 добавляет рутины, шаги, прогоны и гейты', () => {
   const db = openDb(':memory:')
-  assert.equal(migrate(db), 5)
+  assert.equal(migrate(db), 6)
 
   const tables = (db.prepare("select name from sqlite_master where type='table'").all() as Array<{ name: string }>).map(
     (row) => row.name,

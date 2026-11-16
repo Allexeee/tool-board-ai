@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRoutine } from '../../src/core/routines.ts'
@@ -14,9 +14,9 @@ test('прогон материализуется заранее и не дуб�
 
   const now = new Date('2026-11-16T00:00:00')
   const runs = materialize(db, { now })
-  assert.equal(runs.length, 1)
+  assert.equal(runs.length, 2)
   assert.equal(materialize(db, { now }).length, 0)
-  assert.equal(listRuns(db).length, 1)
+  assert.equal(listRuns(db).length, 2)
 })
 
 test('прогон не создаётся раньше окна материализации', () => {

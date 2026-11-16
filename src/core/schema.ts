@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -203,6 +203,9 @@ export function migrate(db: DatabaseSync): number {
           'kind text not null, name text not null, once integer not null default 0, ' +
           'satisfied_at text, payload text)',
       )
+    }
+    if (from < 6) {
+      db.exec('alter table routines add column escalated_at text')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +

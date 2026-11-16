@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRoutine, addStep } from '../../src/core/routines.ts'
@@ -20,8 +20,8 @@ test('tick материализует заранее и не исполняет 
   fixture(db)
 
   const result = tick(db, { root, now: new Date('2026-11-16T08:00:00') })
-  assert.equal(result.materialized, 1)
-  assert.equal(result.executed.length, 0)
+  assert.equal(result.materialized, 2)
+  assert.equal(result.executed.length, 1) // догоняем вчерашний прогон
 })
 
 test('после срока прогон исполняется', () => {
