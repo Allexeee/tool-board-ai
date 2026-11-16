@@ -6,14 +6,14 @@ function pathspecs(task: Task): string[] {
   return task.scope.map((pattern) => `:(glob)${pattern}`)
 }
 
-function stage(worktree: string, task: Task): string {
+function stage(worktree: string, task: Task): { specs: string[]; staged: string } {
   const specs = pathspecs(task).filter(
     (spec) => runGit(worktree, ['status', '--porcelain', '--', spec]).length > 0,
   )
-  if (specs.length === 0) return ''
+  if (specs.length === 0) return { specs, staged: '' }
 
   runGit(worktree, ['add', '--', ...specs])
-  return runGit(worktree, ['diff', '--cached', '--name-only'])
+  return { specs, staged: runGit(worktree, ['diff', '--cached', '--name-only', '--', ...specs]) }
 }
 
 export function commitTask(input: {
@@ -21,7 +21,7 @@ export function commitTask(input: {
   task: Task
   report: { summary: string; checks: string[]; left?: string }
 }): string | null {
-  const staged = stage(input.worktree, input.task)
+  const { specs, staged } = stage(input.worktree, input.task)
   if (!staged) return null
 
   const body = [input.report.summary, ...input.report.checks.map((check) => `проверено: ${check}`)]
@@ -30,7 +30,7 @@ export function commitTask(input: {
 
   runGit(
     input.worktree,
-    ['commit', '-m', `${input.task.id}: ${input.task.title}`, '-m', body],
+    ['commit', '-m', `${input.task.id}: ${input.task.title}`, '-m', body, '--', ...specs],
     { AL_ALLOW: '1' },
   )
 
@@ -38,12 +38,12 @@ export function commitTask(input: {
 }
 
 export function saveDraft(input: { worktree: string; task: Task; summary: string }): string | null {
-  const staged = stage(input.worktree, input.task)
+  const { specs, staged } = stage(input.worktree, input.task)
   if (!staged) return null
 
   runGit(
     input.worktree,
-    ['commit', '-m', `wip: ${input.task.id} ${input.summary}`],
+    ['commit', '-m', `wip: ${input.task.id} ${input.summary}`, '--', ...specs],
     { AL_ALLOW: '1' },
   )
 

@@ -62,3 +62,17 @@ test('save пишет черновик', () => {
   assert.ok(sha)
   assert.match(runGit(worktree, ['log', '-1', '--pretty=%s', sha!]), /wip:/)
 })
+
+test('чужие проиндексированные файлы не попадают в коммит', () => {
+  const { worktree, task } = fixture()
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  mkdirSync(join(worktree, 'docs'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+  writeFileSync(join(worktree, 'docs/b.md'), 'b')
+  runGit(worktree, ['add', 'docs/b.md'])
+
+  const sha = commitTask({ worktree, task, report: { summary: 's', checks: [] } })
+  const files = runGit(worktree, ['show', '--name-only', '--pretty=', sha!]).split('\n')
+  assert.deepEqual(files, ['src/a.ts'])
+  assert.match(runGit(worktree, ['status', '--porcelain']), /docs\//)
+})

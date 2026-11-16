@@ -62,10 +62,24 @@ export function release(
   const changelog =
     `## ${tag} — ${date}\n\n` + stages.map((stage) => `- ${stage.feature} — ${stage.stage}`).join('\n')
 
+  const dirty = runGit(input.root, ['status', '--porcelain', '--untracked-files=no'])
+  if (dirty) {
+    throw new UserError(3, 'дерево грязное: релиз не начинается, закоммитьте или уберите изменения')
+  }
+
   const original = currentBranch(input.root)
   runGit(input.root, ['checkout', main])
   try {
-    runGit(input.root, ['merge', '--no-ff', dev, '-m', `merge: ${dev} → ${main}`], { AL_ALLOW: '1' })
+    try {
+      runGit(input.root, ['merge', '--no-ff', dev, '-m', `merge: ${dev} → ${main}`], { AL_ALLOW: '1' })
+    } catch (error) {
+      try {
+        runGit(input.root, ['merge', '--abort'])
+      } catch {
+        appendEvent(db, { type: 'release.abort_failed', actor: input.actor, subject: tag })
+      }
+      throw error
+    }
 
     const changelogPath = join(input.root, 'CHANGELOG.md')
     const previous = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '# Changelog\n\n'
@@ -74,7 +88,13 @@ export function release(
     runGit(input.root, ['commit', '-m', `chore: release ${tag}`], { AL_ALLOW: '1' })
     runGit(input.root, ['tag', tag])
   } finally {
-    if (original && original !== main) runGit(input.root, ['checkout', original])
+    if (original && original !== main) {
+      try {
+        runGit(input.root, ['checkout', original])
+      } catch {
+        appendEvent(db, { type: 'branch.restore_failed', actor: input.actor, subject: tag })
+      }
+    }
   }
 
   db.prepare("insert or replace into meta (key, value) values ('version', ?)").run(version)

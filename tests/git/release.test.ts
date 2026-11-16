@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -73,4 +73,10 @@ test('повторный релиз без новых этапов ничего 
   assert.equal(second.released, false)
   assert.match(runGit(root, ['tag']), /v0\.2\.0/)
   assert.doesNotMatch(runGit(root, ['tag']), /v0\.3\.0/)
+})
+
+test('релиз требует чистое дерево', () => {
+  const { db, root, config } = repoWithMergedStage()
+  writeFileSync(join(root, 'README.md'), 'изменено')
+  assert.throws(() => release(db, { root, level: 'patch', config, actor: 'owner' }), /грязн/)
 })

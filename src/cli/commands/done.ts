@@ -24,9 +24,14 @@ export default async function command(args: ParsedArgs) {
   }
 
   const before = getTask(db, taskId)
-  const stage = before?.stageId ? getStage(db, before.stageId) : null
+  if (!before) throw new UserError(3, `задача ${taskId} не найдена`)
+  if (before.holder !== executor) throw new UserError(3, `задача ${before.id} не у исполнителя ${executor}`)
+  if (before.status !== 'active') throw new UserError(1, `задача ${before.id} не в работе: ${before.status}`)
+  if (!summary.trim()) throw new UserError(3, 'нужен отчёт: --summary "что сделано"')
+
+  const stage = before.stageId ? getStage(db, before.stageId) : null
   const feature = stage ? getFeature(db, stage.featureId) : null
-  if (before && feature?.worktree && existsSync(feature.worktree)) {
+  if (feature?.worktree && existsSync(feature.worktree)) {
     commitTask({ worktree: feature.worktree, task: before, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
   }
 

@@ -11,22 +11,29 @@ function segments(pattern: string): string[] {
   return normalize(pattern).split('/').filter(Boolean)
 }
 
-const isWildcard = (segment: string) => segment.includes('*')
+function segmentMatches(pattern: string, value: string): boolean {
+  if (pattern === value) return true
+  if (!pattern.includes('*') && !value.includes('*')) return false
+
+  const toRegExp = (glob: string) =>
+    new RegExp('^' + glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$')
+
+  return toRegExp(pattern).test(value) || toRegExp(value).test(pattern)
+}
+
+function overlap(left: string[], i: number, right: string[], j: number): boolean {
+  if (i === left.length && j === right.length) return true
+  if (i === left.length) return right.slice(j).every((segment) => segment === '**')
+  if (j === right.length) return left.slice(i).every((segment) => segment === '**')
+
+  if (left[i] === '**') return overlap(left, i + 1, right, j) || overlap(left, i, right, j + 1)
+  if (right[j] === '**') return overlap(left, i, right, j + 1) || overlap(left, i + 1, right, j)
+
+  return segmentMatches(left[i], right[j]) && overlap(left, i + 1, right, j + 1)
+}
 
 function pairOverlap(a: string, b: string): boolean {
-  const left = segments(a)
-  const right = segments(b)
-  const length = Math.min(left.length, right.length)
-
-  for (let index = 0; index < length; index++) {
-    const x = left[index]
-    const y = right[index]
-    if (x === y) continue
-    if (isWildcard(x) || isWildcard(y)) continue
-    return false
-  }
-
-  return true
+  return overlap(segments(a), 0, segments(b), 0)
 }
 
 export function scopesOverlap(a: TaskScope, b: TaskScope): boolean {

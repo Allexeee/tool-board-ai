@@ -1,6 +1,6 @@
 ﻿import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
-import { branchExists, currentBranch, resolveBranches, runGit } from './git.ts'
+import { branchExists, currentBranch, isRepo, resolveBranches, runGit } from './git.ts'
 import { getFeature } from '../features.ts'
 import { activateNextStage, getStage, listStages } from '../stages.ts'
 import { createTask, listTasks } from '../tasks.ts'
@@ -32,6 +32,8 @@ export function mergeStage(
   const stage = getStage(db, input.stageId)
   if (!stage) throw new UserError(3, `этап ${input.stageId} не найден`)
 
+  if (!isRepo(input.root)) throw new UserError(3, `не git-репозиторий: ${input.root}`)
+
   const feature = getFeature(db, stage.featureId)
   if (!feature) throw new UserError(3, `фича ${stage.featureId} не найдена`)
   if (!feature.branch) throw new UserError(3, `у фичи ${feature.id} нет ветки: выполните feature start`)
@@ -56,7 +58,9 @@ export function mergeStage(
   const original = currentBranch(input.root)
   try {
     runGit(input.root, ['checkout', dev])
-    runGit(input.root, ['merge', '--no-ff', feature.branch, '-m', `${stage.id}: ${stage.name}`])
+    runGit(input.root, ['merge', '--no-ff', feature.branch, '-m', `${stage.id}: ${stage.name}`], {
+      AL_ALLOW: '1',
+    })
   } catch (error) {
     let unmerged: string[] = []
     try {
@@ -98,7 +102,6 @@ export function mergeStage(
   }
 
   const commit = runGit(input.root, ['rev-parse', 'HEAD'])
-  if (original) runGit(input.root, ['checkout', original])
 
   db.prepare("update stages set status = 'merged', merged_at = ? where id = ?").run(new Date().toISOString(), stage.id)
   appendEvent(db, { type: 'stage.merged', actor: 'system', subject: stage.id, after: { commit } })
@@ -106,6 +109,19 @@ export function mergeStage(
   const remaining = listStages(db, feature.id).filter((item) => item.status === 'planned')
   if (remaining.length === 0) db.prepare("update features set status = 'done' where id = ?").run(feature.id)
   else activateNextStage(db, feature.id)
+
+  if (original && original !== dev) {
+    try {
+      runGit(input.root, ['checkout', original])
+    } catch {
+      appendEvent(db, {
+        type: 'branch.restore_failed',
+        actor: 'system',
+        subject: stage.id,
+        note: `остались на ${dev}`,
+      })
+    }
+  }
 
   return { merged: true, commit }
 }

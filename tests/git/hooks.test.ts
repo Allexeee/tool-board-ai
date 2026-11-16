@@ -34,3 +34,11 @@ test('повторная установка не плодит дублей', () 
   const second = installHooks(join(dir, '.git'), { protectedBranches: ['main'] })
   assert.deepEqual(second.installed, [])
 })
+
+import { initProject } from '../../src/core/project.ts'
+
+test('init ставит хук сам', () => {
+  const dir = makeRepo()
+  initProject(dir)
+  assert.equal(hookInstalled(join(dir, '.git')), true)
+})

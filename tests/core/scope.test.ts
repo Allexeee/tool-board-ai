@@ -47,3 +47,9 @@ test('вторая задача с пересечением не берётся'
   takeTask(db, { executor: 'w1', taskId: first.id })
   assert.throws(() => takeTask(db, { executor: 'w2', taskId: second.id }), /област/)
 })
+
+test('двойная звезда перекрывает вложенные каталоги', () => {
+  assert.equal(scopesOverlap(['src/**/a.ts'], ['src/x/y/a.ts']), true)
+  assert.equal(scopesOverlap(['src/**'], ['src/x/y/a.ts']), true)
+  assert.equal(scopesOverlap(['src/**/a.ts'], ['docs/a.ts']), false)
+})

@@ -1,6 +1,7 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
+import { rmSync } from 'node:fs'
 import { makeRepoWithDev } from '../helpers/repo.ts'
 import { initProject } from '../../src/core/project.ts'
 import { openDb } from '../../src/core/db.ts'
@@ -48,6 +49,7 @@ test('abandon закрывает задачи и не сливает ветку'
 test('doctor замечает отсутствие хука и ветки dev', () => {
   const { root, db } = startedFeature()
   runGit(root, ['branch', '-D', 'dev'])
+  rmSync(join(root, '.git/hooks/pre-commit'))
 
   const report = doctorReport(db, { root, devBranch: 'dev' })
   assert.ok(report.checks.some((check) => check.name === 'git-хук' && !check.ok))
