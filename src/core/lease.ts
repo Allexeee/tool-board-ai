@@ -35,6 +35,13 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
     const task = getTask(db, taskId)
     if (!task) throw new UserError(3, `задача ${taskId} не найдена`)
 
+    const reserved = db.prepare('select executor_id from hand where task_id = ?').get(task.id) as
+      | { executor_id: string }
+      | undefined
+    if (reserved && reserved.executor_id !== executor.id) {
+      throw new UserError(1, `задача ${task.id} зарезервирована за ${reserved.executor_id}`)
+    }
+
     const leaseUntil = new Date(Date.now() + (options.leaseMinutes ?? 30) * 60_000).toISOString()
 
     const result = db
