@@ -29,6 +29,14 @@ export function validatePlan(plan: Plan): string[] {
       if (step.size === 'XL') errors.push(`${place}: размер XL — это фича, а не шаг`)
       if (step.size === 'L') errors.push(`${place}: размер L не допускается в плане, нарежьте на M`)
       if (!['XS', 'S', 'M'].includes(step.size)) errors.push(`${place}: неизвестный размер ${step.size}`)
+
+      for (const dep of step.deps ?? []) {
+        if (!Number.isInteger(dep) || dep < 0 || dep >= stage.steps.length) {
+          errors.push(`${place}: зависимость ${dep} вне этапа (шагов ${stage.steps.length})`)
+        } else if (dep === index) {
+          errors.push(`${place}: зависимость на самого себя`)
+        }
+      }
     })
   }
 
