@@ -1,6 +1,7 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
+import { listEvents } from '../../core/events.ts'
 import { createTask, editTask, getTask, listTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -87,16 +88,40 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'show') {
     const task = getTask(db, args.positionals[0] ?? '')
     if (!task) throw new UserError(3, 'задача не найдена')
-    ok(
-      task,
-      [
-        `${task.id}  ${task.title}`,
-        `размер: ${task.size} · навык: ${task.skill} · класс: ${task.class}`,
-        `статус: ${task.status}${task.holder ? ' · держит ' + task.holder : ''}`,
-        `DoD: ${task.dod.join('; ')}`,
-        `область: ${task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')}`,
-      ].join('\n'),
-    )
+
+    const lines = [
+      `${task.id}  ${task.title}`,
+      `размер: ${task.size} · навык: ${task.skill} · класс: ${task.class}`,
+      `статус: ${task.status}${task.holder ? ' · держит ' + task.holder : ''}`,
+      `DoD: ${task.dod.join('; ')}`,
+      `область: ${task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')}`,
+    ]
+
+    if (args.flags.history === true) {
+      const format = (value: unknown): string => {
+        if (value === undefined || value === null) return '—'
+        if (Array.isArray(value)) return value.length === 0 ? '—' : value.join('; ')
+        return String(value)
+      }
+
+      const edits = listEvents(db, { subject: task.id }).filter((event) => event.type === 'task.edited')
+
+      lines.push('', '## История')
+      if (edits.length === 0) {
+        lines.push('изменений нет')
+      } else {
+        for (const event of edits) {
+          const before = event.before ? (JSON.parse(event.before) as Record<string, unknown>) : {}
+          const after = event.after ? (JSON.parse(event.after) as Record<string, unknown>) : {}
+          lines.push(`${event.at}  ${event.actor}`)
+          for (const key of Object.keys(after)) {
+            lines.push(`  ${key}: ${format(before[key])} → ${format(after[key])}`)
+          }
+        }
+      }
+    }
+
+    ok(task, lines.join('\n'))
     return 0
   }
 
