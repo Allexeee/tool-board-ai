@@ -1,6 +1,6 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, editRequest, getRequest, listRequests, mergeRequests, splitRequest } from '../../core/requests.ts'
+import { addRequest, editRequest, getRequest, listRequests, laterRequest, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { markPlansStale } from '../../core/plans.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
@@ -60,6 +60,33 @@ export default async function command(args: ParsedArgs) {
 
     const created = splitRequest(db, { id, into, actor })
     ok(created, created.map((request) => `${request.id}  ${request.title}`).join('\n'))
+    return 0
+  }
+
+  if (args.sub === 'later') {
+    const id = args.positionals[0]
+    const until = stringFlag(args, 'until') ?? args.positionals[1]
+    if (!id || !until) throw new UserError(3, 'использование: request later R3 --until 2026-12-01')
+
+    const request = laterRequest(db, { id, until, actor })
+    ok(request, `${request.id} отложен до ${request.reviewAt}`)
+    return 0
+  }
+
+  if (args.sub === 'reopen') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: request reopen R3')
+
+    const request = reopenRequest(db, { id, actor })
+    ok(request, `${request.id} снова в inbox`)
+    return 0
+  }
+
+  if (args.sub === 'remove') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: request remove R3')
+    removeRequest(db, { id, actor })
+    ok({ id }, `${id} удалён`)
     return 0
   }
 

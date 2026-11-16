@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { addRequest, editRequest, mergeRequests, getRequest, splitRequest } from '../../src/core/requests.ts'
+import { addRequest, editRequest, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
+import { addFeature } from '../../src/core/features.ts'
 import { addPlan, approvePlan } from '../../src/core/plans.ts'
 
 test('правка запроса меняет текст и пишет before/after', () => {
@@ -66,4 +67,40 @@ test('split запроса в работе отвергается', () => {
   db.prepare('update plans set applied_at = ? where request_id = ?').run(new Date().toISOString(), request.id)
 
   assert.throws(() => splitRequest(db, { id: request.id, into: ['часть'], actor: 'owner' }), /в работе/)
+})
+
+test('remove удаляет запрос без фич и оставляет событие', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: 'текст', author: 'owner' })
+
+  removeRequest(db, { id: request.id, actor: 'owner' })
+
+  assert.equal(getRequest(db, request.id), null)
+  const event = db
+    .prepare("select type from events where subject = ? order by id desc limit 1")
+    .get(request.id) as { type: string }
+  assert.equal(event.type, 'request.removed')
+})
+
+test('remove отвергается, если у запроса есть фичи', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
+
+  assert.throws(() => removeRequest(db, { id: request.id, actor: 'owner' }), /фичи/)
+})
+
+test('later требует дату и reopen возвращает в inbox', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+
+  assert.throws(() => laterRequest(db, { id: request.id, until: ' ', actor: 'owner' }), /дата/)
+
+  const later = laterRequest(db, { id: request.id, until: '2026-12-01', actor: 'owner' })
+  assert.equal(later.status, 'later')
+  assert.equal(later.reviewAt, '2026-12-01')
+
+  const reopened = reopenRequest(db, { id: request.id, actor: 'owner' })
+  assert.equal(reopened.status, 'inbox')
+  assert.equal(reopened.reviewAt, null)
 })
