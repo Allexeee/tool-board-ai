@@ -3,14 +3,15 @@ import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
-import { addStage } from '../../src/core/stages.ts'
-import { createTask, updateTask } from '../../src/core/tasks.ts'
+import { addStage, activateNextStage } from '../../src/core/stages.ts'
+import { createTask, getTask, updateTask } from '../../src/core/tasks.ts'
 import { addDep, isReady, refreshReady, wouldCycle } from '../../src/core/deps.ts'
 
 function seed(db: DatabaseSync): string {
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
   const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  activateNextStage(db, feature.id)
 
   const base = {
     stageId: stage.id,
@@ -71,6 +72,7 @@ test('этап ждёт этап: задача не готова, пока пр�
   const sb = addStage(db, { featureId: fb.id, name: 'S1', goal: 'g', appetite: '1 день' })
 
   addDep(db, sb.id, sa.id)
+  activateNextStage(db, fb.id)
 
   const task = createTask(db, {
     stageId: sb.id,
@@ -85,4 +87,50 @@ test('этап ждёт этап: задача не готова, пока пр�
 
   db.prepare("update stages set status = 'merged' where id = ?").run(sa.id)
   assert.equal(isReady(db, task.id), true)
+})
+
+function plannedStage(db: DatabaseSync): { featureId: string; stageId: string; taskId: string } {
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  const task = createTask(db, {
+    stageId: stage.id,
+    title: 'Первый шаг',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  return { featureId: feature.id, stageId: stage.id, taskId: task.id }
+}
+
+test('задача неактивного этапа получает статус planned, а не ready', () => {
+  const db = openDb(':memory:')
+  const { taskId } = plannedStage(db)
+
+  assert.equal(refreshReady(db), 1)
+  assert.equal(getTask(db, taskId)!.status, 'planned')
+  assert.equal(isReady(db, taskId), false)
+})
+
+test('после активации этапа planned-задача становится ready', () => {
+  const db = openDb(':memory:')
+  const { featureId, taskId } = plannedStage(db)
+  refreshReady(db)
+  assert.equal(getTask(db, taskId)!.status, 'planned')
+
+  activateNextStage(db, featureId)
+  assert.equal(refreshReady(db), 1)
+  assert.equal(getTask(db, taskId)!.status, 'ready')
+})
+
+test('в активном этапе незакрытая зависимость оставляет задачу open', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-1`, `${stageId}-2`)
+
+  refreshReady(db)
+  assert.equal(getTask(db, `${stageId}-1`)!.status, 'open')
+  assert.equal(getTask(db, `${stageId}-2`)!.status, 'ready')
 })
