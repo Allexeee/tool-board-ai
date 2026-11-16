@@ -98,3 +98,43 @@ test('now показывает planned этап, когда предыдущий
   assert.match(view.out, /\[2\/2\] planned 1/)
   assert.doesNotMatch(view.out, /\bdone\b/)
 })
+
+test('now показывает активный этап', () => {
+  const { dir } = projectWithPlannedStage()
+  run(dir, ['stage', 'activate', 'F1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /\[1\/1\] ready 1/)
+})
+
+test('now показывает принятый этап, который ещё ждёт слияния', () => {
+  const { dir } = projectWithPlannedStage()
+  run(dir, ['stage', 'add', 'F1', 'S2', '--goal', 'g', '--appetite', '2 дня'])
+  run(dir, ['stage', 'activate', 'F1'])
+
+  const db = openDb(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set acceptance = 'owner' where id = 'F1.S1'").run()
+  db.prepare("update tasks set status = 'done' where id = 'F1.S1-1'").run()
+  db.close()
+
+  const accepted = run(dir, ['stage', 'accept', 'F1.S1'])
+  assert.equal(accepted.code, 0, accepted.err)
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /\[1\/2\] done 1/)
+  assert.doesNotMatch(view.out, /\[2\/2\]/)
+  assert.doesNotMatch(view.out, /planned/)
+})
+
+test('now без этапов показывает фичу с нулевым счётчиком', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /\[0\/0\]/)
+})
