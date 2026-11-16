@@ -80,3 +80,16 @@ node bin/toolbox-al.ts scheduler enable --yes
 ```
 
 Тикер по умолчанию выключен: без него рутины не идут, а `doctor` предупреждает.
+
+## OpenCode
+
+`init` создаёт:
+
+- `.opencode/plugins/toolbox-al/index.ts` — инструменты `al_now`, `al_inbox`, `al_task`, `al_take`, `al_done`, `al_block`, `al_ask`, `al_answer` поверх CLI;
+- `.opencode/skills/toolbox-al/SKILL.md` — как работать с очередью;
+- `.opencode/skills/toolbox-al-setup/SKILL.md` — первичная настройка проекта;
+- блок в `AGENTS.md` между маркерами.
+
+Плагин не содержит логики: он вызывает `node bin/toolbox-al.ts … --json`. Если плагина нет, всё работает через CLI.
+
+В OpenCode: «выполни первичную настройку toolbox-al», затем «разбери inbox».

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { openDb } from './db.ts'
 import { DEFAULT_CONFIG, readConfig, writeConfig, type Config } from './config.ts'
 import { installHooks } from './git/hooks.ts'
+import { writeOpenCodeFiles } from './opencode.ts'
 
 export interface Project {
   root: string
@@ -54,6 +55,9 @@ export function initProject(dir: string): { created: string[]; root: string } {
   if (existsSync(join(root, '.git'))) {
     installHooks(join(root, '.git'), { protectedBranches: ['main', 'dev'] })
   }
+
+  const opencode = writeOpenCodeFiles(root, DEFAULT_CONFIG.toolVersion)
+  created.push(...opencode.created)
 
   const gitignore = join(root, '.gitignore')
   const entries = ['.toolbox-al/', '.worktrees/']

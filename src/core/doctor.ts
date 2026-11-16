@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { hookInstalled } from './git/hooks.ts'
 import { branchExists } from './git/git.ts'
+import { openCodeFilesPresent } from './opencode.ts'
 
 export interface Check {
   name: string
@@ -135,6 +136,14 @@ function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
   const missing = listFeatures(db)
     .filter((feature) => feature.worktree && !existsSync(feature.worktree))
     .map((feature) => feature.id)
+
+  checks.push({
+    name: 'плагин OpenCode',
+    ok: openCodeFilesPresent(root).plugin,
+    detail: openCodeFilesPresent(root).plugin
+      ? 'на месте'
+      : 'нет .opencode/plugins/toolbox-al — выполните init',
+  })
 
   checks.push({
     name: 'каталоги фич',
