@@ -84,6 +84,37 @@ test('request open на пустом срезе говорит об этом', (
   assert.match(opened.out, /открытых запросов нет/)
 })
 
+test('request list показывает вид закрытия', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-kind-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Сделано'])
+  run(dir, ['request', 'add', 'Отменено'])
+  run(dir, ['request', 'add', 'Поглощено'])
+  run(dir, ['request', 'add', 'Цель'])
+  run(dir, ['request', 'close', 'R1', '--reason', 'готово'])
+  run(dir, ['request', 'close', 'R2', '--reason', 'передумали', '--kind', 'cancelled'])
+  run(dir, ['request', 'merge', 'R3', 'R4'])
+
+  const listed = run(dir, ['request', 'list'])
+  assert.equal(listed.code, 0)
+  assert.match(listed.out, /Сделано\s+\(done\)/)
+  assert.match(listed.out, /Отменено\s+\(cancelled\)/)
+  assert.match(listed.out, /Поглощено\s+\(объединён\)/)
+})
+
+test('запрос без вида печатается как раньше', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-kind-none-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Старое закрытие'])
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  db.prepare("update requests set status = 'closed' where id = 'R1'").run()
+  db.close()
+
+  const listed = run(dir, ['request', 'list'])
+  assert.equal(listed.code, 0)
+  assert.doesNotMatch(listed.out, /\(done\)|\(cancelled\)|\(объединён\)/)
+})
+
 test('у закрытого слиянием запроса строки с причиной нет', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-req-close2-'))
   run(dir, ['init'])

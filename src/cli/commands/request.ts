@@ -1,6 +1,6 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, closeRequest, editRequest, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
+import { addRequest, closeKind, closeRequest, editRequest, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
@@ -181,8 +181,15 @@ export default async function command(args: ParsedArgs) {
     requests,
     requests.length === 0
       ? 'запросов нет'
-      : requests.map((r) => `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}`).join('\n'),
+      : requests
+          .map((r) => {
+            const kind = r.status === 'closed' ? closeKind(db, r.id) : null
+            const suffix = kind ? `  (${kind === 'merged' ? 'объединён' : kind})` : ''
+            return `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}${suffix}`
+          })
+          .join('\n'),
   )
   return 0
 }
+
 
