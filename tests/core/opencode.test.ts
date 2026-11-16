@@ -4,9 +4,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  AGENTS_BEGIN,
+  AGENTS_END,
+  mergeManaged,
   openCodeFilesPresent,
   pluginSource,
   pluginVersion,
+  refreshOpenCode,
   writeOpenCodeFiles,
 } from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
@@ -85,4 +89,50 @@ test('doctor замечает отсутствие плагина', () => {
     doctorReport(bareDb, { root: bare }).checks.find((check) => check.name === 'плагин OpenCode')!.ok,
     false,
   )
+})
+
+test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
+  const current = `---\nname: x\n---\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nмоя заметка\n`
+  const next = `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`
+
+  const merged = mergeManaged(current, next)!
+
+  assert.match(merged, /новое/)
+  assert.doesNotMatch(merged, /старое/)
+  assert.match(merged, /моя заметка/)
+  assert.match(merged, /name: x/)
+})
+
+test('mergeManaged отказывается, если в файле нет маркеров', () => {
+  assert.equal(mergeManaged('# просто текст\n', `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`), null)
+})
+
+test('refreshOpenCode не затирает файл без маркеров даже с --yes', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+
+  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
+  writeFileSync(path, '# моя версия без маркеров\n', 'utf8')
+
+  const result = refreshOpenCode(root, '9.9.9', { yes: true })
+  const skill = result.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
+
+  assert.equal(skill.status, 'pending')
+  assert.equal(readFileSync(path, 'utf8'), '# моя версия без маркеров\n')
+  assert.match(readFileSync(`${path}.new`, 'utf8'), /toolbox-al/)
+})
+
+test('refreshOpenCode обновляет блок и сохраняет правку вне маркеров', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+
+  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
+  const original = readFileSync(path, 'utf8')
+  writeFileSync(path, original + '\nмоя заметка\n', 'utf8')
+
+  refreshOpenCode(root, '9.9.9', { yes: true })
+  const after = readFileSync(path, 'utf8')
+
+  assert.match(after, /моя заметка/)
+  assert.match(after, /toolbox-al/)
 })

@@ -118,20 +118,34 @@ export interface ManagedUpdate {
   status: 'same' | 'updated' | 'pending' | 'missing'
 }
 
+/** Меняет только блок между маркерами, оставляя всё, что человек дописал вокруг. */
+export function mergeManaged(current: string, next: string): string | null {
+  const begin = current.indexOf(AGENTS_BEGIN)
+  const end = current.indexOf(AGENTS_END)
+  const nextBegin = next.indexOf(AGENTS_BEGIN)
+  const nextEnd = next.indexOf(AGENTS_END)
+
+  if (begin === -1 || end === -1 || end < begin) return null
+  if (nextBegin === -1 || nextEnd === -1 || nextEnd < nextBegin) return null
+
+  const block = next.slice(nextBegin, nextEnd + AGENTS_END.length)
+  return current.slice(0, begin) + block + current.slice(end + AGENTS_END.length)
+}
+
 export function refreshOpenCode(
   root: string,
   toolVersion: string,
   options: { yes?: boolean } = {},
 ): ManagedUpdate[] {
-  const files: Array<[string, string]> = [
-    ['.opencode/plugins/toolbox-al/index.ts', pluginSource(toolVersion)],
-    ['.opencode/skills/toolbox-al/SKILL.md', skillSource()],
-    ['.opencode/skills/toolbox-al-setup/SKILL.md', setupSkillSource()],
+  const files: Array<[string, string, boolean]> = [
+    ['.opencode/plugins/toolbox-al/index.ts', pluginSource(toolVersion), false],
+    ['.opencode/skills/toolbox-al/SKILL.md', skillSource(), true],
+    ['.opencode/skills/toolbox-al-setup/SKILL.md', setupSkillSource(), true],
   ]
 
   const result: ManagedUpdate[] = []
 
-  for (const [relative, next] of files) {
+  for (const [relative, next, merge] of files) {
     const path = join(root, relative)
 
     if (!existsSync(path)) {
@@ -142,6 +156,32 @@ export function refreshOpenCode(
     }
 
     const current = readFileSync(path, 'utf8')
+
+    if (merge) {
+      const merged = mergeManaged(current, next)
+
+      // файл без маркеров — чужой: не затираем даже с --yes, кладём рядом .new
+      if (merged === null) {
+        writeFileSync(`${path}.new`, next, 'utf8')
+        result.push({ path: relative, status: 'pending' })
+        continue
+      }
+
+      if (merged === current) {
+        result.push({ path: relative, status: 'same' })
+        continue
+      }
+
+      if (options.yes) {
+        writeFileSync(path, merged, 'utf8')
+        result.push({ path: relative, status: 'updated' })
+      } else {
+        writeFileSync(`${path}.new`, merged, 'utf8')
+        result.push({ path: relative, status: 'pending' })
+      }
+      continue
+    }
+
     if (current === next) {
       result.push({ path: relative, status: 'same' })
       continue

@@ -3,6 +3,8 @@ name: toolbox-al-setup
 description: Первичная настройка toolbox-al в проекте: найти бэклоги, предложить команду и ветки, выполнить bootstrap
 ---
 
+<!-- toolbox-al:begin -->
+
 # Первичная настройка toolbox-al
 
 `init` создал только скелет. Настройку выполняешь ты: CLI не знает проект, а ты знаешь.
@@ -34,3 +36,4 @@ node bin/toolbox-al.ts idea add "пункт из бэклога"
 ## 4. Проверить
 
 `node bin/toolbox-al.ts doctor` — незавершённая настройка видна там.
+<!-- toolbox-al:end -->
