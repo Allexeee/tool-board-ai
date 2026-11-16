@@ -112,6 +112,18 @@ export function doctorReport(
     })
   }
 
+  const noWorktree = listFeatures(db).filter(
+    (feature) => feature.status === 'active' && !feature.worktree,
+  )
+  checks.push({
+    name: 'каталоги фич',
+    ok: noWorktree.length === 0,
+    detail:
+      noWorktree.length === 0
+        ? 'на месте'
+        : 'без каталога: ' + noWorktree.map((feature) => feature.id).join(', ') + ' — выполните feature start',
+  })
+
   const stale = stalePoolTasks(db, 7)
   checks.push({
     name: 'пул',
