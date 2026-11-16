@@ -54,6 +54,14 @@ test('XL в плане отвергается', () => {
   assert.match(validatePlan(plan).join(' '), /XL/)
 })
 
+test('scope из плана с запятой разбирается на пути', () => {
+  const { db, request } = fixture([{ ...step, scope: ['src/a,src/b'] }])
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+
+  const result = applyPlan(db, { requestId: request.id })
+  assert.deepEqual(result.tasks[0].scope, ['src/a', 'src/b'])
+})
+
 test('неутверждённый план не применяется', () => {
   const { db, request } = fixture()
   assert.throws(() => applyPlan(db, { requestId: request.id }), /утвержд/)

@@ -1,9 +1,9 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { allocateId, childId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { validateTaskInput, type NewTask, type TaskClass, type TaskKind, type TaskSeverity, type TaskSize, type TaskScope } from './validate.ts'
+import { normalizeScope, validateTaskInput, type NewTask, type TaskClass, type TaskKind, type TaskSeverity, type TaskSize, type TaskScope } from './validate.ts'
 
 export type { NewTask, TaskClass, TaskKind, TaskSeverity, TaskSize, TaskScope } from './validate.ts'
 
@@ -86,6 +86,7 @@ export function openTasks(db: DatabaseSync): Task[] {
 }
 
 export function createTask(db: DatabaseSync, input: NewTask): Task {
+  input = { ...input, scope: normalizeScope(input.scope) }
   const { errors, warnings } = validateTaskInput(input)
   if (errors.length > 0) {
     throw new UserError(3, 'задача не создана:\n  ' + errors.join('\n  '))
@@ -243,7 +244,7 @@ export function editTask(
       sizeReason: input.patch.sizeReason ?? current.sizeReason ?? undefined,
       skill: input.patch.skill ?? current.skill,
       class: input.patch.class ?? current.class,
-      scope: input.patch.scope ?? current.scope,
+      scope: normalizeScope(input.patch.scope ?? current.scope),
     }
 
     const { errors } = validateTaskInput(merged)
@@ -326,3 +327,4 @@ export function attempt(db: DatabaseSync, id: string, maxAttempts = 3): Task {
 
   return getTask(db, id)!
 }
+
