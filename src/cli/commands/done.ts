@@ -57,7 +57,7 @@ export default async function command(args: ParsedArgs) {
     commitTask({ worktree: feature.worktree, task, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
   }
 
-  const task = doneTask(db, {
+  const closed = doneTask(db, {
     taskId,
     executor,
     report: {
@@ -67,6 +67,6 @@ export default async function command(args: ParsedArgs) {
     },
   })
 
-  ok(task, `${task.id}  закрыта`)
+  ok(closed, `${closed.id}  ${closed.status === 'in_review' ? 'на ревью' : 'закрыта'}`)
   return 0
 }

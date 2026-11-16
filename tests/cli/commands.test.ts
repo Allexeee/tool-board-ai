@@ -45,3 +45,11 @@ test('init --dry-run ничего не создаёт', () => {
   assert.match(result.out, /Ничего не изменено/)
   assert.equal(existsSync(join(dir, '.toolbox-al')), false)
 })
+
+test('done без аргументов отвечает кодом 3, а не падает', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+  const result = run(dir, ['done'])
+  assert.equal(result.code, 3)
+  assert.match(result.err, /использование/)
+})
