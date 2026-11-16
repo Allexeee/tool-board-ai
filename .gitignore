@@ -1,0 +1,5 @@
+node_modules/
+.toolbox-al/
+.worktrees/
+.superpowers/
+*.log
