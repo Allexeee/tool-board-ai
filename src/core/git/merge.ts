@@ -44,6 +44,10 @@ export function mergeStage(
     return { merged: false, reason: `не все задачи закрыты: ${open.map((task) => task.id).join(', ')}` }
   }
 
+  if (stage.acceptance === 'owner' && stage.status !== 'accepted') {
+    return { merged: false, reason: 'этап не принят владельцем: stage accept' }
+  }
+
   const { dev } = resolveBranches(input.root, input.config)
   if (!branchExists(input.root, dev)) {
     throw new UserError(3, `ветки ${dev} нет: создайте её от ${input.config.branches.main}`)

@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
@@ -212,7 +212,10 @@ export function ownerHand(db: DatabaseSync): OwnerItem[] {
   const items: OwnerItem[] = []
 
   for (const task of listTasks(db).filter(
-    (task) => (task.holder === 'owner' && task.status === 'active') || task.status === 'needs_owner',
+    (task) =>
+      (task.holder === 'owner' && task.status === 'active') ||
+      task.status === 'needs_owner' ||
+      (task.status === 'in_review' && task.review === 'owner'),
   )) {
     items.push({ id: task.id, kind: 'task', deadline: null, createdAt: task.createdAt, item: task })
   }

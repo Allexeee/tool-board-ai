@@ -18,7 +18,11 @@ import { commitTask } from '../../src/core/git/commit.ts'
 import { mergeStage } from '../../src/core/git/merge.ts'
 import { runGit } from '../../src/core/git/git.ts'
 
-export function mergedReadyFixture(options: { check?: string; skipDev?: boolean } = {}) {
+export function mergedReadyFixture(options: {
+  check?: string
+  skipDev?: boolean
+  acceptance?: 'auto' | 'owner' | 'owner_before_next'
+} = {}) {
   let root = makeRepoWithDev()
   initProject(root)
   const db = openDb(join(root, '.toolbox-al/tracker.db'))
@@ -27,7 +31,13 @@ export function mergedReadyFixture(options: { check?: string; skipDev?: boolean 
 
   const feature = addFeature(db, { name: 'Оплата', rank: 1 })
   if (options.check) setFeatureCheck(db, feature.id, options.check)
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  const stage = addStage(db, {
+    featureId: feature.id,
+    name: 'S1',
+    goal: 'g',
+    appetite: '2 дня',
+    acceptance: options.acceptance ?? 'auto',
+  })
   activateNextStage(db, feature.id)
 
   const task = createTask(db, {

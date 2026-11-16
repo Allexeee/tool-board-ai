@@ -115,7 +115,7 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     leaseUntil: null,
     attempts: 0,
     reason: null,
-    review: 'agent',
+    review: input.review ?? 'none',
     createdAt: new Date().toISOString(),
   }
 

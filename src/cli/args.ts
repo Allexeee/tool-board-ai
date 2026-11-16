@@ -2,7 +2,7 @@
 
 const COMMANDS_WITH_SUB = new Set([
   'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
-  'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine',
+  'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan',
 ])
 
 const KNOWN_FLAGS = new Set([
