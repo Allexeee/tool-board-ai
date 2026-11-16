@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { listExecutors } from './executors.ts'
 import { listTasks } from './tasks.ts'
 import { listFeatures } from './features.ts'
@@ -8,6 +8,7 @@ import { hookInstalled } from './git/hooks.ts'
 import { branchExists, isRepo } from './git/git.ts'
 import { openCodeFilesPresent } from './opencode.ts'
 import { stalePoolTasks } from './pool.ts'
+import { staleBranches } from './git/clean.ts'
 
 export interface Check {
   name: string
@@ -24,6 +25,8 @@ export function doctorReport(
     ownerStaleDays?: number
     root?: string
     devBranch?: string
+    branches?: { main: string; dev: string }
+    branchRetentionDays?: number
     schedulerEnabled?: boolean
   } = {},
 ): { checks: Check[] } {
@@ -121,6 +124,40 @@ export function doctorReport(
         ? 'на месте'
         : 'без каталога: ' + noWorktree.map((feature) => feature.id).join(', ') + ' — выполните feature start',
   })
+
+  const closedWithDir = listFeatures(db).filter(
+    (feature) =>
+      (feature.status === 'done' || feature.status === 'cancelled') &&
+      feature.worktree &&
+      existsSync(feature.worktree),
+  )
+  checks.push({
+    name: 'каталоги закрытых фич',
+    ok: closedWithDir.length === 0,
+    detail:
+      closedWithDir.length === 0
+        ? 'прибраны'
+        : 'лежат: ' +
+          closedWithDir.map((feature) => feature.id).join(', ') +
+          ' — выполните feature clean ' +
+          closedWithDir[0].id,
+  })
+
+  if (options.root) {
+    const stale = staleBranches(db, {
+      root: options.root,
+      config: { branches: options.branches ?? { main: 'main', dev: 'dev' }, branchRetentionDays: options.branchRetentionDays },
+    })
+    checks.push({
+      name: 'ветки закрытых фич',
+      ok: stale.length === 0,
+      detail:
+        stale.length === 0
+          ? 'прибраны'
+          : 'ждут решения: ' +
+            stale.map((item) => `${item.branch} (${item.featureId}: ${item.why})`).join(', '),
+    })
+  }
 
   const stalePlans = db
     .prepare('select id from plans where stale_at is not null and applied_at is null')
@@ -220,3 +257,4 @@ function fairness(db: DatabaseSync): Check {
 
   return { name: 'приоритеты', ok: true, detail: 'очередь соответствует рангам' }
 }
+

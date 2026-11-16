@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
+﻿import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
-import { getFeature, type Feature } from '../features.ts'
+import { getFeature, listFeatures, type Feature } from '../features.ts'
 import { appendEvent } from '../events.ts'
 import { branchExists, resolveBranches, runGit } from './git.ts'
 import { UserError } from '../../cli/errors.ts'
@@ -93,6 +93,122 @@ export function cleanWorktree(
   return { removed: true, rescued, tag }
 }
 
+export interface SweepResult {
+  deleted: string[]
+  kept: string[]
+}
+
+interface SweepConfig {
+  branches: { main: string; dev: string }
+  branchRetentionDays?: number
+}
+
+/** Убирает то, что уже не нужно: слитые старые ветки и отменённые фичи после выдержки. */
+export function sweepBranches(
+  db: DatabaseSync,
+  input: { root: string; config: SweepConfig; actor: string; now?: Date },
+): SweepResult {
+  const result: SweepResult = { deleted: [], kept: [] }
+  const { dev } = resolveBranches(input.root, input.config)
+  const retentionMs = (input.config.branchRetentionDays ?? 30) * 86_400_000
+  const now = (input.now ?? new Date()).getTime()
+
+  for (const feature of listFeatures(db)) {
+    if (feature.status === 'done') {
+      if (!feature.branch) continue
+      const branch = feature.branch
+      if (!branchExists(input.root, branch)) continue
+
+      const merged = isMergedInto(input.root, branch, dev)
+      const last = Date.parse(runGit(input.root, ['log', '-1', '--format=%cI', branch]))
+
+      if (!merged || Number.isNaN(last) || now - last < retentionMs) {
+        result.kept.push(branch)
+        continue
+      }
+
+      runGit(input.root, ['branch', '-D', branch])
+      db.prepare('update features set branch = null where id = ?').run(feature.id)
+      appendEvent(db, {
+        type: 'feature.branch_deleted',
+        actor: input.actor,
+        subject: feature.id,
+        after: { branch, reason: 'merged-retention' },
+      })
+      result.deleted.push(branch)
+      continue
+    }
+
+    if (feature.status !== 'cancelled') continue
+
+    const abandoned = db
+      .prepare("select at from events where type = 'feature.abandoned' and subject = ? order by id desc limit 1")
+      .get(feature.id) as { at: string } | undefined
+    const since = Date.parse(abandoned?.at ?? feature.createdAt)
+    if (Number.isNaN(since) || now - since < retentionMs) {
+      if (feature.branch) result.kept.push(feature.branch)
+      continue
+    }
+
+    const cleaned = cleanWorktree(db, { featureId: feature.id, root: input.root, actor: input.actor })
+    if (cleaned.reason) {
+      if (feature.branch) result.kept.push(feature.branch)
+      continue
+    }
+
+    const branch = feature.branch
+    if (!branch || !branchExists(input.root, branch)) continue
+
+    const tag = archiveTag(feature)
+    runGit(input.root, ['tag', '-f', tag, branch])
+    runGit(input.root, ['branch', '-D', branch])
+    db.prepare('update features set branch = null where id = ?').run(feature.id)
+    appendEvent(db, {
+      type: 'feature.branch_deleted',
+      actor: input.actor,
+      subject: feature.id,
+      after: { branch, tag, reason: 'cancelled-retention' },
+    })
+    result.deleted.push(branch)
+  }
+
+  return result
+}
+
+export interface StaleBranch {
+  featureId: string
+  branch: string
+  why: string
+}
+
+/** Ветки закрытых фич, которые выдержка уже прошла, но убрать их нельзя без решения владельца. */
+export function staleBranches(
+  db: DatabaseSync,
+  input: { root: string; config: SweepConfig; now?: Date },
+): StaleBranch[] {
+  const { dev } = resolveBranches(input.root, input.config)
+  const retentionMs = (input.config.branchRetentionDays ?? 30) * 86_400_000
+  const now = (input.now ?? new Date()).getTime()
+  const stale: StaleBranch[] = []
+
+  for (const feature of listFeatures(db)) {
+    if (feature.status !== 'done' || !feature.branch) continue
+    const branch = feature.branch
+    if (!branchExists(input.root, branch)) continue
+
+    const last = Date.parse(runGit(input.root, ['log', '-1', '--format=%cI', branch]))
+    if (Number.isNaN(last) || now - last < retentionMs) continue
+    if (isMergedInto(input.root, branch, dev)) continue
+
+    const tag = runGit(input.root, ['tag', '--list', archiveTag(feature)])
+    if (tag) continue
+
+    stale.push({ featureId: feature.id, branch, why: 'не влита в dev и нет архивного тега' })
+  }
+
+  return stale
+}
+
 function isMergedInto(root: string, branch: string, dev: string): boolean {
   const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], { cwd: root, stdio: 'ignore' })
   return result.status === 0
@@ -145,3 +261,4 @@ export function cleanFeature(
 
   return { ...cleaned, branchDeleted: true }
 }
+
