@@ -45,6 +45,7 @@ function candidates(db: DatabaseSync): Candidate[] {
        join features f on f.id = st.feature_id
        where t.status = 'ready'
          and st.status = 'active'
+         and f.worktree is not null
          and t.holder is null
          and t.id not in (select task_id from hand)`,
     )

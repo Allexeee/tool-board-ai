@@ -1,8 +1,8 @@
-﻿import test from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
-import { addFeature } from '../../src/core/features.ts'
+import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
@@ -13,6 +13,7 @@ function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  setFeatureBranch(db, feature.id, 'feat/test', 'C:/tmp/test-worktree')
   const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
   activateNextStage(db, feature.id)
 

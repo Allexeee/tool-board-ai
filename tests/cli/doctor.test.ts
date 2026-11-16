@@ -2,12 +2,24 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
 import { doctorReport } from '../../src/core/doctor.ts'
+import { addRequest } from '../../src/core/requests.ts'
+import { addFeature } from '../../src/core/features.ts'
 import { ok, setJsonMode } from '../../src/cli/output.ts'
 
 test('doctor сообщает о незавершённой настройке', () => {
   const db = openDb(':memory:')
   const report = doctorReport(db)
   assert.ok(report.checks.some((check) => check.name === 'исполнители' && !check.ok))
+})
+
+test('doctor предупреждает об активной фиче без каталога', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'A', body: '', author: 'owner' })
+  addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  db.prepare("update features set status = 'active'").run()
+
+  const report = doctorReport(db)
+  assert.ok(report.checks.some((check) => check.name === 'каталоги фич' && !check.ok))
 })
 
 test('--json печатает ровно один JSON-объект', () => {
