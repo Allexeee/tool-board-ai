@@ -199,5 +199,33 @@ test('закрытый запрос не правится и не удаляет
   assert.throws(() => removeRequest(db, { id: request.id, actor: 'owner' }), /закрыт/)
 })
 
+test('старое закрытие без вида выводит вид из фич', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
+  db.prepare("update features set status = 'done'").run()
+  db.prepare("update requests set status = 'closed' where id = ?").run(request.id)
+
+  assert.equal(closeKind(db, request.id), 'done')
+})
+
+test('старое закрытие с отменённой фичей считается отменой', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
+  db.prepare("update features set status = 'cancelled'").run()
+  db.prepare("update requests set status = 'closed' where id = ?").run(request.id)
+
+  assert.equal(closeKind(db, request.id), 'cancelled')
+})
+
+test('закрытие без фич и без вида остаётся без вида', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  db.prepare("update requests set status = 'closed' where id = ?").run(request.id)
+
+  assert.equal(closeKind(db, request.id), null)
+})
+
 
 

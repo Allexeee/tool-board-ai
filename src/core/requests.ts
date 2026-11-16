@@ -126,10 +126,18 @@ export function closeKind(db: DatabaseSync, id: string): CloseKind | 'merged' | 
   const row = db
     .prepare("select after from events where type = 'request.closed' and subject = ? order by id desc limit 1")
     .get(id) as { after: string | null } | undefined
-  if (!row?.after) return null
 
-  const kind = (JSON.parse(row.after) as { kind?: CloseKind }).kind
-  return kind === 'done' || kind === 'cancelled' ? kind : null
+  const kind = row?.after ? (JSON.parse(row.after) as { kind?: CloseKind }).kind : null
+  if (kind === 'done' || kind === 'cancelled') return kind
+
+  // закрытия до появления вида писались без него: выводим из состояния фич
+  const features = db.prepare('select status from features where request_id = ?').all(id) as Array<{
+    status: string
+  }>
+  if (features.length === 0) return null
+  if (features.every((feature) => feature.status === 'done')) return 'done'
+  if (features.some((feature) => feature.status === 'cancelled')) return 'cancelled'
+  return null
 }
 
 export function editRequest(
