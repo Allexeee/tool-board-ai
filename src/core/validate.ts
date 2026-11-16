@@ -4,6 +4,19 @@ export type TaskSeverity = 'S1' | 'S2' | 'S3' | 'S4'
 export type TaskClass = 'expedite' | 'fixed_date' | 'standard' | 'intangible' | 'quick'
 export type TaskScope = string[] | 'exclusive'
 
+/** Привычка писать `--scope "src/a,src/b"` не должна давать молча нерабочую область. */
+export function normalizeScope(scope: TaskScope): TaskScope {
+  if (scope === 'exclusive') return 'exclusive'
+
+  const paths = scope
+    .flatMap((value) => value.split(','))
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  if (paths.length === 1 && paths[0] === 'exclusive') return 'exclusive'
+  return paths
+}
+
 export interface NewTask {
   stageId: string
   title: string

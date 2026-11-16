@@ -139,3 +139,30 @@ test('оркестратор правит любую задачу', () => {
 
   assert.equal(edited.title, 'Уточнённый заголовок')
 })
+
+test('scope через запятую разбирается на пути', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  const task = createTask(db, { ...base, stageId, scope: ['src/a,src/b', ' tests/** '] })
+
+  assert.deepEqual(task.scope, ['src/a', 'src/b', 'tests/**'])
+})
+
+test('scope с запятой при правке тоже разбирается', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  const edited = editTask(db, { id, actor: 'orchestrator', patch: { scope: ['src/a,src/b'] } })
+
+  assert.deepEqual(edited.scope, ['src/a', 'src/b'])
+})
+
+test('одиночный exclusive остаётся эксклюзивной областью', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  const task = createTask(db, { ...base, stageId, scope: [' exclusive '] })
+
+  assert.equal(task.scope, 'exclusive')
+})
