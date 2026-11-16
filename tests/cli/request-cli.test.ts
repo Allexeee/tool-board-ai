@@ -33,3 +33,17 @@ test('история без правок пуста и не падает', () =>
   assert.equal(shown.code, 0)
   assert.match(shown.out, /Просто запрос/)
 })
+
+test('show печатает фичи, решения и историю', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-show-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['decide', 'add', 'Какой провайдер', '--choice', 'ЮKassa', '--reason', 'договор'])
+
+  const shown = run(dir, ['request', 'show', 'R1'])
+  assert.equal(shown.code, 0)
+  assert.match(shown.out, /F1/)
+  assert.match(shown.out, /Решения/)
+  assert.match(shown.out, /История/)
+})
