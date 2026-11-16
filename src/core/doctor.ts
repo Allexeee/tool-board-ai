@@ -124,6 +124,18 @@ export function doctorReport(
         : 'без каталога: ' + noWorktree.map((feature) => feature.id).join(', ') + ' — выполните feature start',
   })
 
+  const stalePlans = db
+    .prepare('select id from plans where stale_at is not null and applied_at is null')
+    .all() as Array<{ id: string }>
+  checks.push({
+    name: 'планы',
+    ok: stalePlans.length === 0,
+    detail:
+      stalePlans.length === 0
+        ? 'актуальны'
+        : 'устарели после правки запроса: ' + stalePlans.map((plan) => plan.id).join(', '),
+  })
+
   const stale = stalePoolTasks(db, 7)
   checks.push({
     name: 'пул',

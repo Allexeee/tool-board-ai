@@ -1,6 +1,8 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, getRequest, listRequests } from '../../core/requests.ts'
+import { addRequest, editRequest, getRequest, listRequests } from '../../core/requests.ts'
+import { listEvents } from '../../core/events.ts'
+import { markPlansStale } from '../../core/plans.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -21,10 +23,51 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'edit') {
+    const id = args.positionals[0]
+    const title = stringFlag(args, 'title')
+    const body = stringFlag(args, 'body')
+
+    if (!id || (title === undefined && body === undefined)) {
+      throw new UserError(3, 'использование: request edit R3 --title "..." --body "..."')
+    }
+
+    const request = editRequest(db, { id, title, body, actor })
+    const stale = markPlansStale(db, { requestId: id, actor })
+    ok(
+      request,
+      `${request.id}  ${request.title}${stale > 0 ? '\nутверждённый план помечен устаревшим' : ''}`,
+    )
+    return 0
+  }
+
   if (args.sub === 'show') {
     const request = getRequest(db, args.positionals[0] ?? '')
     if (!request) throw new UserError(3, 'запрос не найден')
-    ok(request, `${request.id}  ${request.title}\nстатус: ${request.status}\n\n${request.body}`)
+
+    const lines = [`${request.id}  ${request.title}`, `статус: ${request.status}`, '', request.body]
+
+    if (args.flags.history === true) {
+      const history = listEvents(db, { subject: request.id }).filter(
+        (event) => event.type === 'request.edited',
+      )
+
+      lines.push('', '## История')
+
+      if (history.length === 0) {
+        lines.push('изменений нет')
+      } else {
+        for (const event of history) {
+          const before = event.before ? (JSON.parse(event.before) as { title: string; body: string }) : null
+          const after = event.after ? (JSON.parse(event.after) as { title: string; body: string }) : null
+          lines.push(`${event.at}  ${event.actor}`)
+          if (before) lines.push(`  было: ${before.title} · ${before.body}`)
+          if (after) lines.push(`  стало: ${after.title} · ${after.body}`)
+        }
+      }
+    }
+
+    ok(request, lines.join('\n'))
     return 0
   }
 

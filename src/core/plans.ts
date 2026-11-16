@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
@@ -31,6 +31,7 @@ export interface Plan {
   approvedAt: string | null
   approvedBy: string | null
   appliedAt: string | null
+  staleAt: string | null
   featureId: string | null
   createdAt: string
 }
@@ -45,6 +46,7 @@ interface Row {
   approved_at: string | null
   approved_by: string | null
   applied_at: string | null
+  stale_at: string | null
   feature_id: string | null
   created_at: string
 }
@@ -59,6 +61,7 @@ const toPlan = (row: Row): Plan => ({
   approvedAt: row.approved_at,
   approvedBy: row.approved_by,
   appliedAt: row.applied_at,
+  staleAt: row.stale_at,
   featureId: row.feature_id,
   createdAt: row.created_at,
 })
@@ -82,6 +85,7 @@ export function addPlan(
       approvedAt: null,
       approvedBy: null,
       appliedAt: null,
+      staleAt: null,
       featureId: null,
       createdAt: new Date().toISOString(),
     }
@@ -143,5 +147,26 @@ export function approvePlan(
     appendEvent(db, { type: 'plan.approved', actor: input.actor, subject: plan.id })
 
     return { ...plan, approvedAt: at, approvedBy: input.actor }
+  })
+}
+
+export function markPlansStale(
+  db: DatabaseSync,
+  input: { requestId: string; actor: string },
+): number {
+  return tx(db, () => {
+    const rows = db
+      .prepare(
+        'select id from plans where request_id = ? and approved_at is not null and applied_at is null and stale_at is null',
+      )
+      .all(input.requestId) as Array<{ id: string }>
+
+    const at = new Date().toISOString()
+    for (const row of rows) {
+      db.prepare('update plans set stale_at = ? where id = ?').run(at, row.id)
+      appendEvent(db, { type: 'plan.stale', actor: input.actor, subject: row.id })
+    }
+
+    return rows.length
   })
 }

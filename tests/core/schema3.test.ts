@@ -1,11 +1,11 @@
-﻿import test from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, migrate } from '../../src/core/db.ts'
 import { addFeature, getFeature, setFeatureCheck } from '../../src/core/features.ts'
 
 test('миграция v3 добавляет ветку, worktree, merged_at и релизы', () => {
   const db = openDb(':memory:')
-  assert.equal(migrate(db), 6)
+  assert.equal(migrate(db), 7)
 
   const featureColumns = (db.prepare('pragma table_info(features)').all() as Array<{ name: string }>).map((c) => c.name)
   assert.ok(featureColumns.includes('branch'))
