@@ -28,6 +28,7 @@ export function compareTasks(a: Task, b: Task): number {
 interface Candidate {
   id: string
   skill: string
+  klass: string
   featureId: string
   featureRank: number
   stageId: string
@@ -37,8 +38,8 @@ interface Candidate {
 function candidates(db: DatabaseSync): Candidate[] {
   return db
     .prepare(
-      `select t.id as id, t.skill as skill, st.feature_id as featureId, f.rank as featureRank,
-              st.id as stageId, st.seq as stageSeq
+      `select t.id as id, t.skill as skill, t.class as klass, st.feature_id as featureId,
+              f.rank as featureRank, st.id as stageId, st.seq as stageSeq
        from tasks t
        join stages st on st.id = t.stage_id
        join features f on f.id = st.feature_id
@@ -140,6 +141,14 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
 }
 
 export function nextTask(db: DatabaseSync, executorId: string): Task | null {
+  const executor = getExecutor(db, executorId)
+  if (!executor) return null
+
+  const urgent = candidates(db).find(
+    (candidate) => candidate.klass === 'expedite' && executor.skills.includes(candidate.skill),
+  )
+  if (urgent) return getTask(db, urgent.id)
+
   const hand = fillHand(db, executorId)
   return hand[0] ?? null
 }

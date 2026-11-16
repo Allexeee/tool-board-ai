@@ -4,6 +4,7 @@ import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
+import { nextTask } from './hands.ts'
 
 export interface TakeOptions {
   executor: string
@@ -29,11 +30,20 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       )
     }
 
-    const taskId = options.taskId ?? nextFromHand(db, executor.id)
+    const taskId = options.taskId ?? nextTask(db, executor.id)?.id
     if (!taskId) throw new UserError(1, `у ${executor.id} нет задач`)
 
     const task = getTask(db, taskId)
     if (!task) throw new UserError(3, `задача ${taskId} не найдена`)
+
+    if (task.class === 'expedite') {
+      const activeUrgent = db
+        .prepare("select count(*) as c from tasks where holder = ? and status = 'active' and class = 'expedite'")
+        .get(executor.id) as { c: number }
+      if (activeUrgent.c >= 1) {
+        throw new UserError(1, `лимит: у ${executor.id} уже есть активная срочная задача`)
+      }
+    }
 
     const reserved = db.prepare('select executor_id from hand where task_id = ?').get(task.id) as
       | { executor_id: string }
@@ -64,13 +74,6 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
 
     return getTask(db, task.id)!
   })
-}
-
-function nextFromHand(db: DatabaseSync, executorId: string): string | null {
-  const row = db
-    .prepare('select task_id from hand where executor_id = ? order by position limit 1')
-    .get(executorId) as { task_id: string } | undefined
-  return row?.task_id ?? null
 }
 
 export function touchTask(
