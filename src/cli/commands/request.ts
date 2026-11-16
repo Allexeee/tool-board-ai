@@ -2,6 +2,7 @@ import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { addRequest, editRequest, getRequest, listRequests } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
+import { markPlansStale } from '../../core/plans.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -32,7 +33,11 @@ export default async function command(args: ParsedArgs) {
     }
 
     const request = editRequest(db, { id, title, body, actor })
-    ok(request, `${request.id}  ${request.title}`)
+    const stale = markPlansStale(db, { requestId: id, actor })
+    ok(
+      request,
+      `${request.id}  ${request.title}${stale > 0 ? '\nутверждённый план помечен устаревшим' : ''}`,
+    )
     return 0
   }
 

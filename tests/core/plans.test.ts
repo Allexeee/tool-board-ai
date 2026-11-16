@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
-import { addPlan, approvePlan, getPlan, type PlanStage } from '../../src/core/plans.ts'
+import { addPlan, approvePlan, getPlan, markPlansStale, type PlanStage } from '../../src/core/plans.ts'
 
 const stagesFixture: PlanStage[] = [
   {
