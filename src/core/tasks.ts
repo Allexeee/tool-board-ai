@@ -87,18 +87,22 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
   }
 
   return tx(db, () => {
-  const stageId = input.stageId
-  const stage = db.prepare('select id from stages where id = ?').get(stageId)
-  if (!stage) throw new UserError(3, `этап ${stageId} не найден`)
+  const stageId = input.stageId ?? null
+  if (stageId && !db.prepare('select id from stages where id = ?').get(stageId)) {
+    throw new UserError(3, `этап ${stageId} не найден`)
+  }
 
-  const suffix =
-    (db.prepare('select id from tasks where stage_id = ?').all(stageId) as Array<{ id: string }>).reduce(
-      (max, row) => Math.max(max, Number(row.id.split('-').at(-1) ?? 0)),
-      0,
-    ) + 1
+  const suffix = stageId
+    ? (db.prepare('select id from tasks where stage_id = ?').all(stageId) as Array<{ id: string }>).reduce(
+        (max, row) => Math.max(max, Number(row.id.split('-').at(-1) ?? 0)),
+        0,
+      ) + 1
+    : 0
+
+  if (!stageId && !input.id) throw new UserError(3, 'задача вне этапа требует явный id')
 
   const task: Task = {
-    id: childId(stageId, 'task', suffix),
+    id: input.id ?? childId(stageId!, 'task', suffix),
     stageId,
     title: input.title,
     kind: input.kind ?? 'task',

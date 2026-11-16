@@ -19,7 +19,12 @@ const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISO
 
 export function doctorReport(
   db: DatabaseSync,
-  options: { ownerStaleDays?: number; root?: string; devBranch?: string } = {},
+  options: {
+    ownerStaleDays?: number
+    root?: string
+    devBranch?: string
+    schedulerEnabled?: boolean
+  } = {},
 ): { checks: Check[] } {
   const checks: Check[] = []
   const ownerStaleDays = options.ownerStaleDays ?? 3
@@ -95,6 +100,18 @@ export function doctorReport(
   })
 
   if (options.root) checks.push(...gitChecks(db, options.root, options.devBranch ?? 'dev'))
+
+  const routines = (db.prepare('select count(*) as c from routines').get() as { c: number }).c
+  if (routines > 0) {
+    checks.push({
+      name: 'тикер',
+      ok: options.schedulerEnabled === true,
+      detail:
+        options.schedulerEnabled === true
+          ? 'включён'
+          : 'выключен: рутины по расписанию не запустятся (toolbox-al scheduler enable)',
+    })
+  }
 
   return { checks }
 }

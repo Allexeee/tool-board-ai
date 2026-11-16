@@ -5,7 +5,7 @@ import { addFeature, getFeature, setFeatureCheck } from '../../src/core/features
 
 test('миграция v3 добавляет ветку, worktree, merged_at и релизы', () => {
   const db = openDb(':memory:')
-  assert.equal(migrate(db), 4)
+  assert.equal(migrate(db), 5)
 
   const featureColumns = (db.prepare('pragma table_info(features)').all() as Array<{ name: string }>).map((c) => c.name)
   assert.ok(featureColumns.includes('branch'))
