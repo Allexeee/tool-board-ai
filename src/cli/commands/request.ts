@@ -1,6 +1,7 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { addRequest, editRequest, getRequest, listRequests } from '../../core/requests.ts'
+import { listEvents } from '../../core/events.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -38,7 +39,30 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'show') {
     const request = getRequest(db, args.positionals[0] ?? '')
     if (!request) throw new UserError(3, 'запрос не найден')
-    ok(request, `${request.id}  ${request.title}\nстатус: ${request.status}\n\n${request.body}`)
+
+    const lines = [`${request.id}  ${request.title}`, `статус: ${request.status}`, '', request.body]
+
+    if (args.flags.history === true) {
+      const history = listEvents(db, { subject: request.id }).filter(
+        (event) => event.type === 'request.edited',
+      )
+
+      lines.push('', '## История')
+
+      if (history.length === 0) {
+        lines.push('изменений нет')
+      } else {
+        for (const event of history) {
+          const before = event.before ? (JSON.parse(event.before) as { title: string; body: string }) : null
+          const after = event.after ? (JSON.parse(event.after) as { title: string; body: string }) : null
+          lines.push(`${event.at}  ${event.actor}`)
+          if (before) lines.push(`  было: ${before.title} · ${before.body}`)
+          if (after) lines.push(`  стало: ${after.title} · ${after.body}`)
+        }
+      }
+    }
+
+    ok(request, lines.join('\n'))
     return 0
   }
 
