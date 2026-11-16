@@ -16,6 +16,8 @@ const KNOWN_FLAGS = new Set([
   'limit', 'from', 'main', 'dev', 'summary', 'checks', 'left', 'status',
 ])
 
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all'])
+
 export type FlagValue = string | boolean | string[]
 
 export interface ParsedArgs {
@@ -61,7 +63,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         continue
       }
       const next = argv[i + 1]
-      if (next === undefined || next.startsWith('--')) {
+      if (next === undefined || next.startsWith('--') || BOOLEAN_FLAGS.has(name)) {
         setFlag(name, true)
       } else {
         setFlag(name, next)

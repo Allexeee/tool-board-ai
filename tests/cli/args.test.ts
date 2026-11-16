@@ -27,3 +27,9 @@ test('флаги новых команд известны парсеру', () =>
   assert.equal(decide.flags.choice, 'ЮKassa')
   assert.equal(decide.flags.subject, 'F1')
 })
+
+test('булев флаг не съедает команду', () => {
+  const parsed = parseArgs(['--json', 'now'])
+  assert.equal(parsed.command, 'now')
+  assert.equal(parsed.flags.json, true)
+})
