@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
@@ -17,6 +17,7 @@ export interface PlanStage {
   name: string
   goal: string
   appetite: string
+  acceptance?: 'auto' | 'owner' | 'owner_before_next'
   steps: PlanStep[]
 }
 

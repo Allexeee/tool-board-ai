@@ -27,6 +27,9 @@ export function rejectStage(
   return tx(db, () => {
     const stage = getStage(db, input.stageId)
     if (!stage) throw new UserError(3, `этап ${input.stageId} не найден`)
+    if (!['active', 'in_review', 'accepted'].includes(stage.status)) {
+      throw new UserError(1, `нельзя вернуть этап в состоянии ${stage.status}`)
+    }
     if (!input.reason.trim()) throw new UserError(3, 'нужна причина возврата: --reason')
 
     db.prepare("update stages set status = 'active' where id = ?").run(stage.id)
@@ -40,4 +43,13 @@ export function rejectStage(
     appendEvent(db, { type: 'stage.rejected', actor: input.actor, subject: stage.id, note: input.reason })
     return getStage(db, stage.id)!
   })
+}
+
+export function invalidateAcceptance(db: DatabaseSync, stageId: string | null): void {
+  if (!stageId) return
+  const stage = getStage(db, stageId)
+  if (!stage || stage.status !== 'accepted') return
+
+  db.prepare("update stages set status = 'active' where id = ?").run(stageId)
+  appendEvent(db, { type: 'stage.acceptance_invalidated', actor: 'system', subject: stageId })
 }

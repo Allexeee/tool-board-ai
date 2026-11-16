@@ -51,6 +51,9 @@ export function listTemplates(root: string): string[] {
 }
 
 export function showTemplate(root: string, name: string): string {
+  if (!NAME.test(name)) {
+    throw new UserError(3, `имя шаблона — только строчные латинские буквы, цифры и дефис: ${name}`)
+  }
   const path = join(templatesDir(root), `${name}.md`)
   if (!existsSync(path)) throw new UserError(3, `шаблон ${name} не найден`)
   return readFileSync(path, 'utf8')

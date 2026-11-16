@@ -1,8 +1,9 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, updateTask } from './tasks.ts'
 import { UserError } from '../cli/errors.ts'
+import { invalidateAcceptance } from './accept.ts'
 
 export type Verdict = 'approved' | 'rejected'
 
@@ -50,6 +51,7 @@ export function submitReview(
       updateTask(db, task.id, { status: 'done', holder: null, leaseUntil: null })
     } else {
       updateTask(db, task.id, { status: 'ready', holder: null, leaseUntil: null, reason: 'review_rejected' })
+      invalidateAcceptance(db, task.stageId)
     }
 
     appendEvent(db, {

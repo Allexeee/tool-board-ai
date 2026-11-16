@@ -59,6 +59,7 @@ export function applyPlan(
         name: stagePlan.name,
         goal: stagePlan.goal,
         appetite: stagePlan.appetite,
+        acceptance: stagePlan.acceptance,
       })
       stages.push(stage)
 
@@ -79,7 +80,10 @@ export function applyPlan(
       for (const [index, step] of stagePlan.steps.entries()) {
         for (const dep of step.deps ?? []) {
           const target = created[dep]
-          if (target) addDep(db, created[index].id, target.id)
+          if (!target) {
+            throw new UserError(3, `шаг ${index + 1} этапа «${stagePlan.name}»: зависимость ${dep} не найдена`)
+          }
+          addDep(db, created[index].id, target.id)
         }
       }
     }

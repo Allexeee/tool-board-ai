@@ -3,6 +3,7 @@ import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, updateTask, type Task } from './tasks.ts'
 import { UserError } from '../cli/errors.ts'
+import { invalidateAcceptance } from './accept.ts'
 
 export interface Report {
   summary: string
@@ -51,6 +52,7 @@ export function reopenTask(db: DatabaseSync, input: { taskId: string; actor: str
     }
 
     const updated = updateTask(db, task.id, { status: 'ready', holder: null, leaseUntil: null })
+    invalidateAcceptance(db, task.stageId)
     appendEvent(db, {
       type: 'task.reopened',
       actor: input.actor,
