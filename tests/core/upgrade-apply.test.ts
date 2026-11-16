@@ -1,12 +1,12 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { initProject } from '../../src/core/project.ts'
 import { openDb } from '../../src/core/db.ts'
-import { applyUpgrade, planUpgrade, toolRoot, toolVersion } from '../../src/core/upgrade.ts'
+import { applyUpgrade, planUpgrade, pruneBackups, toolRoot, toolVersion } from '../../src/core/upgrade.ts'
 
 const toolRootPath = toolRoot
 
@@ -103,4 +103,39 @@ test('обновление не откатывает версию назад', (
   assert.equal(plan.outdated, false)
   void resolve
 })
+
+test('копии базы не копятся: остаются пять последних', () => {
+  const { dbPath } = project()
+  const dir = dirname(dbPath)
+
+  for (let i = 1; i <= 6; i++) {
+    writeFileSync(`${dbPath}.backup-2026-01-0${i}T00-00-00-000Z`, `старая ${i}`)
+  }
+
+  const removed = pruneBackups(dbPath)
+
+  assert.equal(removed.length, 1)
+  assert.equal(existsSync(`${dbPath}.backup-2026-01-01T00-00-00-000Z`), false)
+  const left = readdirSync(dir).filter((file) => file.startsWith('tracker.db.backup-'))
+  assert.equal(left.length, 5)
+})
+
+test('после обновления свежая копия на месте и журнал на неё ссылается', () => {
+  const { dir, db, dbPath, configPath } = project()
+
+  const result = applyUpgrade(db, {
+    dbPath,
+    configPath,
+    projectRoot: dir,
+    toolRoot: toolRootPath,
+    from: sourceWith('99.0.0'),
+    yes: true,
+  })
+
+  assert.ok(result.backup && existsSync(result.backup))
+  const journals = readdirSync(join(dir, '.toolbox-al/upgrades'))
+  assert.equal(journals.length, 1)
+  assert.match(readFileSync(join(dir, '.toolbox-al/upgrades', journals[0]), 'utf8'), /backup-/)
+})
+
 
