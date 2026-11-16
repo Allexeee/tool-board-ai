@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, updateTask, type Task } from './tasks.ts'
@@ -49,6 +49,16 @@ export function reopenTask(db: DatabaseSync, input: { taskId: string; actor: str
     if (!task) throw new UserError(3, `задача ${input.taskId} не найдена`)
     if (task.status !== 'done' && task.status !== 'in_review') {
       throw new UserError(1, `вернуть можно только закрытую задачу, а ${task.id} — ${task.status}`)
+    }
+
+    if (task.stageId) {
+      const stage = db.prepare('select status from stages where id = ?').get(task.stageId) as
+        | { status: string }
+        | undefined
+      if (stage && ['merged', 'abandoned'].includes(stage.status)) {
+        const word = stage.status === 'merged' ? 'слит' : stage.status
+        throw new UserError(1, `нельзя переоткрыть задачу ${task.id}: этап ${task.stageId} уже ${word}`)
+      }
     }
 
     const updated = updateTask(db, task.id, { status: 'ready', holder: null, leaseUntil: null })

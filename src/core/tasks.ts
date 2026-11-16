@@ -8,6 +8,7 @@ import { validateTaskInput, type NewTask, type TaskClass, type TaskKind, type Ta
 export type { NewTask, TaskClass, TaskKind, TaskSeverity, TaskSize, TaskScope } from './validate.ts'
 
 export type TaskStatus =
+  | 'planned'
   | 'open'
   | 'ready'
   | 'active'

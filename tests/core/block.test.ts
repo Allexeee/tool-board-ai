@@ -1,16 +1,16 @@
-﻿import test from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
-import { createTask, getTask, attempt } from '../../src/core/tasks.ts'
+import { createTask, getTask, attempt, updateTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { addExecutor } from '../../src/core/executors.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { fillHand, getHand } from '../../src/core/hands.ts'
 import { blockTask } from '../../src/core/block.ts'
-import { doneTask } from '../../src/core/done.ts'
+import { doneTask, reopenTask } from '../../src/core/done.ts'
 import { getQuestions } from '../../src/core/questions.ts'
 
 function seed(db: DatabaseSync): string {
@@ -101,4 +101,15 @@ test('done закрывает задачу и пишет отчёт в журн�
   })
 
   assert.equal(task.status, 'done')
+})
+
+test('нельзя переоткрыть задачу слитого этапа', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const task = getTask(db, `${stageId}-1`)!
+  updateTask(db, task.id, { status: 'done' })
+  db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
+
+  assert.throws(() => reopenTask(db, { taskId: task.id, actor: 'owner', reason: 'вернуть' }), /слит/)
+  assert.equal(getTask(db, task.id)!.status, 'done')
 })

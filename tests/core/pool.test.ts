@@ -1,12 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { createTask } from '../../src/core/tasks.ts'
+import { createTask, getTask } from '../../src/core/tasks.ts'
 import { listFeatures } from '../../src/core/features.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
-import { isReady } from '../../src/core/deps.ts'
+import { isReady, refreshReady } from '../../src/core/deps.ts'
 
 const base = {
   title: 'Поправить опечатку',
@@ -45,4 +45,18 @@ test('задача пула не участвует в готовности фи
   assert.equal(tasks.length, 1)
   assert.equal(listFeatures(db).length, 1)
   assert.equal(isReady(db, 'T1'), true)
+})
+
+test('задача пула готова, даже если ни один этап не активен', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'A', body: '', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+
+  const task = createTask(db, { ...base })
+  refreshReady(db)
+
+  assert.equal(task.stageId, null)
+  assert.equal(getTask(db, task.id)!.status, 'ready')
+  assert.equal(isReady(db, task.id), true)
 })

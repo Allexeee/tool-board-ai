@@ -87,6 +87,8 @@ export function listDeps(db: DatabaseSync, id: string): string[] {
 }
 
 export function isReady(db: DatabaseSync, taskId: string): boolean {
+  if (!stageAllowsWork(db, taskId)) return false
+
   const blockers = depsOf(db, taskId)
   if (blockers.some((blocker) => !isSatisfied(db, blocker))) return false
 
@@ -102,16 +104,29 @@ export function isReady(db: DatabaseSync, taskId: string): boolean {
   return true
 }
 
+/** Работать можно только в активном этапе; задача пула этапа не имеет и активности не ждёт. */
+function stageAllowsWork(db: DatabaseSync, taskId: string): boolean {
+  const stage = db
+    .prepare('select status from stages where id = (select stage_id from tasks where id = ?)')
+    .get(taskId) as { status: string } | undefined
+
+  if (!stage) return true
+
+  return stage.status === 'active'
+}
+
 export function refreshReady(db: DatabaseSync): number {
   return tx(db, () => {
     const rows = db
-      .prepare("select id from tasks where status in ('open', 'ready')")
+      .prepare("select id from tasks where status in ('planned', 'open', 'ready')")
       .all() as Array<{ id: string }>
 
     let changed = 0
     for (const { id } of rows) {
-      const ready = isReady(db, id)
-      const wanted = ready ? 'ready' : 'open'
+      let wanted: 'planned' | 'ready' | 'open'
+      if (!stageAllowsWork(db, id)) wanted = 'planned'
+      else wanted = isReady(db, id) ? 'ready' : 'open'
+
       const result = db.prepare('update tasks set status = ? where id = ? and status != ?').run(wanted, id, wanted)
       if (Number(result.changes) > 0) changed++
     }
