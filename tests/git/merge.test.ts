@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -7,7 +7,7 @@ import { initProject } from '../../src/core/project.ts'
 import { openDb } from '../../src/core/db.ts'
 import { readConfig } from '../../src/core/config.ts'
 import { addFeature, setFeatureCheck, getFeature } from '../../src/core/features.ts'
-import { addRequest, getRequest } from '../../src/core/requests.ts'
+import { addRequest, closeKind, getRequest } from '../../src/core/requests.ts'
 import { addStage, activateNextStage, getStage } from '../../src/core/stages.ts'
 import { createTask, getTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
@@ -94,6 +94,7 @@ test('после слияния последнего этапа запрос з�
 
   const request = getRequest(db, feature.requestId!)
   assert.equal(request?.status, 'closed')
+  assert.equal(closeKind(db, feature.requestId!), 'done')
 })
 
 test('запрос не закрывается, пока у него есть другая фича', () => {
@@ -104,3 +105,4 @@ test('запрос не закрывается, пока у него есть д
 
   assert.notEqual(getRequest(db, feature.requestId!)!.status, 'closed')
 })
+

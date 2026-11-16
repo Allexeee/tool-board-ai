@@ -127,6 +127,7 @@ export function mergeStage(
           type: 'request.closed',
           actor: 'system',
           subject: feature.requestId,
+          after: { kind: 'done' },
           note: 'все фичи запроса закрыты',
         })
       }
