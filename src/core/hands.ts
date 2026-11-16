@@ -93,8 +93,24 @@ export function fillHand(db: DatabaseSync, executorId: string, limit?: number): 
       return compareTasks(a.task, b.task)
     })
 
+    const ordered = pool.map((item) => item.task)
+
+    const poolTasks = (
+      db
+        .prepare(
+          "select id from tasks where stage_id is null and status = 'ready' and holder is null " +
+            'and id not in (select task_id from hand)',
+        )
+        .all() as Array<{ id: string }>
+    )
+      .map((row) => getTask(db, row.id)!)
+      .filter((task) => task && executor.skills.includes(task.skill))
+      .sort(compareTasks)
+
+    ordered.push(...poolTasks)
+
     const base = getHand(db, executorId).length
-    pool.slice(0, free).forEach(({ task }, index) => {
+    ordered.slice(0, free).forEach((task, index) => {
       db.prepare(
         'insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)',
       ).run(executorId, base + index + 1, task.id, new Date().toISOString())
