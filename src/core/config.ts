@@ -1,4 +1,5 @@
 ﻿import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { toolVersion } from './version.ts'
 
 export interface Config {
   toolVersion: string
@@ -15,7 +16,7 @@ export interface Config {
 }
 
 export const DEFAULT_CONFIG: Config = {
-  toolVersion: '1.0.2',
+  toolVersion: toolVersion(),
   schemaVersion: 7,
   leaseMinutes: 30,
   maxAttempts: 3,
