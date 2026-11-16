@@ -2,6 +2,7 @@
 import { openDb } from '../../core/db.ts'
 import { activateNextStage, addStage, listStages } from '../../core/stages.ts'
 import { mergeStage } from '../../core/git/merge.ts'
+import { acceptStage, rejectStage } from '../../core/accept.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -21,6 +22,26 @@ export default async function command(args: ParsedArgs) {
     }
     const stage = addStage(db, { featureId, name, goal, appetite })
     ok(stage, `${stage.id}  ${stage.name}`)
+    return 0
+  }
+
+  if (args.sub === 'accept') {
+    const stageId = args.positionals[0]
+    if (!stageId) throw new UserError(3, 'использование: stage accept F1.S1')
+    const stage = acceptStage(db, { stageId, actor: 'owner' })
+    ok(stage, `${stage.id} принят`)
+    return 0
+  }
+
+  if (args.sub === 'reject') {
+    const stageId = args.positionals[0]
+    if (!stageId) throw new UserError(3, 'использование: stage reject F1.S1 --reason "что не так"')
+    const stage = rejectStage(db, {
+      stageId,
+      actor: 'owner',
+      reason: stringFlag(args, 'reason') ?? '',
+    })
+    ok(stage, `${stage.id} возвращён в работу`)
     return 0
   }
 

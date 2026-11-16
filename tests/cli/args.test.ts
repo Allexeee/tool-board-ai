@@ -19,3 +19,11 @@ test('неизвестный флаг отвергается', () => {
 test('--help без команды не требует команды', () => {
   assert.equal(parseArgs(['--help']).command, 'help')
 })
+
+test('флаги новых команд известны парсеру', () => {
+  const review = parseArgs(['review', 'F1.S1-1', '--verdict', 'approved', '--as', 'w2'])
+  assert.equal(review.flags.verdict, 'approved')
+  const decide = parseArgs(['decide', 'add', 'вопрос', '--choice', 'ЮKassa', '--subject', 'F1'])
+  assert.equal(decide.flags.choice, 'ЮKassa')
+  assert.equal(decide.flags.subject, 'F1')
+})

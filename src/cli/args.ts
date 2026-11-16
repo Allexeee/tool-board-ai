@@ -2,14 +2,14 @@
 
 const COMMANDS_WITH_SUB = new Set([
   'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
-  'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine',
+  'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan',
 ])
 
 const KNOWN_FLAGS = new Set([
   'json', 'help', 'version', 'project', 'as', 'yes', 'dry-run', 'all',
   'title', 'body', 'author', 'text', 'name', 'goal', 'rank', 'to',
   'size', 'size-reason', 'dod', 'scope', 'skill', 'skills', 'class', 'kind',
-  'check', 'deps', 'dep', 'review', 'reason', 'note', 'report', 'severity',
+  'check', 'deps', 'dep', 'review', 'verdict', 'choice', 'subject', 'reason', 'note', 'report', 'severity', 'version',
   'deadline', 'options', 'addressee', 'policy', 'timeout', 'appetite',
   'id', 'task', 'stage', 'feature', 'request', 'executor',
   'limit', 'from', 'main', 'dev', 'summary', 'checks', 'left', 'status',

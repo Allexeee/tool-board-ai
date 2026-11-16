@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -154,6 +154,28 @@ export function migrate(db: DatabaseSync): number {
           'changelog text not null, ' +
           'at text not null)',
       )
+    }
+    if (from < 4) {
+      db.exec('alter table tasks add column review text not null default \'agent\'')
+      db.exec(
+        'create table if not exists ideas (' +
+          'id text primary key, text text not null, source text not null, ' +
+          'review_at text, promoted_to text, created_at text not null)',
+      )
+      db.exec(
+        'create table if not exists decisions (' +
+          'id text primary key, question text not null, choice text not null, ' +
+          'alternatives text, reason text not null, subject_id text, ' +
+          'author text not null, created_at text not null)',
+      )
+      db.exec(
+        'create table if not exists plans (' +
+          'id text primary key, request_id text not null, version integer not null, ' +
+          'title text not null, assumptions text not null, steps text not null, ' +
+          'approved_at text, approved_by text, applied_at text, feature_id text, ' +
+          'created_at text not null)',
+      )
+      db.exec('create unique index if not exists idx_plans_request_version on plans(request_id, version)')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +

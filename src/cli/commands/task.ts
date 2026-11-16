@@ -31,6 +31,7 @@ export default async function command(args: ParsedArgs) {
       scope,
       kind: (stringFlag(args, 'kind') as 'task' | 'defect' | 'incident') ?? 'task',
       severity: stringFlag(args, 'severity') as 'S1' | 'S2' | 'S3' | 'S4' | undefined,
+      review: (stringFlag(args, 'review') as 'none' | 'agent' | 'owner') ?? 'agent',
       checkCmd: stringFlag(args, 'check'),
     })
 

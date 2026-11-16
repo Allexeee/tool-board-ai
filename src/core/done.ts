@@ -1,8 +1,9 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, updateTask, type Task } from './tasks.ts'
 import { UserError } from '../cli/errors.ts'
+import { invalidateAcceptance } from './accept.ts'
 
 export interface Report {
   summary: string
@@ -25,7 +26,8 @@ export function doneTask(db: DatabaseSync, input: { taskId: string; executor: st
       throw new UserError(1, `задача ${task.id} не в работе: ${task.status}`)
     }
 
-    const updated = updateTask(db, task.id, { status: 'done', holder: null, leaseUntil: null })
+    const status = task.review === 'none' ? 'done' : 'in_review'
+    const updated = updateTask(db, task.id, { status, holder: null, leaseUntil: null })
     db.prepare('delete from hand where task_id = ?').run(task.id)
 
     appendEvent(db, {
@@ -50,6 +52,7 @@ export function reopenTask(db: DatabaseSync, input: { taskId: string; actor: str
     }
 
     const updated = updateTask(db, task.id, { status: 'ready', holder: null, leaseUntil: null })
+    invalidateAcceptance(db, task.stageId)
     appendEvent(db, {
       type: 'task.reopened',
       actor: input.actor,
