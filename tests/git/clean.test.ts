@@ -135,6 +135,48 @@ test('старая слитая ветка удаляется при слиян�
   if (branch) assert.equal(branchExists(root, branch), false)
 })
 
+test('свежая отменённая фича ждёт выдержки', () => {
+  const { root, db, config, feature, branch, worktree } = cancelledFixture()
+
+  const result = sweepBranches(db, { root, config, actor: 'system' })
+
+  assert.deepEqual(result.deleted, [])
+  assert.ok(result.kept.includes(branch))
+  assert.equal(existsSync(worktree), true)
+  assert.equal(getFeature(db, feature.id)!.status, 'cancelled')
+})
+
+test('отменённая фича старше выдержки убирается с тегом archive', () => {
+  const { root, db, config, feature, branch, worktree } = cancelledFixture()
+  db.prepare("update events set at = ? where type = 'feature.abandoned'").run(
+    new Date(Date.now() - 40 * 86_400_000).toISOString(),
+  )
+
+  const result = sweepBranches(db, { root, config, actor: 'system' })
+
+  assert.deepEqual(result.deleted, [branch])
+  assert.equal(existsSync(worktree), false)
+  assert.equal(branchExists(root, branch), false)
+  assert.match(runGit(root, ['tag', '--list', 'archive/*']), /archive\//)
+  assert.equal(getFeature(db, feature.id)!.worktree, null)
+})
+
+test('грязный каталог отменённой фичи спасается, а не теряется', () => {
+  const { root, db, config, feature, branch, worktree } = cancelledFixture()
+  writeFileSync(join(worktree, 'src', 'черновик.txt'), 'недоделка')
+  db.prepare("update events set at = ? where type = 'feature.abandoned'").run(
+    new Date(Date.now() - 40 * 86_400_000).toISOString(),
+  )
+
+  sweepBranches(db, { root, config, actor: 'system' })
+
+  assert.equal(existsSync(worktree), false)
+  const tag = runGit(root, ['tag', '--list', 'archive/*']).split('\n')[0]
+  assert.ok(tag)
+  const last = runGit(root, ['log', '-1', '--pretty=%s', tag])
+  assert.match(last, /остатки/)
+})
+
 test('ветка с новым коммитом после слияния не считается влитой', () => {
   const { root, db, config, feature } = mergedFixture()
   const branch = getFeature(db, feature.id)!.branch!

@@ -103,7 +103,7 @@ interface SweepConfig {
   branchRetentionDays?: number
 }
 
-/** Убирает слитые ветки, которым уже нечего терять: они целиком в dev и старые. */
+/** Убирает то, что уже не нужно: слитые старые ветки и отменённые фичи после выдержки. */
 export function sweepBranches(
   db: DatabaseSync,
   input: { root: string; config: SweepConfig; actor: string; now?: Date },
@@ -114,26 +114,60 @@ export function sweepBranches(
   const now = (input.now ?? new Date()).getTime()
 
   for (const feature of listFeatures(db)) {
-    if (!feature.branch || feature.status !== 'done') continue
+    if (feature.status === 'done') {
+      if (!feature.branch) continue
+      const branch = feature.branch
+      if (!branchExists(input.root, branch)) continue
 
-    const branch = feature.branch
-    if (!branchExists(input.root, branch)) continue
+      const merged = isMergedInto(input.root, branch, dev)
+      const last = Date.parse(runGit(input.root, ['log', '-1', '--format=%cI', branch]))
 
-    const merged = isMergedInto(input.root, branch, dev)
-    const last = Date.parse(runGit(input.root, ['log', '-1', '--format=%cI', branch]))
+      if (!merged || Number.isNaN(last) || now - last < retentionMs) {
+        result.kept.push(branch)
+        continue
+      }
 
-    if (!merged || Number.isNaN(last) || now - last < retentionMs) {
-      result.kept.push(branch)
+      runGit(input.root, ['branch', '-D', branch])
+      db.prepare('update features set branch = null where id = ?').run(feature.id)
+      appendEvent(db, {
+        type: 'feature.branch_deleted',
+        actor: input.actor,
+        subject: feature.id,
+        after: { branch, reason: 'merged-retention' },
+      })
+      result.deleted.push(branch)
       continue
     }
 
+    if (feature.status !== 'cancelled') continue
+
+    const abandoned = db
+      .prepare("select at from events where type = 'feature.abandoned' and subject = ? order by id desc limit 1")
+      .get(feature.id) as { at: string } | undefined
+    const since = Date.parse(abandoned?.at ?? feature.createdAt)
+    if (Number.isNaN(since) || now - since < retentionMs) {
+      if (feature.branch) result.kept.push(feature.branch)
+      continue
+    }
+
+    const cleaned = cleanWorktree(db, { featureId: feature.id, root: input.root, actor: input.actor })
+    if (cleaned.reason) {
+      if (feature.branch) result.kept.push(feature.branch)
+      continue
+    }
+
+    const branch = feature.branch
+    if (!branch || !branchExists(input.root, branch)) continue
+
+    const tag = archiveTag(feature)
+    runGit(input.root, ['tag', '-f', tag, branch])
     runGit(input.root, ['branch', '-D', branch])
     db.prepare('update features set branch = null where id = ?').run(feature.id)
     appendEvent(db, {
       type: 'feature.branch_deleted',
       actor: input.actor,
       subject: feature.id,
-      after: { branch, reason: 'merged-retention' },
+      after: { branch, tag, reason: 'cancelled-retention' },
     })
     result.deleted.push(branch)
   }
