@@ -1,6 +1,6 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, getRequest, listRequests } from '../../core/requests.ts'
+import { addRequest, editRequest, getRequest, listRequests } from '../../core/requests.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -17,6 +17,20 @@ export default async function command(args: ParsedArgs) {
     if (!title) throw new UserError(3, 'не указан заголовок запроса')
     const body = stringFlag(args, 'body') ?? args.positionals.slice(1).join(' ')
     const request = addRequest(db, { title, body, author: actor })
+    ok(request, `${request.id}  ${request.title}`)
+    return 0
+  }
+
+  if (args.sub === 'edit') {
+    const id = args.positionals[0]
+    const title = stringFlag(args, 'title')
+    const body = stringFlag(args, 'body')
+
+    if (!id || (title === undefined && body === undefined)) {
+      throw new UserError(3, 'использование: request edit R3 --title "..." --body "..."')
+    }
+
+    const request = editRequest(db, { id, title, body, actor })
     ok(request, `${request.id}  ${request.title}`)
     return 0
   }
