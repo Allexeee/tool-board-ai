@@ -10,9 +10,11 @@ const run = promisify(execFile)
 function resolve(ctx, args) {
   const override = process.env.TOOLBOX_AL_CLI
   const local = join(ctx.location.directory, 'bin', 'toolbox-al.ts')
+  const pinned = join(ctx.location.directory, 'tools', 'toolbox-al', 'bin', 'toolbox-al.ts')
 
   if (override) return { file: process.execPath, args: [override, ...args] }
   if (existsSync(local)) return { file: process.execPath, args: [local, ...args] }
+  if (existsSync(pinned)) return { file: process.execPath, args: [pinned, ...args] }
   return { file: 'toolbox-al', args }
 }
 

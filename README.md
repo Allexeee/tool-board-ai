@@ -17,13 +17,16 @@ $env:Path += ";$env:USERPROFILE\tools\toolbox-al"
 
 `npm install` из git **не работает**: Node отказывается обрабатывать TypeScript внутри `node_modules`. Запуск идёт из обычного каталога.
 
-Если нужна фиксированная версия внутри проекта — git submodule и переменная `TOOLBOX_AL_CLI`:
+Если нужна фиксированная версия внутри проекта — git submodule:
 
 ```bash
-git submodule add https://github.com/Allexeee/toolbox-al.git .toolbox-al/tool
-git -C .toolbox-al/tool checkout v0.1.0
-set TOOLBOX_AL_CLI=.toolbox-al/tool/bin/toolbox-al.ts
+git submodule add https://github.com/Allexeee/toolbox-al.git tools/toolbox-al
+git -C tools/toolbox-al checkout v1.0.1
+git add .gitmodules tools/toolbox-al
+git commit -m "chore: pin toolbox-al 1.0.1"
 ```
+
+Команды в проекте: `node tools/toolbox-al/bin/toolbox-al.ts …`. Плагин находит локальную копию сам — по пути `tools/toolbox-al/bin/toolbox-al.ts`. Переменная `TOOLBOX_AL_CLI` перекрывает всё, если нужен другой путь.
 
 ## Быстрый старт
 
