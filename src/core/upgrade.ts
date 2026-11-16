@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION, migrate } from './schema.ts'
+import { refreshOpenCode } from './opencode.ts'
 import { UserError } from '../cli/errors.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -210,7 +211,11 @@ export function applyUpgrade(
     schemaFrom: plan.schemaFrom,
     schemaTo: plan.schemaTo,
     backup,
-    files: [],
+    files: input.root === toolRoot
+      ? []
+      : refreshOpenCode(input.root, plan.current.latest ?? plan.current.current, { yes: true })
+          .filter((item) => item.status !== 'same')
+          .map((item) => item.path),
     now: input.now,
   })
   void journal
