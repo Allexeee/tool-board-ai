@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { addRequest, editRequest, mergeRequests, getRequest } from '../../src/core/requests.ts'
+import { addRequest, editRequest, mergeRequests, getRequest, splitRequest } from '../../src/core/requests.ts'
+import { addPlan, approvePlan } from '../../src/core/plans.ts'
 
 test('правка запроса меняет текст и пишет before/after', () => {
   const db = openDb(':memory:')
@@ -44,4 +45,25 @@ test('нельзя объединить запрос с самим собой', 
   const db = openDb(':memory:')
   const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
   assert.throws(() => mergeRequests(db, { from: request.id, to: request.id, actor: 'owner' }), /с собой/)
+})
+
+test('split создаёт части и закрывает исходный', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата и профиль', body: '', author: 'owner' })
+
+  const parts = splitRequest(db, { id: request.id, into: ['Оплата', 'Профиль'], actor: 'owner' })
+
+  assert.equal(parts.length, 2)
+  assert.equal(getRequest(db, request.id)!.status, 'closed')
+  assert.equal(parts[0].status, 'inbox')
+})
+
+test('split запроса в работе отвергается', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  addPlan(db, { requestId: request.id, title: 'Оплата', assumptions: [], stages: [] })
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+  db.prepare('update plans set applied_at = ? where request_id = ?').run(new Date().toISOString(), request.id)
+
+  assert.throws(() => splitRequest(db, { id: request.id, into: ['часть'], actor: 'owner' }), /в работе/)
 })

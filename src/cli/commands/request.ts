@@ -1,9 +1,9 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, editRequest, getRequest, listRequests, mergeRequests } from '../../core/requests.ts'
+import { addRequest, editRequest, getRequest, listRequests, mergeRequests, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { markPlansStale } from '../../core/plans.ts'
-import { stringFlag, type ParsedArgs } from '../args.ts'
+import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -48,6 +48,18 @@ export default async function command(args: ParsedArgs) {
 
     const request = mergeRequests(db, { from, to, actor })
     ok(request, `${from} объединён с ${to}`)
+    return 0
+  }
+
+  if (args.sub === 'split') {
+    const id = args.positionals[0]
+    const into = listFlag(args, 'into')
+    if (!id || into.length === 0) {
+      throw new UserError(3, 'использование: request split R3 --into "часть 1" --into "часть 2"')
+    }
+
+    const created = splitRequest(db, { id, into, actor })
+    ok(created, created.map((request) => `${request.id}  ${request.title}`).join('\n'))
     return 0
   }
 
