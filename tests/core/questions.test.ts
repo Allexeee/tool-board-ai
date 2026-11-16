@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { ask, answer, getQuestions, inbox, ownerHand, type Question } from '../../src/core/questions.ts'
@@ -11,7 +11,7 @@ import { advanceTime } from '../../src/core/clock.ts'
 function seed(db: DatabaseSync): string {
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
-  return addStage(db, { featureId: feature.id, name: 'S1', goal: 'g' }).id
+  return addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' }).id
 }
 
 test('вопрос владельцу попадает в inbox и закрывается ответом', () => {

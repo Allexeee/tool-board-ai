@@ -14,10 +14,11 @@ export default async function command(args: ParsedArgs) {
     const featureId = args.positionals[0] ?? stringFlag(args, 'feature')
     const name = args.positionals[1] ?? stringFlag(args, 'name')
     const goal = stringFlag(args, 'goal')
-    if (!featureId || !name || !goal) {
-      throw new UserError(3, 'использование: stage add F1 "S1" --goal "что можно показать"')
+    const appetite = stringFlag(args, 'appetite')
+    if (!featureId || !name || !goal || !appetite) {
+      throw new UserError(3, 'использование: stage add F1 "S1" --goal "что можно показать" --appetite "3 дня"')
     }
-    const stage = addStage(db, { featureId, name, goal })
+    const stage = addStage(db, { featureId, name, goal, appetite })
     ok(stage, `${stage.id}  ${stage.name}`)
     return 0
   }

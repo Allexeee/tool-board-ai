@@ -1,6 +1,7 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { childId } from './ids.ts'
 import { tx } from './db.ts'
+import { appendEvent } from './events.ts'
 
 export type StageStatus = 'planned' | 'active' | 'in_review' | 'accepted' | 'merged' | 'abandoned'
 export type Acceptance = 'auto' | 'owner' | 'owner_before_next'
@@ -40,8 +41,11 @@ const toStage = (row: Row): Stage => ({
 
 export function addStage(
   db: DatabaseSync,
-  input: { featureId: string; name: string; goal: string; appetite?: string; acceptance?: Acceptance },
+  input: { featureId: string; name: string; goal: string; appetite: string; acceptance?: Acceptance },
 ): Stage {
+  if (!input.appetite?.trim()) {
+    throw new Error('этап без appetite: укажите, сколько времени стоит потратить')
+  }
   return tx(db, () => {
     const seq =
       (db.prepare('select coalesce(max(seq), 0) as s from stages where feature_id = ?').get(input.featureId) as {
@@ -72,6 +76,13 @@ export function addStage(
       stage.status,
       stage.acceptance,
     )
+
+    appendEvent(db, {
+      type: 'stage.added',
+      actor: 'system',
+      subject: stage.id,
+      after: { featureId: stage.featureId, name: stage.name, appetite: stage.appetite },
+    })
 
     return stage
   })

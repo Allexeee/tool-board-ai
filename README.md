@@ -1,4 +1,4 @@
-# toolbox-al
+﻿# toolbox-al
 
 Ящик инструментов для работы по фичам: очереди на исполнителей, где исполнитель — и человек, и ИИ-агент.
 
@@ -11,7 +11,7 @@ node bin/toolbox-al.ts init            # скелет проекта
 node bin/toolbox-al.ts executor add w1 --skills backend,frontend
 node bin/toolbox-al.ts request add "Оплата подписки"
 node bin/toolbox-al.ts feature add "Оплата" --request R1
-node bin/toolbox-al.ts stage add F1 "Каркас" --goal "можно заплатить"
+node bin/toolbox-al.ts stage add F1 "Каркас" --goal "можно заплатить" --appetite "3 дня"
 node bin/toolbox-al.ts stage activate F1
 node bin/toolbox-al.ts task add F1.S1 "Добавить вебхук подтверждения" \
   --dod "вебхук принимает событие" --size S --skill backend \
@@ -38,7 +38,7 @@ node bin/toolbox-al.ts done F1.S1-1 --as w1 --summary "вебхук работа
 | `done id --as w1 --summary "..."` | закрыть с отчётом |
 | `block id --as w1 --reason ... --note "..."` | прервать с причиной |
 | `reopen id --reason "..."` | вернуть в работу |
-| `ask id "текст" --to owner` | задать вопрос |
+| `ask id "текст" --to owner` | задать вопрос |`n| `answer Q1 "ответ"` | ответить на вопрос |
 | `now` | фичи, этапы, кто что держит |
 | `inbox` | что ждёт человека |
 | `dispatch` | кому какая задача достаётся |

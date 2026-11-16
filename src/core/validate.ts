@@ -1,5 +1,6 @@
 export type TaskKind = 'task' | 'defect' | 'incident'
 export type TaskSize = 'XS' | 'S' | 'M' | 'L'
+export type TaskSeverity = 'S1' | 'S2' | 'S3' | 'S4'
 export type TaskClass = 'expedite' | 'fixed_date' | 'standard' | 'intangible' | 'quick'
 export type TaskScope = string[] | 'exclusive'
 
@@ -7,6 +8,7 @@ export interface NewTask {
   stageId: string
   title: string
   kind?: TaskKind
+  severity?: TaskSeverity
   dod: string[]
   checkCmd?: string
   size: TaskSize
@@ -15,6 +17,8 @@ export interface NewTask {
   class: TaskClass
   scope: TaskScope
 }
+
+const SEVERITIES: TaskSeverity[] = ['S1', 'S2', 'S3', 'S4']
 
 const VAGUE_TITLE = new Set(['оплата', 'фикс', 'доработки', 'разное', 'задачи', 'правки'])
 
@@ -40,6 +44,14 @@ export function validateTaskInput(input: NewTask): { errors: string[]; warnings:
   }
   if (input.size === 'L' && !input.sizeReason) {
     errors.push('размер L требует причины (--size-reason)')
+  }
+
+  const kind = input.kind ?? 'task'
+  if ((kind === 'defect' || kind === 'incident') && !input.severity) {
+    errors.push('у дефекта нужна severity S1–S4 (--severity): ущерб и очерёдность — разные шкалы')
+  }
+  if (input.severity && !SEVERITIES.includes(input.severity)) {
+    errors.push(`severity должна быть одной из ${SEVERITIES.join(', ')}`)
   }
 
   const title = (input.title ?? '').trim().toLowerCase()

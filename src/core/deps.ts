@@ -8,6 +8,32 @@ export function depsOf(db: DatabaseSync, id: string): string[] {
     .map((row) => row.to_id)
 }
 
+type EntityKind = 'task' | 'stage' | 'feature'
+
+export function entityKind(db: DatabaseSync, id: string): EntityKind | null {
+  if (db.prepare('select 1 as found from tasks where id = ?').get(id)) return 'task'
+  if (db.prepare('select 1 as found from stages where id = ?').get(id)) return 'stage'
+  if (db.prepare('select 1 as found from features where id = ?').get(id)) return 'feature'
+  return null
+}
+
+export function isSatisfied(db: DatabaseSync, id: string): boolean {
+  const kind = entityKind(db, id)
+  if (kind === 'task') {
+    const row = db.prepare('select status from tasks where id = ?').get(id) as { status: string }
+    return row.status === 'done'
+  }
+  if (kind === 'stage') {
+    const row = db.prepare('select status from stages where id = ?').get(id) as { status: string }
+    return row.status === 'merged' || row.status === 'accepted'
+  }
+  if (kind === 'feature') {
+    const row = db.prepare('select status from features where id = ?').get(id) as { status: string }
+    return row.status === 'done'
+  }
+  return false
+}
+
 function pathBetween(db: DatabaseSync, start: string, goal: string): string[] | null {
   const previous = new Map<string, string>()
   const seen = new Set<string>([start])
@@ -43,10 +69,14 @@ export function wouldCycle(db: DatabaseSync, from: string, to: string): string[]
 export function addDep(db: DatabaseSync, from: string, to: string): void {
   if (from === to) throw new UserError(3, `цикл: ${from} не может зависеть от себя`)
 
-  const cycle = wouldCycle(db, from, to)
-  if (cycle) throw new UserError(3, `цикл зависимостей: ${cycle.join(' → ')}`)
+  return tx(db, () => {
+    for (const id of [from, to]) {
+      if (!entityKind(db, id)) throw new UserError(3, `зависимость: объект ${id} не найден`)
+    }
 
-  tx(db, () => {
+    const cycle = wouldCycle(db, from, to)
+    if (cycle) throw new UserError(3, `цикл зависимостей: ${cycle.join(' → ')}`)
+
     db.prepare('insert or ignore into deps (from_id, to_id) values (?, ?)').run(from, to)
     appendEvent(db, { type: 'dep.added', actor: 'system', subject: from, after: { dependsOn: to } })
   })
@@ -58,14 +88,18 @@ export function listDeps(db: DatabaseSync, id: string): string[] {
 
 export function isReady(db: DatabaseSync, taskId: string): boolean {
   const blockers = depsOf(db, taskId)
-  if (blockers.length === 0) return true
+  if (blockers.some((blocker) => !isSatisfied(db, blocker))) return false
 
-  const placeholders = blockers.map(() => '?').join(', ')
-  const row = db
-    .prepare(`select count(*) as pending from tasks where id in (${placeholders}) and status != 'done'`)
-    .get(...blockers) as { pending: number }
+  const stage = db.prepare('select id, feature_id from stages where id = (select stage_id from tasks where id = ?)').get(taskId) as
+    | { id: string; feature_id: string }
+    | undefined
 
-  return row.pending === 0
+  if (stage) {
+    if (depsOf(db, stage.id).some((blocker) => !isSatisfied(db, blocker))) return false
+    if (depsOf(db, stage.feature_id).some((blocker) => !isSatisfied(db, blocker))) return false
+  }
+
+  return true
 }
 
 export function refreshReady(db: DatabaseSync): number {

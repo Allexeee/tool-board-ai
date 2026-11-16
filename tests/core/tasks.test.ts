@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -10,7 +10,7 @@ import { validateTaskInput, type NewTask } from '../../src/core/validate.ts'
 function seed(db: DatabaseSync): string {
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g' })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
   return stage.id
 }
 
@@ -52,4 +52,16 @@ test('createTask отказывает со списком ошибок', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)
   assert.throws(() => createTask(db, { ...base, stageId, dod: [] }), /DoD/)
+})
+
+test('дефект без severity не создаётся', () => {
+  const result = validateTaskInput({ ...base, kind: 'defect' })
+  assert.match(result.errors.join('\n'), /severity/)
+})
+
+test('severity сохраняется у дефекта', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const task = createTask(db, { ...base, stageId, kind: 'defect', severity: 'S2' })
+  assert.equal(task.severity, 'S2')
 })

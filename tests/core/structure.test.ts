@@ -1,9 +1,10 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
 import { addRequest, listRequests } from '../../src/core/requests.ts'
 import { addFeature, listFeatures, rankFeature } from '../../src/core/features.ts'
 import { addStage, activateNextStage, listStages } from '../../src/core/stages.ts'
+import { listEvents } from '../../src/core/events.ts'
 
 test('ранг переставляется без дыр', () => {
   const db = openDb(':memory:')
@@ -21,8 +22,8 @@ test('этапы нумеруются подряд и активируются �
   const db = openDb(':memory:')
   const r = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const f = addFeature(db, { requestId: r.id, name: 'A', rank: 1 })
-  const s1 = addStage(db, { featureId: f.id, name: 'S1', goal: 'g' })
-  const s2 = addStage(db, { featureId: f.id, name: 'S2', goal: 'g' })
+  const s1 = addStage(db, { featureId: f.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  const s2 = addStage(db, { featureId: f.id, name: 'S2', goal: 'g', appetite: '2 дня' })
 
   assert.equal(s2.seq, 2)
   assert.equal(activateNextStage(db, f.id)!.id, s1.id)
@@ -34,4 +35,22 @@ test('запрос создаётся в inbox', () => {
   const db = openDb(':memory:')
   addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   assert.equal(listRequests(db)[0].status, 'inbox')
+})
+
+test('добавление этапа пишется в журнал', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  assert.equal(listEvents(db, { subject: stage.id })[0].type, 'stage.added')
+})
+
+test('этап без appetite не создаётся', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  assert.throws(
+    () => addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '' }),
+    /appetite/,
+  )
 })

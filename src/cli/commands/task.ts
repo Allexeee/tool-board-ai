@@ -1,4 +1,4 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { createTask, getTask, listTasks, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
@@ -30,6 +30,7 @@ export default async function command(args: ParsedArgs) {
       class: (stringFlag(args, 'class') as TaskClass) ?? 'standard',
       scope,
       kind: (stringFlag(args, 'kind') as 'task' | 'defect' | 'incident') ?? 'task',
+      severity: stringFlag(args, 'severity') as 'S1' | 'S2' | 'S3' | 'S4' | undefined,
       checkCmd: stringFlag(args, 'check'),
     })
 

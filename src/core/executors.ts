@@ -1,6 +1,7 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { tx } from './db.ts'
+import { appendEvent } from './events.ts'
 
 export type ExecutorKind = 'human' | 'agent'
 
@@ -47,7 +48,7 @@ export function addExecutor(
     wipLimit: input.wipLimit ?? 1,
     handSize: input.handSize ?? 5,
     session: null,
-    lastSeen: null,
+    lastSeen: new Date().toISOString(),
   }
 
   db.prepare(
@@ -59,8 +60,15 @@ export function addExecutor(
     executor.wipLimit,
     executor.handSize,
     null,
-    null,
+    executor.lastSeen,
   )
+
+  appendEvent(db, {
+    type: 'executor.added',
+    actor: 'system',
+    subject: executor.id,
+    after: { skills: executor.skills, kind: executor.kind },
+  })
 
   return executor
 }

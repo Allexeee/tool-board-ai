@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -9,7 +9,7 @@ import { refreshReady } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { addExecutor } from '../../src/core/executors.ts'
-import { compareTasks, fillHand, getHand } from '../../src/core/hands.ts'
+import { compareTasks, fillHand, getHand, setHand } from '../../src/core/hands.ts'
 
 const plusMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -19,7 +19,7 @@ function seed(db: DatabaseSync): string {
 
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g' })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
   activateNextStage(db, feature.id)
 
   const base = {
@@ -90,4 +90,11 @@ test('исполнитель offline теряет руку', () => {
   assert.ok(getHand(db, 'w2').length > 0)
   advanceTime(db, plusMinutes(121))
   assert.deepEqual(getHand(db, 'w2'), [])
+})
+
+test('setHand не отбирает задачу, зарезервированную другим', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  fillHand(db, 'w1')
+  assert.throws(() => setHand(db, 'w2', [`${stageId}-1`], 'orchestrator'), /зарезервирован/)
 })

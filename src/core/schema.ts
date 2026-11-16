@@ -1,6 +1,6 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -98,6 +98,7 @@ create table if not exists hand (
   reserved_at text not null,
   primary key (executor_id, task_id)
 );
+create unique index if not exists idx_hand_task on hand(task_id);
 
 create table if not exists questions (
   id             text primary key,
@@ -139,6 +140,7 @@ export function migrate(db: DatabaseSync): number {
   db.exec('begin immediate')
   try {
     if (from < 1) db.exec(DDL_V1)
+    if (from < 2) db.exec('alter table tasks add column severity text')
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +
       'on conflict(key) do update set value = excluded.value',

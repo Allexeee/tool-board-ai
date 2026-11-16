@@ -1,14 +1,15 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
-import { addStage } from '../../src/core/stages.ts'
+import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask, getTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { addExecutor } from '../../src/core/executors.ts'
+import { addDep } from '../../src/core/deps.ts'
 
 const plusMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -18,7 +19,8 @@ function seed(db: DatabaseSync): string {
 
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g' })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  activateNextStage(db, feature.id)
 
   const base = {
     stageId: stage.id,
@@ -84,4 +86,29 @@ test('третье истечение аренды уходит владельц
   advanceTime(db, plusMinutes(31))
 
   assert.equal(getTask(db, `${stageId}-1`)!.status, 'needs_owner')
+})
+
+test('нельзя взять задачу без нужного навыка', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addExecutor(db, { id: 'designer', kind: 'agent', skills: ['design'] })
+
+  assert.throws(() => takeTask(db, { executor: 'designer', taskId: `${stageId}-1` }), /навык backend/)
+})
+
+test('нельзя взять задачу с незакрытой зависимостью', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-1`, `${stageId}-2`)
+  refreshReady(db)
+
+  assert.throws(() => takeTask(db, { executor: 'w1', taskId: `${stageId}-1` }), /не готова/)
+})
+
+test('нельзя взять задачу неактивного этапа', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'planned'").run()
+
+  assert.throws(() => takeTask(db, { executor: 'w1', taskId: `${stageId}-1` }), /этап/)
 })

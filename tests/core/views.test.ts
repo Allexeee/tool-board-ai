@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -13,7 +13,7 @@ function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
   const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
   const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g' })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
   activateNextStage(db, feature.id)
 
   const base = {
@@ -61,4 +61,13 @@ test('навык без исполнителя попадает в предуп�
 
   const plan = dispatchPlan(db)
   assert.ok(plan.warnings.some((warning) => warning.includes('audio')))
+})
+
+test('повторный dispatch не сбрасывает руки', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  const first = dispatchPlan(db)
+  const second = dispatchPlan(db)
+  assert.deepEqual(second.assignments, first.assignments)
+  assert.ok(second.assignments[0].tasks.length > 0)
 })

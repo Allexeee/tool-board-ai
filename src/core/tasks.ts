@@ -1,10 +1,11 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { childId } from './ids.ts'
+import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { validateTaskInput, type NewTask, type TaskClass, type TaskKind, type TaskSize, type TaskScope } from './validate.ts'
+import { validateTaskInput, type NewTask, type TaskClass, type TaskKind, type TaskSeverity, type TaskSize, type TaskScope } from './validate.ts'
 
-export type { NewTask, TaskClass, TaskKind, TaskSize, TaskScope } from './validate.ts'
+export type { NewTask, TaskClass, TaskKind, TaskSeverity, TaskSize, TaskScope } from './validate.ts'
 
 export type TaskStatus =
   | 'open'
@@ -82,6 +83,7 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     throw new UserError(3, 'задача не создана:\n  ' + errors.join('\n  '))
   }
 
+  return tx(db, () => {
   const stageId = input.stageId
   const stage = db.prepare('select id from stages where id = ?').get(stageId)
   if (!stage) throw new UserError(3, `этап ${stageId} не найден`)
@@ -97,6 +99,7 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     stageId,
     title: input.title,
     kind: input.kind ?? 'task',
+    severity: input.severity ?? null,
     dod: input.dod,
     checkCmd: input.checkCmd ?? null,
     size: input.size,
@@ -113,13 +116,14 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
   }
 
   db.prepare(
-    'insert into tasks (id, stage_id, title, kind, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, created_at) ' +
-      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, created_at) ' +
+      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     task.id,
     task.stageId,
     task.title,
     task.kind,
+    task.severity,
     JSON.stringify(task.dod),
     task.checkCmd,
     task.size,
@@ -143,6 +147,7 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
   })
 
   return task
+  })
 }
 
 export function getTask(db: DatabaseSync, id: string): Task | null {

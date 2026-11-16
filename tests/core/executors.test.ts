@@ -1,7 +1,8 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
 import { addExecutor, assertSkill, getExecutor } from '../../src/core/executors.ts'
+import { listEvents } from '../../src/core/events.ts'
 
 test('исполнитель хранит набор навыков и wip', () => {
   const db = openDb(':memory:')
@@ -20,6 +21,12 @@ test('повторное добавление того же исполнител
   const db = openDb(':memory:')
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
   assert.throws(() => addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] }), /уже есть/)
+})
+
+test('добавление исполнителя пишется в журнал', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  assert.equal(listEvents(db, { subject: 'w1' })[0].type, 'executor.added')
 })
 
 test('getExecutor возвращает null для неизвестного', () => {

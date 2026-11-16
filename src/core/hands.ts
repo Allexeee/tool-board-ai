@@ -120,6 +120,13 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
       const task = getTask(db, id)
       if (!task) throw new UserError(3, `задача ${id} не найдена`)
       if (task.status !== 'ready') throw new UserError(3, `задача ${id} не готова: ${task.status}`)
+
+      const reserved = db
+        .prepare('select executor_id from hand where task_id = ? and executor_id != ?')
+        .get(id, executorId) as { executor_id: string } | undefined
+      if (reserved) {
+        throw new UserError(3, `задача ${id} уже зарезервирована за ${reserved.executor_id}`)
+      }
     }
 
     db.prepare('delete from hand where executor_id = ?').run(executorId)

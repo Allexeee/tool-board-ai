@@ -1,10 +1,11 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { getExecutor } from './executors.ts'
+import { getExecutor, assertSkill, touchExecutor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 import { nextTask } from './hands.ts'
+import { isReady } from './deps.ts'
 
 export interface TakeOptions {
   executor: string
@@ -36,6 +37,23 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
     const task = getTask(db, taskId)
     if (!task) throw new UserError(3, `задача ${taskId} не найдена`)
 
+    if (task.status !== 'ready') {
+      throw new UserError(1, `задача ${task.id} не готова: ${task.status}`)
+    }
+
+    assertSkill(executor, task.skill)
+
+    const stageRow = db.prepare('select status from stages where id = ?').get(task.stageId ?? '') as
+      | { status: string }
+      | undefined
+    if (!stageRow || stageRow.status !== 'active') {
+      throw new UserError(1, `этап ${task.stageId} не активен: ${stageRow?.status ?? 'нет'}`)
+    }
+
+    if (!isReady(db, task.id)) {
+      throw new UserError(1, `у задачи ${task.id} не закрыты зависимости`)
+    }
+
     if (task.class === 'expedite') {
       const activeUrgent = db
         .prepare("select count(*) as c from tasks where holder = ? and status = 'active' and class = 'expedite'")
@@ -65,6 +83,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
     }
 
     db.prepare('delete from hand where task_id = ?').run(task.id)
+    touchExecutor(db, executor.id)
     appendEvent(db, {
       type: 'task.taken',
       actor: executor.id,

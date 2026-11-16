@@ -17,7 +17,7 @@ export function releaseOfflineHands(db: DatabaseSync, now: string, offlineAfterM
   const rows = db
     .prepare(
       'select distinct h.executor_id as id from hand h join executors e on e.id = h.executor_id ' +
-        'where e.last_seen is null or e.last_seen < ?',
+        'where e.last_seen is not null and e.last_seen < ?',
     )
     .all(threshold) as Array<{ id: string }>
 
