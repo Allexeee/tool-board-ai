@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+﻿import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
@@ -8,7 +8,10 @@ const here = dirname(fileURLToPath(import.meta.url))
 export const toolRoot = join(here, '..', '..')
 
 export function toolVersion(root = toolRoot): string {
-  const raw = readFileSync(join(root, 'package.json'), 'utf8').replace(/^\uFEFF/, '')
+  const path = join(root, 'package.json')
+  if (!existsSync(path)) return '0.0.0'
+
+  const raw = readFileSync(path, 'utf8').replace(/^\uFEFF/, '')
   const pkg = JSON.parse(raw) as { version?: string }
   return pkg.version ?? '0.0.0'
 }
@@ -55,4 +58,53 @@ export function availableVersions(root = toolRoot): string[] {
   } catch {
     return []
   }
+}
+
+export function versionsFromDirectory(dir: string): string[] {
+  const manifestPath = join(dir, 'manifest.json')
+  if (existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8').replace(/^\uFEFF/, '')) as {
+        versions?: string[]
+      }
+      if (Array.isArray(manifest.versions)) {
+        return manifest.versions.map(String).sort(compare).reverse()
+      }
+    } catch {
+      // битый манифест — считаем, что версий нет
+    }
+  }
+
+  const packagePath = join(dir, 'package.json')
+  if (existsSync(packagePath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(packagePath, 'utf8').replace(/^\uFEFF/, '')) as {
+        version?: string
+      }
+      if (pkg.version) return [pkg.version]
+    } catch {
+      return []
+    }
+  }
+
+  return []
+}
+
+export interface VersionCheck {
+  current: string
+  available: string[]
+  source: 'git' | 'dir' | 'none'
+  latest: string | null
+}
+
+export function checkVersions(root: string, options: { from?: string } = {}): VersionCheck {
+  const current = toolVersion(root)
+
+  if (options.from) {
+    const available = versionsFromDirectory(options.from)
+    return { current, available, source: available.length ? 'dir' : 'none', latest: available[0] ?? null }
+  }
+
+  const available = availableVersions(root)
+  return { current, available, source: available.length ? 'git' : 'none', latest: available[0] ?? null }
 }
