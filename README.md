@@ -65,3 +65,18 @@ node bin/toolbox-al.ts done F1.S1-1 --as w1 --summary "вебхук работа
 - Аренда истекает сама; третья неудача уходит владельцу.
 - `expedite` выдаётся первым, лимит — один активный на исполнителя.
 - Порядок детерминирован: два `dispatch` дают одно и то же.
+
+## Рутины
+
+```bash
+node bin/toolbox-al.ts routine add "Деплой" --schedule "daily 02:00" --window 02:00-04:00
+node bin/toolbox-al.ts routine step RU1 "Сборка" --action mechanical --cmd "npm run build"
+node bin/toolbox-al.ts routine gate RU1 --kind approval --name first_publish --once
+node bin/toolbox-al.ts gate approve G1
+node bin/toolbox-al.ts tick
+node bin/toolbox-al.ts cal --days 14
+node bin/toolbox-al.ts friction
+node bin/toolbox-al.ts scheduler enable --yes
+```
+
+Тикер по умолчанию выключен: без него рутины не идут, а `doctor` предупреждает.

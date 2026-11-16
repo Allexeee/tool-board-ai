@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 6
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -176,6 +176,36 @@ export function migrate(db: DatabaseSync): number {
           'created_at text not null)',
       )
       db.exec('create unique index if not exists idx_plans_request_version on plans(request_id, version)')
+    }
+    if (from < 5) {
+      db.exec(
+        'create table if not exists routines (' +
+          'id text primary key, name text not null, schedule text not null, ' +
+          'window text, timezone text not null, guard text, created_at text not null)',
+      )
+      db.exec(
+        'create table if not exists routine_steps (' +
+          'id text primary key, routine_id text not null, seq integer not null, ' +
+          'title text not null, kind text not null, skill text, command text, ' +
+          'dod text, scope text, on_missing text not null, created_at text not null)',
+      )
+      db.exec(
+        'create table if not exists routine_runs (' +
+          'id text primary key, routine_id text not null, due_at text not null, ' +
+          'status text not null, started_at text, finished_at text, note text)',
+      )
+      db.exec(
+        'create unique index if not exists idx_runs_routine_due on routine_runs(routine_id, due_at)',
+      )
+      db.exec(
+        'create table if not exists gates (' +
+          'id text primary key, routine_id text not null, step_id text, ' +
+          'kind text not null, name text not null, once integer not null default 0, ' +
+          'satisfied_at text, payload text)',
+      )
+    }
+    if (from < 6) {
+      db.exec('alter table routines add column escalated_at text')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +

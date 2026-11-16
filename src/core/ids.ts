@@ -1,7 +1,7 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 
-export type IdKind = 'request' | 'feature' | 'stage' | 'task' | 'question' | 'idea' | 'decision' | 'plan'
+export type IdKind = 'request' | 'feature' | 'stage' | 'task' | 'question' | 'idea' | 'decision' | 'plan' | 'routine' | 'run' | 'gate'
 
 const PREFIX: Record<IdKind, string> = {
   request: 'R',
@@ -12,6 +12,9 @@ const PREFIX: Record<IdKind, string> = {
   idea: 'I',
   decision: 'D',
   plan: 'P',
+  routine: 'RU',
+  run: 'RR',
+  gate: 'G',
 }
 
 export function allocateId(db: DatabaseSync, kind: IdKind): string {

@@ -1,4 +1,4 @@
-export type TaskKind = 'task' | 'defect' | 'incident'
+﻿export type TaskKind = 'task' | 'defect' | 'incident'
 export type TaskSize = 'XS' | 'S' | 'M' | 'L'
 export type TaskSeverity = 'S1' | 'S2' | 'S3' | 'S4'
 export type TaskClass = 'expedite' | 'fixed_date' | 'standard' | 'intangible' | 'quick'

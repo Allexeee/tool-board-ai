@@ -13,6 +13,7 @@ export default async function command() {
     ownerStaleDays: project.config.ownerStaleDays,
     root: project.root,
     devBranch: project.config.branches.dev,
+    schedulerEnabled: project.config.scheduler,
   })
   const bad = report.checks.filter((check) => !check.ok)
 

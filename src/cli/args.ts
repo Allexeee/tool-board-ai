@@ -11,6 +11,7 @@ const KNOWN_FLAGS = new Set([
   'size', 'size-reason', 'dod', 'scope', 'skill', 'skills', 'class', 'kind',
   'check', 'deps', 'dep', 'review', 'verdict', 'choice', 'subject', 'reason', 'note', 'report', 'severity', 'version',
   'deadline', 'options', 'addressee', 'policy', 'timeout', 'appetite',
+  'schedule', 'window', 'guard', 'action', 'cmd', 'on-missing', 'once', 'days',
   'id', 'task', 'stage', 'feature', 'request', 'executor',
   'limit', 'from', 'main', 'dev', 'summary', 'checks', 'left', 'status',
 ])
