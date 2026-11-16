@@ -6,7 +6,7 @@ import { listFeatures } from './features.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { hookInstalled } from './git/hooks.ts'
-import { branchExists } from './git/git.ts'
+import { branchExists, isRepo } from './git/git.ts'
 import { openCodeFilesPresent } from './opencode.ts'
 
 export interface Check {
@@ -100,7 +100,16 @@ export function doctorReport(
     detail: orphanHand.length === 0 ? 'ссылки целы' : `руки ссылаются на пропавшие задачи: ${orphanHand.map((r) => r.task_id).join(', ')}`,
   })
 
-  if (options.root) checks.push(...gitChecks(db, options.root, options.devBranch ?? 'dev'))
+  if (options.root) {
+    checks.push(...gitChecks(db, options.root, options.devBranch ?? 'dev'))
+    checks.push({
+      name: 'плагин OpenCode',
+      ok: openCodeFilesPresent(options.root).plugin,
+      detail: openCodeFilesPresent(options.root).plugin
+        ? 'на месте'
+        : 'нет .opencode/plugins/toolbox-al — выполните init',
+    })
+  }
 
   const routines = (db.prepare('select count(*) as c from routines').get() as { c: number }).c
   if (routines > 0) {
@@ -119,6 +128,11 @@ export function doctorReport(
 
 function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
   const checks: Check[] = []
+
+  if (!isRepo(root)) {
+    return [{ name: 'git', ok: true, detail: 'не репозиторий: ветки и коммиты выключены' }]
+  }
+
   const gitDir = join(root, '.git')
 
   checks.push({
@@ -136,14 +150,6 @@ function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
   const missing = listFeatures(db)
     .filter((feature) => feature.worktree && !existsSync(feature.worktree))
     .map((feature) => feature.id)
-
-  checks.push({
-    name: 'плагин OpenCode',
-    ok: openCodeFilesPresent(root).plugin,
-    detail: openCodeFilesPresent(root).plugin
-      ? 'на месте'
-      : 'нет .opencode/plugins/toolbox-al — выполните init',
-  })
 
   checks.push({
     name: 'каталоги фич',
