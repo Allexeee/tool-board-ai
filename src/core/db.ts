@@ -1,16 +1,31 @@
 import { DatabaseSync } from 'node:sqlite'
-import { migrate } from './schema.ts'
+import { migrate, schemaVersionOf, SCHEMA_VERSION } from './schema.ts'
+import { UserError } from '../cli/errors.ts'
 
 export { migrate } from './schema.ts'
 
 const depth = new WeakMap<DatabaseSync, number>()
 
-export function openDb(path: string): DatabaseSync {
+export function openDb(path: string, options: { allowOutdated?: boolean } = {}): DatabaseSync {
   const db = new DatabaseSync(path)
   db.exec('pragma journal_mode = wal')
   db.exec('pragma busy_timeout = 5000')
   db.exec('pragma foreign_keys = on')
-  migrate(db)
+
+  const version = schemaVersionOf(db)
+
+  if (version === 0) {
+    migrate(db)
+    return db
+  }
+
+  if (version < SCHEMA_VERSION && !options.allowOutdated) {
+    throw new UserError(
+      3,
+      `схема ${version} устарела (нужна ${SCHEMA_VERSION}): выполните toolbox-al upgrade --yes`,
+    )
+  }
+
   return db
 }
 

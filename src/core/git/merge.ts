@@ -113,14 +113,23 @@ export function mergeStage(
   const remaining = listStages(db, feature.id).filter((item) => item.status === 'planned')
   if (remaining.length === 0) {
     db.prepare("update features set status = 'done' where id = ?").run(feature.id)
+
     if (feature.requestId) {
-      db.prepare("update requests set status = 'closed' where id = ?").run(feature.requestId)
-      appendEvent(db, {
-        type: 'request.closed',
-        actor: 'system',
-        subject: feature.requestId,
-        note: `фича ${feature.id} закрыта`,
-      })
+      const open = db
+        .prepare(
+          "select count(*) as c from features where request_id = ? and status not in ('done', 'cancelled')",
+        )
+        .get(feature.requestId) as { c: number }
+
+      if (open.c === 0) {
+        db.prepare("update requests set status = 'closed' where id = ?").run(feature.requestId)
+        appendEvent(db, {
+          type: 'request.closed',
+          actor: 'system',
+          subject: feature.requestId,
+          note: 'все фичи запроса закрыты',
+        })
+      }
     }
   } else {
     activateNextStage(db, feature.id)

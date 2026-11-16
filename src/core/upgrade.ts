@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
@@ -153,12 +153,28 @@ export function writeUpgradeJournal(root: string, entry: JournalEntry): string {
 
 export interface UpgradePlan {
   current: VersionCheck
+  pinned: string
   schemaFrom: number
   schemaTo: number
   outdated: boolean
 }
 
-export function planUpgrade(db: DatabaseSync, options: { root: string; from?: string }): UpgradePlan {
+function readPinned(configPath?: string): string | null {
+  if (!configPath || !existsSync(configPath)) return null
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '')) as {
+      toolVersion?: string
+    }
+    return config.toolVersion ?? null
+  } catch {
+    return null
+  }
+}
+
+export function planUpgrade(
+  db: DatabaseSync,
+  options: { toolRoot?: string; configPath?: string; from?: string },
+): UpgradePlan {
   const row = db.prepare("select value from meta where key = 'schemaVersion'").get() as
     | { value: string }
     | undefined
@@ -171,10 +187,18 @@ export function planUpgrade(db: DatabaseSync, options: { root: string; from?: st
     )
   }
 
-  const current = checkVersions(options.root, { from: options.from })
-  const versionBehind = current.latest !== null && current.current !== current.latest
+  const current = checkVersions(options.toolRoot ?? toolRoot, { from: options.from })
+  const pinned = readPinned(options.configPath) ?? current.current
+  const latest = current.latest ?? current.current
+  const versionBehind = compare(pinned, latest) < 0
 
-  return { current, schemaFrom, schemaTo: SCHEMA_VERSION, outdated: schemaFrom < SCHEMA_VERSION || versionBehind }
+  return {
+    current,
+    pinned,
+    schemaFrom,
+    schemaTo: SCHEMA_VERSION,
+    outdated: schemaFrom < SCHEMA_VERSION || versionBehind,
+  }
 }
 
 export interface UpgradeResult {
@@ -188,24 +212,26 @@ export function applyUpgrade(
   input: {
     dbPath: string
     configPath: string
-    root: string
+    projectRoot: string
+    toolRoot?: string
     from?: string
     yes: boolean
     now?: Date
   },
 ): UpgradeResult {
-  const plan = planUpgrade(db, { root: input.root, from: input.from })
+  const projectRoot = input.projectRoot
+  const plan = planUpgrade(db, { toolRoot: input.toolRoot, configPath: input.configPath, from: input.from })
 
   if (!plan.outdated) return { applied: false, plan }
   if (!input.yes) return { applied: false, plan }
 
   const stamp = (input.now ?? new Date()).toISOString().replace(/[:.]/g, '-')
   const backup = `${input.dbPath}.backup-${stamp}`
-  copyFileSync(input.dbPath, backup)
+  db.exec(`vacuum into '${backup.replace(/'/g, "''")}'`)
 
   migrate(db)
 
-  const journal = writeUpgradeJournal(input.root, {
+  const journal = writeUpgradeJournal(projectRoot, {
     from: plan.current.current,
     to: plan.current.latest ?? plan.current.current,
     schemaFrom: plan.schemaFrom,
@@ -213,7 +239,7 @@ export function applyUpgrade(
     backup,
     files: input.root === toolRoot
       ? []
-      : refreshOpenCode(input.root, plan.current.latest ?? plan.current.current, { yes: true })
+      : refreshOpenCode(projectRoot, plan.current.latest ?? plan.current.current, { yes: true })
           .filter((item) => item.status !== 'same')
           .map((item) => item.path),
     now: input.now,

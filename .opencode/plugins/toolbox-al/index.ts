@@ -1,4 +1,4 @@
-﻿// toolbox-al-plugin-version: 1.0.2
+﻿// toolbox-al-plugin-version: 99.0.0
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'

@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 
 export const SCHEMA_VERSION = 6
 
@@ -127,14 +127,14 @@ create table if not exists reviews (
 );
 `
 
-function currentVersion(db: DatabaseSync): number {
+export function schemaVersionOf(db: DatabaseSync): number {
   db.exec('create table if not exists meta (key text primary key, value text not null)')
   const row = db.prepare("select value from meta where key = 'schemaVersion'").get() as { value: string } | undefined
   return row ? Number(row.value) : 0
 }
 
 export function migrate(db: DatabaseSync): number {
-  const from = currentVersion(db)
+  const from = schemaVersionOf(db)
   if (from >= SCHEMA_VERSION) return from
 
   db.exec('begin immediate')

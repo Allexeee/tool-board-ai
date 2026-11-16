@@ -7,7 +7,7 @@ import { UserError } from '../errors.ts'
 export default async function command() {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
-  const db = openDb(project.dbPath)
+  const db = openDb(project.dbPath, { allowOutdated: true })
 
   const tool = toolVersion()
   const schema = schemaVersion(db)

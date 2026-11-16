@@ -1,8 +1,8 @@
-﻿import { UserError } from './errors.ts'
+import { UserError } from './errors.ts'
 
 const COMMANDS_WITH_SUB = new Set([
   'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
-  'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan',
+  'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan', 'pool',
 ])
 
 const KNOWN_FLAGS = new Set([

@@ -53,8 +53,16 @@ export default async function command(args: ParsedArgs) {
     }
   }
 
-  if (feature?.worktree && existsSync(feature.worktree)) {
+  if (task.stageId) {
+    if (!feature?.worktree) {
+      throw new UserError(3, `у фичи ${feature?.id ?? '?'} нет рабочего каталога: выполните feature start`)
+    }
+    if (!existsSync(feature.worktree)) {
+      throw new UserError(3, `рабочий каталог фичи ${feature.id} пропал: выполните feature start`)
+    }
     commitTask({ worktree: feature.worktree, task, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
+  } else {
+    commitTask({ worktree: project.root, task, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
   }
 
   const closed = doneTask(db, {

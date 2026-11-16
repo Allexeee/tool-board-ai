@@ -1,4 +1,4 @@
-﻿import { findProject } from '../../core/project.ts'
+import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { doctorReport } from '../../core/doctor.ts'
 import { ok } from '../output.ts'
@@ -7,7 +7,7 @@ import { UserError } from '../errors.ts'
 export default async function command() {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
-  const db = openDb(project.dbPath)
+  const db = openDb(project.dbPath, { allowOutdated: true })
 
   const report = doctorReport(db, {
     ownerStaleDays: project.config.ownerStaleDays,

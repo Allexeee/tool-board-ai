@@ -95,3 +95,12 @@ test('после слияния последнего этапа запрос з�
   const request = getRequest(db, feature.requestId!)
   assert.equal(request?.status, 'closed')
 })
+
+test('запрос не закрывается, пока у него есть другая фича', () => {
+  const { root, db, config, stage, feature } = mergedReadyFixture()
+  addFeature(db, { requestId: feature.requestId!, name: 'Вторая', rank: 2 })
+
+  mergeStage(db, { root, stageId: stage.id, config })
+
+  assert.notEqual(getRequest(db, feature.requestId!)!.status, 'closed')
+})
