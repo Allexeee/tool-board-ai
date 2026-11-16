@@ -175,6 +175,40 @@ export function sweepBranches(
   return result
 }
 
+export interface StaleBranch {
+  featureId: string
+  branch: string
+  why: string
+}
+
+/** Ветки закрытых фич, которые выдержка уже прошла, но убрать их нельзя без решения владельца. */
+export function staleBranches(
+  db: DatabaseSync,
+  input: { root: string; config: SweepConfig; now?: Date },
+): StaleBranch[] {
+  const { dev } = resolveBranches(input.root, input.config)
+  const retentionMs = (input.config.branchRetentionDays ?? 30) * 86_400_000
+  const now = (input.now ?? new Date()).getTime()
+  const stale: StaleBranch[] = []
+
+  for (const feature of listFeatures(db)) {
+    if (feature.status !== 'done' || !feature.branch) continue
+    const branch = feature.branch
+    if (!branchExists(input.root, branch)) continue
+
+    const last = Date.parse(runGit(input.root, ['log', '-1', '--format=%cI', branch]))
+    if (Number.isNaN(last) || now - last < retentionMs) continue
+    if (isMergedInto(input.root, branch, dev)) continue
+
+    const tag = runGit(input.root, ['tag', '--list', archiveTag(feature)])
+    if (tag) continue
+
+    stale.push({ featureId: feature.id, branch, why: 'не влита в dev и нет архивного тега' })
+  }
+
+  return stale
+}
+
 function isMergedInto(root: string, branch: string, dev: string): boolean {
   const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], { cwd: root, stdio: 'ignore' })
   return result.status === 0
