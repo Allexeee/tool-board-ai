@@ -1,6 +1,21 @@
 import { initProject } from '../../core/project.ts'
+import { boolFlag, type ParsedArgs } from '../args.ts'
 
-export function runInit(dir: string): string {
+const PLAN = [
+  '.toolbox-al/config.json и tracker.db',
+  '.opencode/plugins/toolbox-al/index.ts',
+  '.opencode/skills/toolbox-al/SKILL.md',
+  '.opencode/skills/toolbox-al-setup/SKILL.md',
+  'блок в AGENTS.md между маркерами',
+  'записи .toolbox-al/ и .worktrees/ в .gitignore',
+  'pre-commit хук, если это git-репозиторий',
+]
+
+export function runInit(dir: string, options: { dryRun?: boolean } = {}): string {
+  if (options.dryRun) {
+    return ['Ничего не изменено. Было бы создано:', ...PLAN.map((line) => '  - ' + line)].join('\n')
+  }
+
   const { created, root } = initProject(dir)
 
   const lines: string[] = []
@@ -16,8 +31,8 @@ export function runInit(dir: string): string {
   return lines.join('\n')
 }
 
-export default async function command(args: { flags: Record<string, unknown>; positionals: string[] }) {
+export default async function command(args: ParsedArgs) {
   const dir = args.positionals[0] ?? process.cwd()
-  process.stdout.write(runInit(dir) + '\n')
+  process.stdout.write(runInit(dir, { dryRun: boolFlag(args, 'dry-run') }) + '\n')
   return 0
 }

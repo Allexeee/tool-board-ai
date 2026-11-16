@@ -44,7 +44,7 @@ export function mergeStage(
     return { merged: false, reason: `не все задачи закрыты: ${open.map((task) => task.id).join(', ')}` }
   }
 
-  if (stage.acceptance === 'owner' && stage.status !== 'accepted') {
+  if ((stage.acceptance === 'owner' || stage.acceptance === 'owner_before_next') && stage.status !== 'accepted') {
     return { merged: false, reason: 'этап не принят владельцем: stage accept' }
   }
 

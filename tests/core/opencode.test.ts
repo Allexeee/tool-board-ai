@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -38,7 +38,7 @@ test('существующий AGENTS.md сохраняется', () => {
 
 test('плагин объявляет инструменты и вызывает CLI', () => {
   const source = pluginSource('9.9.9')
-  for (const name of ['now', 'inbox', 'task', 'take', 'done', 'block', 'ask', 'answer']) {
+  for (const name of ['now', 'inbox', 'task', 'take', 'done', 'block', 'ask', 'dispatch', 'review', 'accept', 'answer']) {
     assert.ok(source.includes(`name: '${name}'`), name)
   }
   assert.match(source, /toolbox-al\.ts/)

@@ -1,4 +1,4 @@
-// toolbox-al-plugin-version: __VERSION__
+﻿// toolbox-al-plugin-version: __VERSION__
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
 import { join } from 'node:path'
@@ -99,6 +99,42 @@ export default Plugin.define({
           'text',
         ]),
         execute: (input) => call(ctx, ['ask', input.subject, input.text, '--to', input.to ?? 'owner']),
+      })
+
+      editor.add({
+        name: 'dispatch',
+        description: 'Кому какая задача достаётся и в каком дереве',
+        input: schema({}),
+        execute: () => call(ctx, ['dispatch']),
+      })
+
+      editor.add({
+        name: 'review',
+        description: 'Вердикт по задаче',
+        input: schema(
+          { id: { type: 'string' }, verdict: { type: 'string' }, note: { type: 'string' }, reviewer: { type: 'string' } },
+          ['id', 'verdict'],
+        ),
+        execute: (input) =>
+          call(ctx, [
+            'review',
+            input.id,
+            '--as',
+            input.reviewer ?? 'reviewer',
+            '--verdict',
+            input.verdict,
+            ...(input.note ? ['--note', input.note] : []),
+          ]),
+      })
+
+      editor.add({
+        name: 'accept',
+        description: 'Принять или вернуть этап',
+        input: schema({ id: { type: 'string' }, reject: { type: 'string' } }, ['id']),
+        execute: (input) =>
+          input.reject
+            ? call(ctx, ['stage', 'reject', input.id, '--reason', input.reject])
+            : call(ctx, ['stage', 'accept', input.id]),
       })
 
       editor.add({

@@ -1,7 +1,7 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -36,4 +36,12 @@ test('hand show и hand set работают', () => {
   const shown = run(dir, ['hand', 'show', '--as', 'w1'])
   assert.equal(shown.code, 0)
   assert.match(shown.out, /пусто|рука/i)
+})
+
+test('init --dry-run ничего не создаёт', () => {
+  const dir = tmp()
+  const result = run(dir, ['init', '--dry-run'])
+  assert.equal(result.code, 0)
+  assert.match(result.out, /Ничего не изменено/)
+  assert.equal(existsSync(join(dir, '.toolbox-al')), false)
 })

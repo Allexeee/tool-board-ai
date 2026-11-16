@@ -13,6 +13,11 @@ export function acceptStage(db: DatabaseSync, input: { stageId: string; actor: s
       throw new UserError(1, `принимать можно активный этап, а ${stage.id} — ${stage.status}`)
     }
 
+    const open = listTasks(db, { stageId: stage.id }).filter((task) => task.status !== 'done')
+    if (open.length > 0) {
+      throw new UserError(1, `нельзя принять этап: не закрыты ${open.map((task) => task.id).join(', ')}`)
+    }
+
     db.prepare("update stages set status = 'accepted' where id = ?").run(stage.id)
     appendEvent(db, { type: 'stage.accepted', actor: input.actor, subject: stage.id })
 

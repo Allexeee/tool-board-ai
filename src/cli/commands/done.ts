@@ -6,6 +6,8 @@ import { getStage } from '../../core/stages.ts'
 import { getFeature } from '../../core/features.ts'
 import { commitTask } from '../../core/git/commit.ts'
 import { existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { advanceTime } from '../../core/clock.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -25,14 +27,34 @@ export default async function command(args: ParsedArgs) {
 
   const before = getTask(db, taskId)
   if (!before) throw new UserError(3, `задача ${taskId} не найдена`)
-  if (before.holder !== executor) throw new UserError(3, `задача ${before.id} не у исполнителя ${executor}`)
-  if (before.status !== 'active') throw new UserError(1, `задача ${before.id} не в работе: ${before.status}`)
+  advanceTime(db)
+  const task = getTask(db, taskId)!
+  if (task.holder !== executor) throw new UserError(3, `задача ${task.id} не у исполнителя ${executor}`)
+  if (task.status !== 'active') throw new UserError(1, `задача ${task.id} не в работе: ${task.status}`)
   if (!summary.trim()) throw new UserError(3, 'нужен отчёт: --summary "что сделано"')
 
-  const stage = before.stageId ? getStage(db, before.stageId) : null
+  const stage = task.stageId ? getStage(db, task.stageId) : null
   const feature = stage ? getFeature(db, stage.featureId) : null
+
+  if (feature && !feature.worktree) {
+    throw new UserError(3, `у фичи ${feature.id} нет рабочего каталога: выполните feature start`)
+  }
+
+  if (task.checkCmd) {
+    const result =
+      process.platform === 'win32'
+        ? spawnSync('cmd.exe', ['/c', task.checkCmd], { cwd: feature?.worktree ?? project.root, encoding: 'utf8' })
+        : spawnSync('sh', ['-c', task.checkCmd], { cwd: feature?.worktree ?? project.root, encoding: 'utf8' })
+    if (result.status !== 0) {
+      throw new UserError(
+        3,
+        `проверка DoD не прошла: ${task.checkCmd}\n${String(result.stdout ?? '')}${String(result.stderr ?? '')}`,
+      )
+    }
+  }
+
   if (feature?.worktree && existsSync(feature.worktree)) {
-    commitTask({ worktree: feature.worktree, task: before, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
+    commitTask({ worktree: feature.worktree, task, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
   }
 
   const task = doneTask(db, {
