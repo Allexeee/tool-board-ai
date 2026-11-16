@@ -1,6 +1,7 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { applyUpgrade, planUpgrade, toolRoot } from '../../core/upgrade.ts'
+import { planOpenCode } from '../../core/opencode.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -27,7 +28,22 @@ export default async function command(args: ParsedArgs) {
       return 1
     }
 
-    ok({ applied: false, plan }, lines.join('\n') + '\n\nчтобы применить, повторите с --yes')
+    const labels = {
+      same: 'без изменений',
+      update: 'обновится',
+      missing: 'будет создан',
+      blocked: 'без маркеров — перенесите вручную',
+    } as const
+    const target = plan.current.latest ?? plan.current.current
+    const managed = planOpenCode(project.root, target).map((item) => {
+      const head = `${item.path}: ${labels[item.status]}`
+      return item.diff ? `${head}\n${item.diff.split('\n').map((line) => '    ' + line).join('\n')}` : head
+    })
+
+    ok(
+      { applied: false, plan, files: planOpenCode(project.root, target) },
+      lines.join('\n') + '\n\nФАЙЛЫ\n' + managed.join('\n') + '\n\nчтобы применить, повторите с --yes',
+    )
     return 0
   }
 
@@ -51,3 +67,4 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
