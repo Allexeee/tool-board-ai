@@ -1,6 +1,6 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, editRequest, getRequest, listRequests, laterRequest, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
+import { addRequest, closeRequest, editRequest, getRequest, listRequests, laterRequest, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
@@ -23,6 +23,18 @@ export default async function command(args: ParsedArgs) {
     const body = stringFlag(args, 'body') ?? args.positionals.slice(1).join(' ')
     const request = addRequest(db, { title, body, author: actor })
     ok(request, `${request.id}  ${request.title}`)
+    return 0
+  }
+
+  if (args.sub === 'close') {
+    const id = args.positionals[0]
+    const reason = stringFlag(args, 'reason')
+    if (!id || !reason) {
+      throw new UserError(3, 'использование: request close R20 --reason "почему закрыт"')
+    }
+
+    const request = closeRequest(db, { id, reason, actor })
+    ok(request, `${request.id} закрыт`)
     return 0
   }
 
