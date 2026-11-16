@@ -1,6 +1,6 @@
-﻿import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
-import { childId } from './ids.ts'
+import { allocateId, childId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { validateTaskInput, type NewTask, type TaskClass, type TaskKind, type TaskSeverity, type TaskSize, type TaskScope } from './validate.ts'
@@ -99,7 +99,10 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
       ) + 1
     : 0
 
-  if (!stageId && !input.id) throw new UserError(3, 'задача вне этапа требует явный id')
+  if (!stageId && !input.id) {
+    const poolId = allocateId(db, 'task')
+    input = { ...input, id: poolId }
+  }
 
   const task: Task = {
     id: input.id ?? childId(stageId!, 'task', suffix),

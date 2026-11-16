@@ -1,4 +1,4 @@
-﻿import { findProject } from '../../core/project.ts'
+import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { createTask, getTask, listTasks, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
@@ -11,10 +11,13 @@ export default async function command(args: ParsedArgs) {
   const db = openDb(project.dbPath)
 
   if (args.sub === 'add') {
-    const stageId = args.positionals[0] ?? stringFlag(args, 'stage')
-    const title = args.positionals[1] ?? stringFlag(args, 'title')
-    if (!stageId || !title) {
-      throw new UserError(3, 'использование: task add F1.S1 "Заголовок" --dod "..." --size S --skill backend')
+    const first = args.positionals[0] ?? stringFlag(args, 'stage')
+    const isStage = first ? /^F\d+\.S\d+$/.test(first) : false
+
+    const stageId = isStage ? first : null
+    const title = (isStage ? args.positionals[1] : first) ?? stringFlag(args, 'title')
+    if (!title) {
+      throw new UserError(3, 'использование: task add F1.S1 "Заголовок" … или task add "Заголовок" … для пула')
     }
 
     const scopes = listFlag(args, 'scope')
