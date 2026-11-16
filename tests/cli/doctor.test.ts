@@ -19,7 +19,16 @@ test('doctor предупреждает об активной фиче без к
   db.prepare("update features set status = 'active'").run()
 
   const report = doctorReport(db)
-  assert.ok(report.checks.some((check) => check.name === 'каталоги фич' && !check.ok))
+  assert.ok(report.checks.some((check) => check.name === 'каталоги фич назначены' && !check.ok))
+})
+
+test('проверки doctor называются по-разному и целостность базы в порядке', () => {
+  const db = openDb(':memory:')
+  const report = doctorReport(db)
+
+  const names = report.checks.map((check) => check.name)
+  assert.equal(new Set(names).size, names.length, 'имена проверок не повторяются')
+  assert.ok(report.checks.some((check) => check.name === 'целостность базы' && check.ok))
 })
 
 test('--json печатает ровно один JSON-объект', () => {

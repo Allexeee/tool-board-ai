@@ -1,5 +1,4 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { SCHEMA_VERSION } from './schema.ts'
 import { listExecutors } from './executors.ts'
 import { listTasks } from './tasks.ts'
 import { listFeatures } from './features.ts'
@@ -31,14 +30,13 @@ export function doctorReport(
   const checks: Check[] = []
   const ownerStaleDays = options.ownerStaleDays ?? 3
 
-  const schemaRow = db.prepare("select value from meta where key = 'schemaVersion'").get() as
-    | { value: string }
-    | undefined
-  const schema = Number(schemaRow?.value ?? 0)
+  // схема проверяется при открытии базы, здесь остаётся то, что может сломаться в работе
+  const quick = db.prepare('pragma quick_check').get() as Record<string, string> | undefined
+  const integrity = quick ? Object.values(quick)[0] : 'нет ответа'
   checks.push({
-    name: 'схема',
-    ok: schema === SCHEMA_VERSION,
-    detail: schema === SCHEMA_VERSION ? `версия ${schema}` : `в базе ${schema}, в коде ${SCHEMA_VERSION}`,
+    name: 'целостность базы',
+    ok: integrity === 'ok',
+    detail: integrity === 'ok' ? 'ok' : `quick_check: ${integrity}`,
   })
 
   const executors = listExecutors(db)
@@ -116,7 +114,7 @@ export function doctorReport(
     (feature) => feature.status === 'active' && !feature.worktree,
   )
   checks.push({
-    name: 'каталоги фич',
+    name: 'каталоги фич назначены',
     ok: noWorktree.length === 0,
     detail:
       noWorktree.length === 0
@@ -184,7 +182,7 @@ function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
     .map((feature) => feature.id)
 
   checks.push({
-    name: 'каталоги фич',
+    name: 'каталоги фич на месте',
     ok: missing.length === 0,
     detail: missing.length === 0 ? 'на месте' : `нет каталога у: ${missing.join(', ')}`,
   })
