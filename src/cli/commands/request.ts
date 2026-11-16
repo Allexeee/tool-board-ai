@@ -114,11 +114,13 @@ export default async function command(args: ParsedArgs) {
       (question) => question.subjectId === request.id,
     )
     const decisions = listDecisions(db, { subjectId: request.id })
-    const history = listEvents(db, { subject: request.id }).filter(
-      (event) => event.type === 'request.edited',
-    )
+    const allEvents = listEvents(db, { subject: request.id })
+    const history = allEvents.filter((event) => event.type === 'request.edited')
+    const closedEvent = allEvents.filter((event) => event.type === 'request.closed').at(-1)
 
-    const lines = [`${request.id}  ${request.title}`, `статус: ${request.status}`, '', request.body]
+    const lines = [`${request.id}  ${request.title}`, `статус: ${request.status}`]
+    if (closedEvent?.note) lines.push(`закрыт: ${closedEvent.note}`)
+    lines.push('', request.body)
 
     lines.push('', '## Фичи')
     lines.push(
