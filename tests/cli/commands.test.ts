@@ -67,6 +67,15 @@ test('task show печатает тот же статус, что list', () => {
   assert.match(listed.out, /ready/)
 })
 
+test('release pending на свежем проекте говорит, что релизить нечего', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+
+  const pending = run(dir, ['release', 'pending'])
+  assert.equal(pending.code, 0)
+  assert.match(pending.out, /нечего релизить/)
+})
+
 test('init --dry-run ничего не создаёт', () => {
   const dir = tmp()
   const result = run(dir, ['init', '--dry-run'])
