@@ -1,9 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/toolbox-al.ts')
 const flags = ['--dod', 'текст исправлен', '--size', 'XS', '--skill', 'backend', '--class', 'quick', '--scope', 'docs/**']
@@ -51,10 +52,18 @@ test('done отказывает, если каталог фичи пропал',
   run(dir, ['stage', 'add', 'F1', 'S1', '--goal', 'g', '--appetite', '1 день'])
   run(dir, ['stage', 'activate', 'F1'])
   run(dir, ['task', 'add', 'F1.S1', 'Сделать', ...flags])
+
+  // рабочий каталог был, но пропал: берём задачу, затем убираем каталог
+  const worktree = mkdtempSync(join(tmpdir(), 'al-wt-'))
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  db.prepare("update features set worktree = ? where id = 'F1'").run(worktree)
+  db.close()
+
   run(dir, ['take', 'F1.S1-1', '--as', 'w1'])
+  rmSync(worktree, { recursive: true, force: true })
 
   assert.throws(
     () => run(dir, ['done', 'F1.S1-1', '--as', 'w1', '--summary', 'готово']),
-    /рабочего каталога/,
+    /рабочего каталога|пропал/,
   )
 })

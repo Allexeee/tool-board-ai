@@ -7,12 +7,30 @@ import { getTask, type Task } from './tasks.ts'
 import { nextTask } from './hands.ts'
 import { isReady } from './deps.ts'
 import { scopesOverlap } from './git/scope.ts'
+import { existsSync } from 'node:fs'
 
 export interface TakeOptions {
   executor: string
   taskId?: string
   leaseMinutes?: number
   wipLimit?: number
+}
+
+export function assertFeatureWorktree(db: DatabaseSync, task: Task): void {
+  if (!task.stageId) return
+
+  const feature = db
+    .prepare(
+      'select f.id as id, f.worktree as worktree from stages st join features f on f.id = st.feature_id where st.id = ?',
+    )
+    .get(task.stageId) as { id: string; worktree: string | null } | undefined
+
+  if (!feature?.worktree) {
+    throw new UserError(1, `у фичи ${feature?.id ?? '?'} нет рабочего каталога: выполните feature start`)
+  }
+  if (!existsSync(feature.worktree)) {
+    throw new UserError(1, `рабочий каталог фичи ${feature.id} пропал: выполните feature start`)
+  }
 }
 
 export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
