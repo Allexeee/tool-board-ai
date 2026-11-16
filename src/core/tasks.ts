@@ -81,6 +81,10 @@ const toTask = (row: Row): Task => ({
   createdAt: row.created_at,
 })
 
+export function openTasks(db: DatabaseSync): Task[] {
+  return listTasks(db).filter((task) => task.status !== 'done' && task.status !== 'cancelled')
+}
+
 export function createTask(db: DatabaseSync, input: NewTask): Task {
   const { errors, warnings } = validateTaskInput(input)
   if (errors.length > 0) {

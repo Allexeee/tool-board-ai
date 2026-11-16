@@ -62,6 +62,28 @@ test('request close закрывает запрос, show печатает пр�
   assert.match(shown.out, /закрыт: реализовано в F4/)
 })
 
+test('request open печатает только незакрытые', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-open-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Открытый'])
+  run(dir, ['request', 'add', 'Закрытый'])
+  run(dir, ['request', 'close', 'R2', '--reason', 'сделано'])
+
+  const opened = run(dir, ['request', 'open'])
+  assert.equal(opened.code, 0)
+  assert.match(opened.out, /Открытый/)
+  assert.doesNotMatch(opened.out, /Закрытый/)
+})
+
+test('request open на пустом срезе говорит об этом', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-open-empty-'))
+  run(dir, ['init'])
+
+  const opened = run(dir, ['request', 'open'])
+  assert.equal(opened.code, 0)
+  assert.match(opened.out, /открытых запросов нет/)
+})
+
 test('у закрытого слиянием запроса строки с причиной нет', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-req-close2-'))
   run(dir, ['init'])

@@ -1,8 +1,8 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { listEvents } from '../../core/events.ts'
-import { createTask, editTask, getTask, listTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
+import { createTask, editTask, getTask, listTasks, openTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -85,6 +85,24 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'open') {
+    advanceTime(db)
+    const tasks = openTasks(db)
+    ok(
+      tasks,
+      tasks.length === 0
+        ? 'открытых задач нет'
+        : tasks
+            .map((task) => {
+              const holder = task.holder ? ` · ${task.holder}` : ''
+              const reason = task.reason ? ` · ${task.reason}` : ''
+              return `${task.id.padEnd(10)} ${task.status.padEnd(10)} ${task.title}${holder}${reason}`
+            })
+            .join('\n'),
+    )
+    return 0
+  }
+
   if (args.sub === 'show') {
     // статус должен совпадать с list: время пересчитывается и здесь
     advanceTime(db)
@@ -139,3 +157,4 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+

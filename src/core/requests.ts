@@ -74,6 +74,10 @@ export function listRequests(db: DatabaseSync): Request[] {
   return (db.prepare('select * from requests order by created_at, id').all() as unknown as Row[]).map(toRequest)
 }
 
+export function openRequests(db: DatabaseSync): Request[] {
+  return listRequests(db).filter((request) => request.status !== 'closed')
+}
+
 export function closeRequest(
   db: DatabaseSync,
   input: { id: string; reason: string; actor: string },

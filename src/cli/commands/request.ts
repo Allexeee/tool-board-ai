@@ -1,6 +1,6 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, closeRequest, editRequest, getRequest, listRequests, laterRequest, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
+import { addRequest, closeRequest, editRequest, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
@@ -160,6 +160,17 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'open') {
+    const requests = openRequests(db)
+    ok(
+      requests,
+      requests.length === 0
+        ? 'открытых запросов нет'
+        : requests.map((r) => `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}`).join('\n'),
+    )
+    return 0
+  }
+
   const requests = listRequests(db)
   ok(
     requests,
@@ -169,3 +180,4 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+

@@ -7,6 +7,28 @@ import { UserError } from '../../cli/errors.ts'
 
 export type ReleaseLevel = 'major' | 'minor' | 'patch'
 
+export interface PendingStage {
+  featureId: string
+  featureName: string
+  stageId: string
+  stageName: string
+  mergedAt: string
+}
+
+// что уже в dev, но ещё не уехало в main: этапы, слитые после прошлого релиза
+export function pendingRelease(db: DatabaseSync): PendingStage[] {
+  const lastRelease = db.prepare('select max(at) as at from releases').get() as { at: string | null }
+
+  return db
+    .prepare(
+      `select f.id as featureId, f.name as featureName, s.id as stageId, s.name as stageName, s.merged_at as mergedAt
+       from stages s join features f on f.id = s.feature_id
+       where s.status = 'merged' and s.merged_at > ?
+       order by f.rank, s.seq`,
+    )
+    .all(lastRelease.at ?? '0000-00-00') as unknown as PendingStage[]
+}
+
 export interface ReleaseResult {
   released: boolean
   version?: string

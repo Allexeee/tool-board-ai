@@ -16,7 +16,7 @@ import { doneTask } from '../../src/core/done.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
 import { commitTask } from '../../src/core/git/commit.ts'
 import { mergeStage } from '../../src/core/git/merge.ts'
-import { release } from '../../src/core/git/release.ts'
+import { pendingRelease, release } from '../../src/core/git/release.ts'
 import { runGit } from '../../src/core/git/git.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
@@ -80,3 +80,29 @@ test('релиз требует чистое дерево', () => {
   writeFileSync(join(root, 'README.md'), 'изменено')
   assert.throws(() => release(db, { root, level: 'patch', config, actor: 'owner' }), /грязн/)
 })
+
+test('pending показывает слитые этапы до релиза', () => {
+  const { db } = repoWithMergedStage()
+
+  const pending = pendingRelease(db)
+  assert.equal(pending.length, 1)
+  assert.equal(pending[0].stageName, 'Каркас')
+  assert.equal(pending[0].featureName, 'Оплата')
+})
+
+test('pending пуст после релиза', () => {
+  const { db, root, config } = repoWithMergedStage()
+  release(db, { root, level: 'minor', config, actor: 'owner' })
+
+  assert.deepEqual(pendingRelease(db), [])
+})
+
+test('pending на свежем проекте пуст', () => {
+  const root = makeRepoWithDev()
+  initProject(root)
+  const db = openDb(join(root, '.toolbox-al/tracker.db'))
+
+  assert.deepEqual(pendingRelease(db), [])
+})
+
+
