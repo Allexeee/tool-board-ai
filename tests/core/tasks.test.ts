@@ -4,7 +4,7 @@ import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addStage } from '../../src/core/stages.ts'
-import { createTask, editTask, getTask } from '../../src/core/tasks.ts'
+import { createTask, editTask, getTask, updateTask } from '../../src/core/tasks.ts'
 import { validateTaskInput, type NewTask } from '../../src/core/validate.ts'
 
 function seed(db: DatabaseSync): string {
@@ -108,4 +108,34 @@ test('правка без изменений не пишет событие', ()
 
   const count = db.prepare("select count(*) as c from events where type = 'task.edited'").get()
   assert.equal(count.c, 0)
+})
+
+test('держатель правит свою активную задачу', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+  updateTask(db, id, { status: 'active', holder: 'w1' })
+
+  const edited = editTask(db, { id, actor: 'w1', patch: { dod: ['новое условие'] } })
+
+  assert.deepEqual(edited.dod, ['новое условие'])
+  assert.equal(edited.holder, 'w1', 'правка не сбрасывает аренду')
+})
+
+test('посторонний исполнитель не правит чужую активную задачу', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+  updateTask(db, id, { status: 'active', holder: 'w1' })
+
+  assert.throws(() => editTask(db, { id, actor: 'w2', patch: { dod: ['чужое'] } }), /держит w1/)
+  assert.deepEqual(getTask(db, id)!.dod, ['вебхук принимает событие'])
+})
+
+test('оркестратор правит любую задачу', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+  updateTask(db, id, { status: 'active', holder: 'w1' })
+
+  const edited = editTask(db, { id, actor: 'orchestrator', patch: { title: 'Уточнённый заголовок' } })
+
+  assert.equal(edited.title, 'Уточнённый заголовок')
 })

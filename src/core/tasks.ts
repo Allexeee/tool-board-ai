@@ -217,6 +217,17 @@ export function editTask(
     const current = getTask(db, input.id)
     if (!current) throw new UserError(3, `задача ${input.id} не найдена`)
 
+    // активную задачу правит тот, кто её держит; оркестратор и владелец — поверх очереди
+    if (current.status === 'active' && current.holder !== input.actor) {
+      const allowed = input.actor === 'orchestrator' || input.actor === 'owner'
+      if (!allowed) {
+        throw new UserError(
+          1,
+          `задачу ${current.id} держит ${current.holder}: править может держатель, orchestrator или owner`,
+        )
+      }
+    }
+
     const merged = {
       stageId: current.stageId,
       title: input.patch.title ?? current.title,
