@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openDb } from '../../src/core/db.ts'
 
 const bin = resolve('bin/toolbox-al.ts')
 const tmp = () => mkdtempSync(join(tmpdir(), 'al-pool-cli-'))
@@ -39,4 +40,61 @@ test('task add с этапом создаёт задачу этапа, а не �
   const created = run(dir, ['task', 'add', 'F1.S1', 'Сделать вебхук', ...flags])
   assert.equal(created.code, 0)
   assert.match(created.out, /F1\.S1-1/)
+})
+
+function projectWithPlannedStage() {
+  const dir = tmp()
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'S1', '--goal', 'g', '--appetite', '2 дня'])
+
+  const created = run(dir, ['task', 'add', 'F1.S1', 'Сделать вебхук', ...flags])
+  assert.equal(created.code, 0, created.err)
+  assert.match(created.out, /F1\.S1-1/)
+
+  return { dir, taskId: 'F1.S1-1' }
+}
+
+test('task list показывает planned у задачи неактивного этапа', () => {
+  const { dir, taskId } = projectWithPlannedStage()
+
+  const listed = run(dir, ['task', 'list'])
+  assert.equal(listed.code, 0, listed.err)
+  assert.match(listed.out, new RegExp(`${taskId}\\s+planned`))
+  assert.doesNotMatch(listed.out, /ready/)
+})
+
+test('task list показывает ready после активации этапа', () => {
+  const { dir, taskId } = projectWithPlannedStage()
+  run(dir, ['stage', 'activate', 'F1'])
+
+  const listed = run(dir, ['task', 'list'])
+  assert.equal(listed.code, 0, listed.err)
+  assert.match(listed.out, new RegExp(`${taskId}\\s+ready`))
+  assert.doesNotMatch(listed.out, /planned/)
+})
+
+test('now считает planned отдельно и не выдаёт задачу за готовую', () => {
+  const { dir } = projectWithPlannedStage()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /planned 1/)
+  assert.doesNotMatch(view.out, /ready/)
+})
+
+test('now показывает planned этап, когда предыдущий уже слит', () => {
+  const { dir } = projectWithPlannedStage()
+  run(dir, ['stage', 'add', 'F1', 'S2', '--goal', 'g', '--appetite', '2 дня'])
+  run(dir, ['task', 'add', 'F1.S2', 'Второй шаг', ...flags])
+
+  const db = openDb(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'merged' where id = 'F1.S1'").run()
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /\[2\/2\] planned 1/)
+  assert.doesNotMatch(view.out, /\bdone\b/)
 })

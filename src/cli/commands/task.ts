@@ -1,5 +1,6 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
+import { advanceTime } from '../../core/clock.ts'
 import { createTask, getTask, listTasks, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -59,6 +60,8 @@ export default async function command(args: ParsedArgs) {
   }
 
   const stageId = args.positionals[0] ?? stringFlag(args, 'stage')
+  // статусы пересчитываются перед показом: задача неактивного этапа честно зовётся planned
+  advanceTime(db)
   const tasks = listTasks(db, stageId ? { stageId } : {})
   ok(
     tasks,

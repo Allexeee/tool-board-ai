@@ -21,7 +21,13 @@ export interface NowView {
 export function nowView(db: DatabaseSync): NowView {
   const features = listFeatures(db).map((feature) => {
     const stages = listStages(db, feature.id)
-    const stage = stages.find((item) => item.status === 'active') ?? stages[0] ?? null
+    // показываем то, что происходит сейчас: активный этап, иначе ближайший запланированный,
+    // и только если таких нет — первый (например, уже слитый)
+    const stage =
+      stages.find((item) => item.status === 'active') ??
+      stages.find((item) => item.status === 'planned') ??
+      stages[0] ??
+      null
 
     const counts: Record<string, number> = {}
     if (stage) {
