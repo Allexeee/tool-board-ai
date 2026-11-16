@@ -1,4 +1,4 @@
-import { UserError } from './errors.ts'
+﻿import { UserError } from './errors.ts'
 
 const COMMANDS_WITH_SUB = new Set([
   'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
@@ -13,10 +13,10 @@ const KNOWN_FLAGS = new Set([
   'deadline', 'options', 'addressee', 'policy', 'timeout', 'appetite',
   'schedule', 'window', 'guard', 'action', 'cmd', 'on-missing', 'once', 'days', 'history', 'until',
   'id', 'task', 'stage', 'feature', 'request', 'executor',
-  'limit', 'from', 'main', 'dev', 'summary', 'checks', 'left', 'status',
+  'limit', 'from', 'main', 'dev', 'branch', 'summary', 'checks', 'left', 'status',
 ])
 
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all'])
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all', 'branch'])
 
 export type FlagValue = string | boolean | string[]
 
@@ -111,3 +111,4 @@ export function listFlag(args: ParsedArgs, name: string): string[] {
 export function boolFlag(args: ParsedArgs, name: string): boolean {
   return args.flags[name] === true || args.flags[name] === 'true'
 }
+

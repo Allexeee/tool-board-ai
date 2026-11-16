@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
 import { getFeature, type Feature } from '../features.ts'
 import { appendEvent } from '../events.ts'
-import { runGit } from './git.ts'
+import { branchExists, resolveBranches, runGit } from './git.ts'
 import { UserError } from '../../cli/errors.ts'
 
 export function featureSlug(feature: Feature): string {
@@ -90,4 +91,57 @@ export function cleanWorktree(
   })
 
   return { removed: true, rescued, tag }
+}
+
+function isMergedInto(root: string, branch: string, dev: string): boolean {
+  const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], { cwd: root, stdio: 'ignore' })
+  return result.status === 0
+}
+
+export interface FeatureCleanResult extends CleanResult {
+  branchDeleted: boolean
+}
+
+/** Ручная уборка: каталог всегда, ветку — по флагу. Незакрытую фичу не трогаем. */
+export function cleanFeature(
+  db: DatabaseSync,
+  input: {
+    featureId: string
+    root: string
+    branch: boolean
+    config: { branches: { main: string; dev: string } }
+    actor: string
+  },
+): FeatureCleanResult {
+  const feature = getFeature(db, input.featureId)
+  if (!feature) throw new UserError(3, `фича ${input.featureId} не найдена`)
+  if (feature.status !== 'done' && feature.status !== 'cancelled') {
+    throw new UserError(1, `фича ${feature.id} в статусе ${feature.status}: clean не трогает незакрытые`)
+  }
+
+  const cleaned = cleanWorktree(db, { featureId: feature.id, root: input.root, actor: input.actor })
+  if (!input.branch) return { ...cleaned, branchDeleted: false }
+
+  const branch = feature.branch
+  if (!branch) return { ...cleaned, branchDeleted: false }
+  if (cleaned.reason) {
+    throw new UserError(1, `ветку ${branch} не удалить: каталог остался (${cleaned.reason})`)
+  }
+  if (!branchExists(input.root, branch)) return { ...cleaned, branchDeleted: false }
+
+  const { dev } = resolveBranches(input.root, input.config)
+  const merged = isMergedInto(input.root, branch, dev)
+  const tag = archiveTag(feature)
+  if (!merged) runGit(input.root, ['tag', '-f', tag, branch])
+
+  runGit(input.root, ['branch', '-D', branch])
+  appendEvent(db, {
+    type: 'feature.branch_deleted',
+    actor: input.actor,
+    subject: feature.id,
+    after: { branch, tag: merged ? null : tag },
+  })
+  db.prepare('update features set branch = null where id = ?').run(feature.id)
+
+  return { ...cleaned, branchDeleted: true }
 }

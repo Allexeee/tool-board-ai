@@ -2,6 +2,7 @@
 import { openDb } from '../../core/db.ts'
 import { abandonFeature, addFeature, getFeature, listFeatures, rankFeature } from '../../core/features.ts'
 import { startFeature } from '../../core/git/worktree.ts'
+import { cleanFeature } from '../../core/git/clean.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -43,6 +44,30 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'clean') {
+    const id = args.positionals[0] ?? stringFlag(args, 'id')
+    if (!id) throw new UserError(3, 'использование: feature clean F1 [--branch]')
+
+    const result = cleanFeature(db, {
+      featureId: id,
+      root: project.root,
+      branch: args.flags.branch === true,
+      config: project.config,
+      actor: 'owner',
+    })
+
+    const what = [
+      result.removed ? 'каталог убран' : 'каталога не было',
+      result.rescued ? 'наработки спасены в тег' : null,
+      result.branchDeleted ? 'ветка удалена' : null,
+    ]
+      .filter(Boolean)
+      .join(', ')
+
+    ok(result, `${id}: ${what}`)
+    return 0
+  }
+
   if (args.sub === 'rank') {
     const id = args.positionals[0]
     const rank = Number(args.positionals[1] ?? stringFlag(args, 'rank'))
@@ -71,3 +96,4 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
