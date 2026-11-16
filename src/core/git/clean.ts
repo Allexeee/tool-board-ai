@@ -1,4 +1,4 @@
-﻿import { existsSync } from 'node:fs'
+﻿import { existsSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
@@ -41,7 +41,9 @@ export function cleanWorktree(
     return { removed: false, rescued: false, tag: null }
   }
 
-  const dirty = runGit(dir, ['status', '--porcelain', '--untracked-files=normal']).length > 0
+  const registered = isRegisteredWorktree(input.root, dir)
+  const dirty =
+    registered && runGit(dir, ['status', '--porcelain', '--untracked-files=normal']).length > 0
   let tag: string | null = null
   let rescued = false
 
@@ -70,9 +72,16 @@ export function cleanWorktree(
     if (cwd === dir || cwd.startsWith(dir + (process.platform === 'win32' ? '\\' : '/'))) {
       process.chdir(input.root)
     }
-    runGit(input.root, ['worktree', 'remove', '--force', dir])
+
+    // после неудачной уборки git может снять каталог с учёта, оставив пустую папку:
+    // такое удаляем напрямую, иначе остаток не убрать уже никогда
+    if (registered) {
+      runGit(input.root, ['worktree', 'remove', '--force', dir])
+    } else {
+      rmSync(dir, { recursive: true, force: true })
+    }
   } catch (error) {
-    const reason = (error as Error).message
+    const reason = `${(error as Error).message}. Закройте процесс, который держит каталог, и повторите feature clean`
     appendEvent(db, {
       type: 'feature.cleanup_skipped',
       actor: input.actor,
@@ -209,6 +218,16 @@ export function staleBranches(
   return stale
 }
 
+function isRegisteredWorktree(root: string, dir: string): boolean {
+  const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase()
+  const wanted = normalize(dir)
+
+  return runGit(root, ['worktree', 'list', '--porcelain'])
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .some((line) => normalize(line.slice('worktree '.length).trim()) === wanted)
+}
+
 function isMergedInto(root: string, branch: string, dev: string): boolean {
   const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], { cwd: root, stdio: 'ignore' })
   return result.status === 0
@@ -261,4 +280,5 @@ export function cleanFeature(
 
   return { ...cleaned, branchDeleted: true }
 }
+
 
