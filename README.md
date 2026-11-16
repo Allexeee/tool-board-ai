@@ -28,7 +28,10 @@ node bin/toolbox-al.ts done F1.S1-1 --as w1 --summary "вебхук работа
 | `init [каталог]` | создаёт `.toolbox-al/`, базу, `.gitignore` |
 | `request add\|list\|show` | запросы: то, что пишет человек словами |
 | `feature add\|list\|show\|rank` | фичи и их ранг |
-| `stage add\|list\|activate` | этапы: единица слияния и приёмки |
+| `stage add\|list\|activate\|merge` | этапы: единица слияния и приёмки; `--appetite` обязателен |
+| `feature start\|abandon` | ветка и рабочий каталог фичи; отмена без слияния |
+| `save id --summary` | черновик в пределах области |
+| `release major\|minor\|patch` | changelog, тег и слияние dev в main |
 | `task add\|show\|list` | задачи; без DoD не создаются |
 | `executor add\|list` | исполнители и их навыки |
 | `hand show\|set\|add` | руки исполнителей |
