@@ -1,6 +1,7 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { addFeature, getFeature, listFeatures, rankFeature } from '../../core/features.ts'
+import { startFeature } from '../../core/git/worktree.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -19,6 +20,14 @@ export default async function command(args: ParsedArgs) {
       rank: stringFlag(args, 'rank') ? Number(stringFlag(args, 'rank')) : undefined,
     })
     ok(feature, `${feature.id}  ранг ${feature.rank}  ${feature.name}`)
+    return 0
+  }
+
+  if (args.sub === 'start') {
+    const id = args.positionals[0] ?? stringFlag(args, 'id')
+    if (!id) throw new UserError(3, 'использование: feature start F1')
+    const result = startFeature(db, { root: project.root, featureId: id, config: project.config })
+    ok(result, `${id}: ветка ${result.branch}\nкаталог ${result.worktree}`)
     return 0
   }
 
