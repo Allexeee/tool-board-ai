@@ -1,6 +1,7 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { activateNextStage, addStage, listStages } from '../../core/stages.ts'
+import { mergeStage } from '../../core/git/merge.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -21,6 +22,19 @@ export default async function command(args: ParsedArgs) {
     const stage = addStage(db, { featureId, name, goal, appetite })
     ok(stage, `${stage.id}  ${stage.name}`)
     return 0
+  }
+
+  if (args.sub === 'merge') {
+    const stageId = args.positionals[0]
+    if (!stageId) throw new UserError(3, 'использование: stage merge F1.S1')
+    const result = mergeStage(db, { root: project.root, stageId, config: project.config })
+    ok(
+      result,
+      result.merged
+        ? `${stageId} слит в ${project.config.branches.dev}`
+        : `${stageId} не слит: ${result.reason}`,
+    )
+    return result.merged ? 0 : 1
   }
 
   if (args.sub === 'activate') {
