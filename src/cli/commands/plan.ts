@@ -19,10 +19,14 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'new') {
     const file = args.positionals[1] ?? stringFlag(args, 'from')
     if (!file) throw new UserError(3, 'использование: plan new R1 plan.json')
-    const body = JSON.parse(readFileSync(file, 'utf8')) as {
-      title: string
-      assumptions?: string[]
-      stages: never[]
+
+    // PowerShell и часть редакторов пишут UTF-8 BOM: для JSON это мусор в начале
+    const raw = readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
+    let body: { title: string; assumptions?: string[]; stages: never[] }
+    try {
+      body = JSON.parse(raw) as { title: string; assumptions?: string[]; stages: never[] }
+    } catch (error) {
+      throw new UserError(3, `не разобрать JSON плана ${file}: ${(error as Error).message}`)
     }
     const plan = addPlan(db, {
       requestId,
