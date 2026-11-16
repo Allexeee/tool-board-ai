@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -141,6 +141,20 @@ export function migrate(db: DatabaseSync): number {
   try {
     if (from < 1) db.exec(DDL_V1)
     if (from < 2) db.exec('alter table tasks add column severity text')
+    if (from < 3) {
+      db.exec('alter table features add column branch text')
+      db.exec('alter table features add column worktree text')
+      db.exec('alter table features add column check_cmd text')
+      db.exec('alter table stages add column merged_at text')
+      db.exec(
+        'create table if not exists releases (' +
+          'id integer primary key autoincrement, ' +
+          'version text not null, ' +
+          'tag text not null, ' +
+          'changelog text not null, ' +
+          'at text not null)',
+      )
+    }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +
       'on conflict(key) do update set value = excluded.value',

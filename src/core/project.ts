@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+﻿import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { openDb } from './db.ts'
 import { DEFAULT_CONFIG, readConfig, writeConfig, type Config } from './config.ts'
+import { installHooks } from './git/hooks.ts'
 
 export interface Project {
   root: string
@@ -48,6 +49,10 @@ export function initProject(dir: string): { created: string[]; root: string } {
   if (!existsSync(dbPath)) {
     openDb(dbPath).close()
     created.push('.toolbox-al/tracker.db')
+  }
+
+  if (existsSync(join(root, '.git'))) {
+    installHooks(join(root, '.git'), { protectedBranches: ['main', 'dev'] })
   }
 
   const gitignore = join(root, '.gitignore')

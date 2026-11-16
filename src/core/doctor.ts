@@ -1,8 +1,12 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION } from './schema.ts'
 import { listExecutors } from './executors.ts'
 import { listTasks } from './tasks.ts'
 import { listFeatures } from './features.ts'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { hookInstalled } from './git/hooks.ts'
+import { branchExists } from './git/git.ts'
 
 export interface Check {
   name: string
@@ -13,7 +17,10 @@ export interface Check {
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
 
-export function doctorReport(db: DatabaseSync, options: { ownerStaleDays?: number } = {}): { checks: Check[] } {
+export function doctorReport(
+  db: DatabaseSync,
+  options: { ownerStaleDays?: number; root?: string; devBranch?: string } = {},
+): { checks: Check[] } {
   const checks: Check[] = []
   const ownerStaleDays = options.ownerStaleDays ?? 3
 
@@ -87,7 +94,38 @@ export function doctorReport(db: DatabaseSync, options: { ownerStaleDays?: numbe
     detail: orphanHand.length === 0 ? 'ссылки целы' : `руки ссылаются на пропавшие задачи: ${orphanHand.map((r) => r.task_id).join(', ')}`,
   })
 
+  if (options.root) checks.push(...gitChecks(db, options.root, options.devBranch ?? 'dev'))
+
   return { checks }
+}
+
+function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
+  const checks: Check[] = []
+  const gitDir = join(root, '.git')
+
+  checks.push({
+    name: 'git-хук',
+    ok: hookInstalled(gitDir),
+    detail: hookInstalled(gitDir) ? 'main и dev защищены' : 'хук не установлен: коммит в main пройдёт',
+  })
+
+  checks.push({
+    name: 'ветка dev',
+    ok: branchExists(root, devBranch),
+    detail: branchExists(root, devBranch) ? devBranch : `ветки ${devBranch} нет: этапы некуда сливать`,
+  })
+
+  const missing = listFeatures(db)
+    .filter((feature) => feature.worktree && !existsSync(feature.worktree))
+    .map((feature) => feature.id)
+
+  checks.push({
+    name: 'каталоги фич',
+    ok: missing.length === 0,
+    detail: missing.length === 0 ? 'на месте' : `нет каталога у: ${missing.join(', ')}`,
+  })
+
+  return checks
 }
 
 function fairness(db: DatabaseSync): Check {

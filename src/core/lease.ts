@@ -6,6 +6,7 @@ import { getExecutor, assertSkill, touchExecutor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 import { nextTask } from './hands.ts'
 import { isReady } from './deps.ts'
+import { scopesOverlap } from './git/scope.ts'
 
 export interface TakeOptions {
   executor: string
@@ -52,6 +53,22 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
 
     if (!isReady(db, task.id)) {
       throw new UserError(1, `у задачи ${task.id} не закрыты зависимости`)
+    }
+
+    const conflict = db
+      .prepare(
+        `select t.id as id, t.scope as scope from tasks t
+         where t.status = 'active'
+           and t.id != ?
+           and t.stage_id in (select id from stages where feature_id = (select feature_id from stages where id = ?))`,
+      )
+      .all(task.id, task.stageId ?? '') as Array<{ id: string; scope: string }>
+
+    for (const other of conflict) {
+      const otherScope = other.scope === 'exclusive' ? 'exclusive' : JSON.parse(other.scope)
+      if (scopesOverlap(task.scope, otherScope)) {
+        throw new UserError(1, `область задачи ${task.id} пересекается с ${other.id}`)
+      }
     }
 
     if (task.class === 'expedite') {
