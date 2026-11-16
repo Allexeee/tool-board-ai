@@ -10,7 +10,7 @@ import { addFeature } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
-import { commitTask, saveDraft } from '../../src/core/git/commit.ts'
+import { assertScopeRespected, commitTask, saveDraft } from '../../src/core/git/commit.ts'
 import { runGit } from '../../src/core/git/git.ts'
 
 function fixture() {
@@ -71,4 +71,18 @@ test('изменения вне области отвергаются', () => {
     () => commitTask({ worktree, task, report: { summary: 's', checks: [] } }),
     /вне области/,
   )
+})
+
+test('несохранённое изменение в области не считается чужим', () => {
+  const { worktree, task } = fixture()
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+  assert.doesNotThrow(() => assertScopeRespected(worktree, task))
+})
+
+test('чужой файл в дереве виден как изменение вне области', () => {
+  const { worktree, task } = fixture()
+  mkdirSync(join(worktree, 'docs'), { recursive: true })
+  writeFileSync(join(worktree, 'docs/b.md'), 'b')
+  assert.throws(() => assertScopeRespected(worktree, task), /вне области/)
 })

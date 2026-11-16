@@ -9,10 +9,15 @@ function pathspecs(task: Task): string[] {
 }
 
 function changedFiles(worktree: string): string[] {
-  return runGit(worktree, ['status', '--porcelain'])
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => line.slice(3).trim())
+  const parts = [
+    runGit(worktree, ['diff', '--name-only']),
+    runGit(worktree, ['diff', '--cached', '--name-only']),
+    runGit(worktree, ['ls-files', '--others', '--exclude-standard']),
+  ]
+
+  return parts
+    .flatMap((part) => part.split('\n'))
+    .map((line) => line.trim())
     .filter(Boolean)
 }
 
