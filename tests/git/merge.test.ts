@@ -1,6 +1,6 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeRepoWithDev } from '../helpers/repo.ts'
 import { initProject } from '../../src/core/project.ts'
@@ -105,4 +105,52 @@ test('запрос не закрывается, пока у него есть д
 
   assert.notEqual(getRequest(db, feature.requestId!)!.status, 'closed')
 })
+
+test('после слияния каталог фичи удаляется, а ветка остаётся', () => {
+  const { root, db, config, stage, feature, worktree } = mergedReadyFixture()
+  mergeStage(db, { root, stageId: stage.id, config })
+
+  assert.equal(existsSync(worktree), false)
+  assert.equal(getFeature(db, feature.id)!.worktree, null)
+  const branch = getFeature(db, feature.id)!.branch!
+  assert.ok(runGit(root, ['branch', '--list', branch]).length > 0)
+})
+
+test('грязный каталог спасается коммитом и тегом', () => {
+  const { root, db, config, stage, feature, worktree } = mergedReadyFixture()
+  writeFileSync(join(worktree, 'src', 'черновик.txt'), 'недоделка')
+
+  mergeStage(db, { root, stageId: stage.id, config })
+
+  assert.equal(existsSync(worktree), false)
+  const tags = runGit(root, ['tag', '--list', 'archive/*'])
+  assert.match(tags, /archive\//)
+  const branch = getFeature(db, feature.id)!.branch!
+  const last = runGit(root, ['log', '-1', '--pretty=%s', branch])
+  assert.match(last, /остатки/)
+})
+
+test('если спасти не удалось, каталог остаётся', () => {
+  const { root, db, config, stage, feature, worktree } = mergedReadyFixture()
+  writeFileSync(join(worktree, 'src', 'черновик.txt'), 'недоделка')
+
+  const gitDir = runGit(worktree, ['rev-parse', '--absolute-git-dir'])
+  const lock = join(gitDir, 'index.lock')
+  writeFileSync(lock, '')
+  try {
+    mergeStage(db, { root, stageId: stage.id, config })
+  } finally {
+    rmSync(lock, { force: true })
+  }
+
+  assert.equal(existsSync(worktree), true)
+  assert.ok(getFeature(db, feature.id)!.worktree)
+  const event = db
+    .prepare("select note from events where type = 'feature.cleanup_skipped' order by id desc limit 1")
+    .get() as { note: string } | undefined
+  assert.ok(event)
+})
+
+
+
 
