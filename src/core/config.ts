@@ -14,7 +14,7 @@ export interface Config {
 }
 
 export const DEFAULT_CONFIG: Config = {
-  toolVersion: '0.1.0',
+  toolVersion: '1.0.0',
   schemaVersion: 6,
   leaseMinutes: 30,
   maxAttempts: 3,

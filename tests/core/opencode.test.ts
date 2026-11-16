@@ -64,7 +64,7 @@ test('init создаёт файлы OpenCode', () => {
     setupSkill: true,
     agentsBlock: true,
   })
-  assert.equal(pluginVersion(root), '0.1.0')
+  assert.equal(pluginVersion(root), '1.0.0')
 })
 
 test('doctor замечает отсутствие плагина', () => {
