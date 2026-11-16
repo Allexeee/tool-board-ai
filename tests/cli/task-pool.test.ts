@@ -108,7 +108,7 @@ test('now показывает активный этап', () => {
   assert.match(view.out, /\[1\/1\] ready 1/)
 })
 
-test('now показывает принятый этап, который ещё ждёт слияния', () => {
+test('приёмка двигает работу: следующий этап становится активным', () => {
   const { dir } = projectWithPlannedStage()
   run(dir, ['stage', 'add', 'F1', 'S2', '--goal', 'g', '--appetite', '2 дня'])
   run(dir, ['stage', 'activate', 'F1'])
@@ -121,11 +121,12 @@ test('now показывает принятый этап, который ещё 
   const accepted = run(dir, ['stage', 'accept', 'F1.S1'])
   assert.equal(accepted.code, 0, accepted.err)
 
+  const stages = run(dir, ['stage', 'list', 'F1'])
+  assert.match(stages.out, /F1\.S2\s+active/)
+
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /\[1\/2\] done 1/)
-  assert.doesNotMatch(view.out, /\[2\/2\]/)
-  assert.doesNotMatch(view.out, /planned/)
+  assert.match(view.out, /ждёт вас: 1/)
 })
 
 test('now без этапов показывает фичу с нулевым счётчиком', () => {

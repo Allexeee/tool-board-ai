@@ -1,7 +1,7 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { getStage, type Stage } from './stages.ts'
+import { activateNextStage, getStage, type Stage } from './stages.ts'
 import { listTasks, updateTask } from './tasks.ts'
 import { UserError } from '../cli/errors.ts'
 
@@ -20,6 +20,11 @@ export function acceptStage(db: DatabaseSync, input: { stageId: string; actor: s
 
     db.prepare("update stages set status = 'accepted' where id = ?").run(stage.id)
     appendEvent(db, { type: 'stage.accepted', actor: input.actor, subject: stage.id })
+
+    // приёмка владельцем — такой же повод двинуть работу дальше, как и слияние
+    if (stage.acceptance === 'owner' || stage.acceptance === 'owner_before_next') {
+      activateNextStage(db, stage.featureId)
+    }
 
     return getStage(db, stage.id)!
   })
@@ -58,3 +63,4 @@ export function invalidateAcceptance(db: DatabaseSync, stageId: string | null): 
   db.prepare("update stages set status = 'active' where id = ?").run(stageId)
   appendEvent(db, { type: 'stage.acceptance_invalidated', actor: 'system', subject: stageId })
 }
+

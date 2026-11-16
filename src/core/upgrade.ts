@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION, migrate } from './schema.ts'
@@ -101,6 +101,21 @@ export function checkVersions(root: string, options: { from?: string } = {}): Ve
 
   const available = availableVersions(root)
   return { current, available, source: available.length ? 'git' : 'none', latest: available[0] ?? null }
+}
+
+/** Оставляет последние копии базы: иначе они копятся после каждого обновления. */
+export function pruneBackups(dbPath: string, keep = 5): string[] {
+  const dir = dirname(dbPath)
+  const prefix = `${basename(dbPath)}.backup-`
+  if (!existsSync(dir)) return []
+
+  const files = readdirSync(dir)
+    .filter((file) => file.startsWith(prefix))
+    .sort()
+
+  const extra = files.slice(0, Math.max(0, files.length - keep))
+  for (const file of extra) rmSync(join(dir, file), { force: true })
+  return extra
 }
 
 export interface JournalEntry {
@@ -219,6 +234,7 @@ export function applyUpgrade(
   const stamp = (input.now ?? new Date()).toISOString().replace(/[:.]/g, '-')
   const backup = `${input.dbPath}.backup-${stamp}`
   db.exec(`vacuum into '${backup.replace(/'/g, "''")}'`)
+  pruneBackups(input.dbPath)
 
   migrate(db)
 

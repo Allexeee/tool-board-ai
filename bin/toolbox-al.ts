@@ -6,18 +6,23 @@ import { UserError } from '../src/cli/errors.ts'
 const HELP = `toolbox-al — ящик инструментов для работы по фичам
 
   init                    создать скелет проекта
-  request add|list|show   запросы
-  feature list|show|rank  фичи
-  stage list|accept       этапы
-  task add|show|list      задачи
+  request add|list|open   запросы: добавить, все, незакрытые
+  feature list|show|clean фичи: список, карточка, уборка каталога и ветки
+  stage list|accept|merge этапы: список, приёмка, слияние в dev
+  task add|show|list|open задачи: добавить, карточка, список, открытые
+  pool list|stale|merge   пул задач без фич
   executor add|list       исполнители
   hand show|set|add       руки исполнителей
   take / next             взять задачу
   touch                   продлить аренду
-  done / block / reopen   закрыть, прервать, вернуть
+  done / block            закрыть, прервать
+  reopen                  вернуть задачу в работу
   ask / answer            вопросы
   now / inbox / cal       состояние, ожидание, календарь
+  upgrade [--yes]         обновить инструмент в проекте
+  version                 версия инструмента
   dispatch                кому что достаётся
+                          пример: toolbox-al dispatch --json
   doctor                  проверка настройки
 
   --json                  машинный вывод

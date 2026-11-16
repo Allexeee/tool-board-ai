@@ -21,6 +21,32 @@ test('этап с приёмкой владельца не сливается б
   assert.equal(mergeStage(db, { root, stageId: stage.id, config }).merged, true)
 })
 
+test('приёмка владельцем активирует следующий этап', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'A', body: '', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  const first = addStage(db, {
+    featureId: feature.id,
+    name: 'S1',
+    goal: 'g',
+    appetite: '2 дня',
+    acceptance: 'owner',
+  })
+  const second = addStage(db, {
+    featureId: feature.id,
+    name: 'S2',
+    goal: 'g',
+    appetite: '2 дня',
+    acceptance: 'owner_before_next',
+  })
+  activateNextStage(db, feature.id)
+
+  acceptStage(db, { stageId: first.id, actor: 'owner' })
+
+  assert.equal(getStage(db, first.id)!.status, 'accepted')
+  assert.equal(getStage(db, second.id)!.status, 'active')
+})
+
 test('возврат этапа переоткрывает задачи', () => {
   const db = openDb(':memory:')
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
