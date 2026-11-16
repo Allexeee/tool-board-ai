@@ -18,8 +18,13 @@ export default async function command() {
       .filter(([, value]) => value > 0)
       .map(([status, value]) => `${status} ${value}`)
       .join(' · ')
-    return `${feature.rank}. ${feature.id.padEnd(5)} ${feature.name}  [${feature.stage.seq}/${feature.stage.total}] ${counts}`
+    const mark = feature.finished
+      ? `[${feature.stage.done}/${feature.stage.total}] завершена`
+      : `[${feature.stage.seq}/${feature.stage.total}]`
+    return `${feature.rank}. ${feature.id.padEnd(5)} ${feature.name}  ${mark} ${counts}`.trimEnd()
   })
+
+  const pool = view.pool.map((task) => `  ${task.id.padEnd(12)} ${task.title}`)
 
   const holders = view.holders.map((holder) =>
     holder.task ? `  ${holder.executor.padEnd(12)} держит ${holder.task}` : `  ${holder.executor.padEnd(12)} свободен`,
@@ -28,6 +33,7 @@ export default async function command() {
   const text =
     'ФИЧИ\n' +
     (features.length ? features.join('\n') : '  нет') +
+    (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
     (holders.length ? holders.join('\n') : '  нет') +
     `\n\nждёт вас: ${view.waitingOwner}`

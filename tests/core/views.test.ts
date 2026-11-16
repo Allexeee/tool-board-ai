@@ -72,3 +72,44 @@ test('повторный dispatch не сбрасывает руки', () => {
   assert.deepEqual(second.assignments, first.assignments)
   assert.ok(second.assignments[0].tasks.length > 0)
 })
+
+test('у завершённой фичи прогресс полный, а не первый этап', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
+  db.prepare("update features set status = 'done' where id = 'F1'").run()
+
+  const feature = nowView(db).features[0]
+  assert.equal(feature.finished, true)
+  assert.equal(feature.stage.done, 1)
+  assert.equal(feature.stage.seq, feature.stage.total)
+})
+
+test('номер этапа считается по завершённым', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addStage(db, { featureId: 'F1', name: 'S2', goal: 'g', appetite: '1 день' })
+  db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
+  activateNextStage(db, 'F1')
+
+  const feature = nowView(db).features[0]
+  assert.equal(feature.stage.total, 2)
+  assert.equal(feature.stage.seq, 2)
+  assert.equal(feature.stage.done, 1)
+})
+
+test('ready-задача пула видна в now отдельной строкой', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  createTask(db, {
+    title: 'Поправить опечатку',
+    dod: ['опечатки нет'],
+    size: 'XS',
+    skill: 'backend',
+    class: 'quick',
+    scope: ['docs/**'],
+  })
+  refreshReady(db)
+
+  assert.ok(nowView(db).pool.some((task) => task.title === 'Поправить опечатку'))
+})

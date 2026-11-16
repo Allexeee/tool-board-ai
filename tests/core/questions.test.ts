@@ -82,4 +82,77 @@ test('ответ на чужой вопрос отвергается', () => {
   assert.throws(() => answer(db, { id: question.id, answer: 'y', actor: 'w1' }), /адресован/)
 })
 
+test('этап, принятый но не слитый, ждёт владельца', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'accepted' where id = ?").run(stageId)
+
+  const item = inbox(db).find((entry) => entry.kind === 'stage')
+  assert.equal(item?.id, stageId)
+})
+
+test('этап на приёмке у владельца виден, на авто-приёмке нет', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'in_review', acceptance = 'owner' where id = ?").run(stageId)
+  assert.equal(inbox(db).filter((entry) => entry.kind === 'stage').length, 1)
+
+  db.prepare("update stages set acceptance = 'auto' where id = ?").run(stageId)
+  assert.equal(inbox(db).filter((entry) => entry.kind === 'stage').length, 0)
+})
+
+test('слитый этап в inbox не попадает', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
+
+  assert.equal(inbox(db).some((entry) => entry.kind === 'stage' && entry.id === stageId), false)
+})
+
+test('задача пула в blocked и needs_owner видна в inbox', () => {
+  const db = openDb(':memory:')
+  seed(db)
+
+  const blocked = createTask(db, {
+    stageId: null,
+    title: 'Починить выгрузку',
+    dod: ['выгрузка идёт'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  updateTask(db, blocked.id, { status: 'blocked', reason: 'нет доступа' })
+
+  const stuck = createTask(db, {
+    stageId: null,
+    title: 'Согласовать макет',
+    dod: ['макет согласован'],
+    size: 'S',
+    skill: 'design',
+    class: 'standard',
+    scope: ['docs/**'],
+  })
+  updateTask(db, stuck.id, { status: 'needs_owner' })
+
+  const ids = inbox(db).map((entry) => entry.id)
+  assert.ok(ids.includes(blocked.id))
+  assert.ok(ids.includes(stuck.id))
+})
+
+test('inbox не создаёт вопросов и событий', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'accepted' where id = ?").run(stageId)
+
+  const count = (table: string) =>
+    (db.prepare(`select count(*) as c from ${table}`).get() as { c: number }).c
+
+  const before = { events: count('events'), questions: count('questions'), tasks: count('tasks') }
+  inbox(db)
+  const after = { events: count('events'), questions: count('questions'), tasks: count('tasks') }
+
+  assert.deepEqual(after, before)
+})
+
 import type { Task } from '../../src/core/tasks.ts'

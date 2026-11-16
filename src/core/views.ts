@@ -12,8 +12,11 @@ export interface NowView {
     id: string
     name: string
     rank: number
-    stage: { id: string; seq: number; total: number; counts: Record<string, number> }
+    status: string
+    finished: boolean
+    stage: { id: string; seq: number; total: number; done: number; counts: Record<string, number> }
   }>
+  pool: Array<{ id: string; title: string }>
   holders: Array<{ executor: string; task: string | null }>
   waitingOwner: number
 }
@@ -21,15 +24,20 @@ export interface NowView {
 export function nowView(db: DatabaseSync): NowView {
   const features = listFeatures(db).map((feature) => {
     const stages = listStages(db, feature.id)
+    const done = stages.filter((item) => item.status === 'merged').length
+    const finished = stages.length > 0 && done === stages.length
+
     // показываем то, что происходит сейчас: работающий этап, затем принятый (ждёт слияния),
-    // затем на ревью, затем ближайший запланированный, и только потом первый
-    const stage =
-      stages.find((item) => item.status === 'active') ??
-      stages.find((item) => item.status === 'accepted') ??
-      stages.find((item) => item.status === 'in_review') ??
-      stages.find((item) => item.status === 'planned') ??
-      stages[0] ??
-      null
+    // затем на ревью, затем ближайший запланированный, и только потом первый.
+    // у завершённой фичи «сейчас» — последний этап, иначе номер снова начинался бы с первого
+    const stage = finished
+      ? stages[stages.length - 1]
+      : stages.find((item) => item.status === 'active') ??
+        stages.find((item) => item.status === 'accepted') ??
+        stages.find((item) => item.status === 'in_review') ??
+        stages.find((item) => item.status === 'planned') ??
+        stages[0] ??
+        null
 
     const counts: Record<string, number> = {}
     if (stage) {
@@ -42,21 +50,28 @@ export function nowView(db: DatabaseSync): NowView {
       id: feature.id,
       name: feature.name,
       rank: feature.rank,
+      status: feature.status,
+      finished: finished || feature.status === 'done',
       stage: {
         id: stage?.id ?? '',
-        seq: stage?.seq ?? 0,
+        seq: stages.length === 0 ? 0 : finished ? stages.length : done + 1,
         total: stages.length,
+        done,
         counts,
       },
     }
   })
+
+  const pool = listTasks(db, { status: 'ready' as TaskStatus })
+    .filter((task) => task.stageId === null)
+    .map((task) => ({ id: task.id, title: task.title }))
 
   const holders = listExecutors(db).map((executor) => {
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })[0]
     return { executor: executor.id, task: active?.id ?? null }
   })
 
-  return { features, holders, waitingOwner: ownerHand(db).length }
+  return { features, pool, holders, waitingOwner: ownerHand(db).length }
 }
 
 export interface DispatchEntry {
