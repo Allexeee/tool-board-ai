@@ -141,6 +141,42 @@ test('у запроса без слияний строки о заливке н�
   assert.doesNotMatch(shown.out, /залито:/)
 })
 
+test('request list показывает, где запрос — dev или main', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-list-land-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'S1', '--goal', 'g', '--appetite', '1 день'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  db.prepare("update stages set status = 'merged', merged_at = '2026-01-01T00:00:00.000Z' where id = 'F1.S1'").run()
+  db.prepare("update features set status = 'done' where id = 'F1'").run()
+  db.close()
+
+  run(dir, ['request', 'close', 'R1', '--reason', 'готово'])
+
+  const before = run(dir, ['request', 'list'])
+  assert.match(before.out, /\(done · dev\)/)
+
+  const released = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  released
+    .prepare('insert into releases (version, tag, changelog, at) values (?, ?, ?, ?)')
+    .run('0.2.0', 'v0.2.0', 'x', '2026-06-01T00:00:00.000Z')
+  released.close()
+
+  const after = run(dir, ['request', 'list'])
+  assert.match(after.out, /\(done · main\)/)
+})
+
+test('у запроса без слияний отметки нет и строка не меняется', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-list-noland-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+
+  const listed = run(dir, ['request', 'list'])
+  assert.match(listed.out, /R1\s+inbox\s+Оплата\s*$/)
+})
+
 test('у закрытого слиянием запроса строки с причиной нет', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-req-close2-'))
   run(dir, ['init'])

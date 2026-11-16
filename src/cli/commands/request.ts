@@ -185,8 +185,13 @@ export default async function command(args: ParsedArgs) {
       ? 'запросов нет'
       : requests
           .map((r) => {
+            const parts: string[] = []
             const kind = r.status === 'closed' ? closeKind(db, r.id) : null
-            const suffix = kind ? `  (${kind === 'merged' ? 'объединён' : kind})` : ''
+            if (kind) parts.push(kind === 'merged' ? 'объединён' : kind)
+            const land = landState(db, r.id)
+            if (land) parts.push(land)
+
+            const suffix = parts.length > 0 ? `  (${parts.join(' · ')})` : ''
             return `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}${suffix}`
           })
           .join('\n'),
