@@ -1,0 +1,55 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+
+const bin = resolve('bin/toolbox-al.ts')
+
+function run(dir: string, args: string[]) {
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  return { code: result.status, out: result.stdout, err: result.stderr }
+}
+
+const flags = ['--dod', 'сделано', '--skill', 'backend', '--scope', 'src/**']
+
+test('task open печатает незакрытые задачи и не печатает done', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-task-open-'))
+  run(dir, ['init'])
+  run(dir, ['task', 'add', 'Осталась', ...flags])
+  run(dir, ['task', 'add', 'Сделана', ...flags])
+
+  // закрываем вторую задачу вручную: take+done требует git-репозиторий
+  const database = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  database.prepare("update tasks set status = 'done' where id = 'T2'").run()
+  database.close()
+
+  const opened = run(dir, ['task', 'open'])
+  assert.equal(opened.code, 0)
+  assert.match(opened.out, /Осталась/)
+  assert.doesNotMatch(opened.out, /Сделана/)
+})
+
+test('task open на пустом срезе говорит об этом', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-task-open-empty-'))
+  run(dir, ['init'])
+
+  const opened = run(dir, ['task', 'open'])
+  assert.equal(opened.code, 0)
+  assert.match(opened.out, /открытых задач нет/)
+})
+
+test('task open показывает причину блокировки', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-task-open-why-'))
+  run(dir, ['init'])
+  run(dir, ['task', 'add', 'Ждёт', ...flags])
+
+  const database = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  database.prepare("update tasks set status = 'blocked', reason = 'нет доступа' where id = 'T1'").run()
+  database.close()
+
+  const opened = run(dir, ['task', 'open'])
+  assert.match(opened.out, /нет доступа/)
+})
