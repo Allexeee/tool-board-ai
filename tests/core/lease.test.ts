@@ -1,4 +1,4 @@
-﻿import test from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -111,4 +111,21 @@ test('нельзя взять задачу неактивного этапа', (
   db.prepare("update stages set status = 'planned'").run()
 
   assert.throws(() => takeTask(db, { executor: 'w1', taskId: `${stageId}-1` }), /этап/)
+})
+
+test('задачу пула можно взять без этапа', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const task = createTask(db, {
+    title: 'Поправить опечатку',
+    dod: ['опечатки нет'],
+    size: 'XS',
+    skill: 'backend',
+    class: 'quick',
+    scope: ['docs/**'],
+  })
+  refreshReady(db)
+
+  const taken = takeTask(db, { executor: 'w1', taskId: task.id })
+  assert.equal(taken.status, 'active')
 })

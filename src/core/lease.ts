@@ -44,11 +44,13 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
 
     assertSkill(executor, task.skill)
 
-    const stageRow = db.prepare('select status from stages where id = ?').get(task.stageId ?? '') as
-      | { status: string }
-      | undefined
-    if (!stageRow || stageRow.status !== 'active') {
-      throw new UserError(1, `этап ${task.stageId} не активен: ${stageRow?.status ?? 'нет'}`)
+    if (task.stageId) {
+      const stageRow = db.prepare('select status from stages where id = ?').get(task.stageId) as
+        | { status: string }
+        | undefined
+      if (!stageRow || stageRow.status !== 'active') {
+        throw new UserError(1, `этап ${task.stageId} не активен: ${stageRow?.status ?? 'нет'}`)
+      }
     }
 
     if (!isReady(db, task.id)) {
