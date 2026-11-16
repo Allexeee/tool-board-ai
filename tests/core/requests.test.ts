@@ -1,7 +1,7 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { addRequest, closeRequest, editRequest, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
+import { addRequest, closeRequest, editRequest, openRequests, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addPlan, approvePlan } from '../../src/core/plans.ts'
 
@@ -105,6 +105,25 @@ test('later требует дату и reopen возвращает в inbox', ()
   assert.equal(reopened.reviewAt, null)
 })
 
+test('open возвращает только незакрытые запросы', () => {
+  const db = openDb(':memory:')
+  const first = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  const second = addRequest(db, { title: 'Профиль', body: '', author: 'owner' })
+  closeRequest(db, { id: second.id, reason: 'решено', actor: 'owner' })
+
+  const open = openRequests(db)
+  assert.equal(open.length, 1)
+  assert.equal(open[0].id, first.id)
+})
+
+test('open пуст, когда все запросы закрыты', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  closeRequest(db, { id: request.id, reason: 'решено', actor: 'owner' })
+
+  assert.deepEqual(openRequests(db), [])
+})
+
 test('close закрывает запрос и пишет причину в журнал', () => {
   const db = openDb(':memory:')
   const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
@@ -146,4 +165,5 @@ test('закрытый запрос не правится и не удаляет
   assert.throws(() => editRequest(db, { id: request.id, title: 'Другое', actor: 'owner' }), /закрыт/)
   assert.throws(() => removeRequest(db, { id: request.id, actor: 'owner' }), /закрыт/)
 })
+
 
