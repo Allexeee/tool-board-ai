@@ -48,3 +48,12 @@ test('pool stale не путается с pool list', () => {
   assert.equal(result.code, 0)
   assert.match(result.out, /пул пуст/)
 })
+
+test('pool list печатает статус задачи', () => {
+  const dir = project()
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+
+  const listed = run(dir, ['pool', 'list'])
+  assert.equal(listed.code, 0)
+  assert.match(listed.out, /T1\s+\w+\s/)
+})

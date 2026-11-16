@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, listTasks, updateTask, type Task } from './tasks.ts'
+import { addDep, depsOf } from './deps.ts'
 import { UserError } from '../cli/errors.ts'
 
 export function poolTasks(db: DatabaseSync): Task[] {
@@ -10,9 +11,19 @@ export function poolTasks(db: DatabaseSync): Task[] {
   )
 }
 
+export function lastMovement(db: DatabaseSync, taskId: string): string {
+  const row = db.prepare('select max(at) as at from events where subject = ?').get(taskId) as {
+    at: string | null
+  }
+  if (row.at) return row.at
+
+  const task = getTask(db, taskId)
+  return task?.createdAt ?? new Date(0).toISOString()
+}
+
 export function stalePoolTasks(db: DatabaseSync, days = 7): Task[] {
   const threshold = new Date(Date.now() - days * 86_400_000).toISOString()
-  return poolTasks(db).filter((task) => task.createdAt < threshold)
+  return poolTasks(db).filter((task) => lastMovement(db, task.id) < threshold)
 }
 
 export function removePoolTask(
@@ -52,6 +63,19 @@ export function mergePoolTasks(
     if (target.status === 'done' || target.status === 'cancelled') {
       throw new UserError(1, `задача ${target.id} уже ${target.status}`)
     }
+    for (const task of [source, target]) {
+      if (task.status === 'active') {
+        throw new UserError(1, `задача ${task.id} в работе — сначала прервите её`)
+      }
+    }
+
+    // зависимости источника переезжают на цель, а всё, что зависело от источника, — тоже
+    for (const dep of depsOf(db, source.id)) {
+      if (dep === target.id) continue
+      addDep(db, target.id, dep)
+    }
+    db.prepare('delete from deps where from_id = ?').run(source.id)
+    db.prepare('update or ignore deps set to_id = ? where to_id = ?').run(target.id, source.id)
 
     const merged = [...new Set([...target.dod, ...source.dod])]
     db.prepare('update tasks set dod = ? where id = ?').run(JSON.stringify(merged), target.id)
