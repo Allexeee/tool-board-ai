@@ -82,4 +82,31 @@ test('ответ на чужой вопрос отвергается', () => {
   assert.throws(() => answer(db, { id: question.id, answer: 'y', actor: 'w1' }), /адресован/)
 })
 
+test('этап, принятый но не слитый, ждёт владельца', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'accepted' where id = ?").run(stageId)
+
+  const item = inbox(db).find((entry) => entry.kind === 'stage')
+  assert.equal(item?.id, stageId)
+})
+
+test('этап на приёмке у владельца виден, на авто-приёмке нет', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'in_review', acceptance = 'owner' where id = ?").run(stageId)
+  assert.equal(inbox(db).filter((entry) => entry.kind === 'stage').length, 1)
+
+  db.prepare("update stages set acceptance = 'auto' where id = ?").run(stageId)
+  assert.equal(inbox(db).filter((entry) => entry.kind === 'stage').length, 0)
+})
+
+test('слитый этап в inbox не попадает', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
+
+  assert.equal(inbox(db).some((entry) => entry.kind === 'stage' && entry.id === stageId), false)
+})
+
 import type { Task } from '../../src/core/tasks.ts'

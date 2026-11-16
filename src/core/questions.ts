@@ -3,6 +3,8 @@ import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, listTasks, type Task } from './tasks.ts'
+import { listFeatures } from './features.ts'
+import { listStages, type Stage } from './stages.ts'
 import { UserError } from '../cli/errors.ts'
 
 export type Addressee = 'owner' | 'orchestrator' | 'executor'
@@ -202,10 +204,10 @@ export function expireQuestions(db: DatabaseSync, now = new Date().toISOString()
 
 export interface OwnerItem {
   id: string
-  kind: 'task' | 'question'
+  kind: 'task' | 'question' | 'stage'
   deadline: string | null
   createdAt: string
-  item: Task | Question
+  item: Task | Question | Stage
 }
 
 export function ownerHand(db: DatabaseSync): OwnerItem[] {
@@ -218,6 +220,16 @@ export function ownerHand(db: DatabaseSync): OwnerItem[] {
       (task.status === 'in_review' && task.review === 'owner'),
   )) {
     items.push({ id: task.id, kind: 'task', deadline: null, createdAt: task.createdAt, item: task })
+  }
+
+  // этап, который уже не двигается без владельца: принят и ждёт слияния либо ждёт приёмки
+  for (const feature of listFeatures(db)) {
+    for (const stage of listStages(db, feature.id)) {
+      const awaitingMerge = stage.status === 'accepted'
+      const awaitingAccept = stage.status === 'in_review' && stage.acceptance !== 'auto'
+      if (!awaitingMerge && !awaitingAccept) continue
+      items.push({ id: stage.id, kind: 'stage', deadline: null, createdAt: '', item: stage })
+    }
   }
 
   for (const question of getQuestions(db, { addressee: 'owner', status: 'pending' })) {

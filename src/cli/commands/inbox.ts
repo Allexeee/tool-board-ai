@@ -2,6 +2,7 @@ import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { inbox, type OwnerItem } from '../../core/questions.ts'
+import type { Stage } from '../../core/stages.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -46,6 +47,12 @@ function isToday(iso: string): boolean {
 }
 
 function render(item: OwnerItem): string {
+  if (item.kind === 'stage') {
+    const stage = item.item as Stage
+    const note = stage.status === 'accepted' ? 'ждёт слияния' : 'ждёт приёмки'
+    return `  ${item.id.padEnd(12)} ${'этап'.padEnd(7)} ${stage.name} — ${note}`
+  }
+
   const title = item.kind === 'task' ? (item.item as { title: string }).title : (item.item as { text: string }).text
   const kind = item.kind === 'task' ? 'задача' : 'вопрос'
   return `  ${item.id.padEnd(12)} ${kind.padEnd(7)} ${title}`
