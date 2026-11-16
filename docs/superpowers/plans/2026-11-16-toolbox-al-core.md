@@ -500,12 +500,6 @@ test('WIP: вторая задача тому же исполнителю не �
   takeTask(db, { executor: 'w1', taskId: 'F1.S1-1' })
   assert.throws(() => takeTask(db, { executor: 'w1', taskId: 'F1.S1-2' }), /WIP/)
 })
-
-test('исполнитель offline теряет руку', () => {
-  fillHand(db, 'w2')
-  advanceTime(db, plusMinutes(121))
-  assert.deepEqual(getHand(db, 'w2'), [])
-})
 ```
 
 - [ ] **Step 2: Run** → FAIL
@@ -547,7 +541,7 @@ test('рука пополняется задачами того же этапа 
 })
 
 test('все кандидаты заблокированы — рука пуста, без зависания', () => {
-  blockTask(db, { taskId: 'F1.S1-1', executor: 'w1', reason: 'needs_data', note: 'нет' })
+  db.prepare("update tasks set status='blocked'").run()
   assert.deepEqual(fillHand(db, 'w1'), [])
 })
 
@@ -564,6 +558,12 @@ test('задача с чужим навыком не попадает в рук�
 test('зарезервированную задачу не берёт другой исполнитель', () => {
   fillHand(db, 'w1')
   assert.throws(() => takeTask(db, { executor: 'w2', taskId: 'F1.S1-1' }), (e: any) => e.code === 1)
+})
+
+test('исполнитель offline теряет руку', () => {
+  fillHand(db, 'w2')
+  advanceTime(db, plusMinutes(121))
+  assert.deepEqual(getHand(db, 'w2'), [])
 })
 ```
 

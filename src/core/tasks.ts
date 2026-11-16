@@ -1,0 +1,225 @@
+﻿import type { DatabaseSync } from 'node:sqlite'
+import { UserError } from '../cli/errors.ts'
+import { childId } from './ids.ts'
+import { tx } from './db.ts'
+import { appendEvent } from './events.ts'
+import { validateTaskInput, type NewTask, type TaskClass, type TaskKind, type TaskSeverity, type TaskSize, type TaskScope } from './validate.ts'
+
+export type { NewTask, TaskClass, TaskKind, TaskSeverity, TaskSize, TaskScope } from './validate.ts'
+
+export type TaskStatus =
+  | 'open'
+  | 'ready'
+  | 'active'
+  | 'blocked'
+  | 'needs_owner'
+  | 'in_review'
+  | 'done'
+  | 'cancelled'
+
+export interface Task {
+  id: string
+  stageId: string | null
+  title: string
+  kind: TaskKind
+  dod: string[]
+  checkCmd: string | null
+  size: TaskSize
+  sizeReason: string | null
+  skill: string
+  class: TaskClass
+  scope: TaskScope
+  status: TaskStatus
+  holder: string | null
+  leaseUntil: string | null
+  attempts: number
+  reason: string | null
+  createdAt: string
+}
+
+interface Row {
+  id: string
+  stage_id: string | null
+  title: string
+  kind: TaskKind
+  dod: string
+  check_cmd: string | null
+  size: TaskSize
+  size_reason: string | null
+  skill: string
+  class: TaskClass
+  scope: string
+  status: TaskStatus
+  holder: string | null
+  lease_until: string | null
+  attempts: number
+  reason: string | null
+  created_at: string
+}
+
+const toTask = (row: Row): Task => ({
+  id: row.id,
+  stageId: row.stage_id,
+  title: row.title,
+  kind: row.kind,
+  dod: JSON.parse(row.dod) as string[],
+  checkCmd: row.check_cmd,
+  size: row.size,
+  sizeReason: row.size_reason,
+  skill: row.skill,
+  class: row.class,
+  scope: row.scope === 'exclusive' ? 'exclusive' : (JSON.parse(row.scope) as string[]),
+  status: row.status,
+  holder: row.holder,
+  leaseUntil: row.lease_until,
+  attempts: row.attempts,
+  reason: row.reason,
+  createdAt: row.created_at,
+})
+
+export function createTask(db: DatabaseSync, input: NewTask): Task {
+  const { errors, warnings } = validateTaskInput(input)
+  if (errors.length > 0) {
+    throw new UserError(3, 'задача не создана:\n  ' + errors.join('\n  '))
+  }
+
+  return tx(db, () => {
+  const stageId = input.stageId
+  const stage = db.prepare('select id from stages where id = ?').get(stageId)
+  if (!stage) throw new UserError(3, `этап ${stageId} не найден`)
+
+  const suffix =
+    (db.prepare('select id from tasks where stage_id = ?').all(stageId) as Array<{ id: string }>).reduce(
+      (max, row) => Math.max(max, Number(row.id.split('-').at(-1) ?? 0)),
+      0,
+    ) + 1
+
+  const task: Task = {
+    id: childId(stageId, 'task', suffix),
+    stageId,
+    title: input.title,
+    kind: input.kind ?? 'task',
+    severity: input.severity ?? null,
+    dod: input.dod,
+    checkCmd: input.checkCmd ?? null,
+    size: input.size,
+    sizeReason: input.sizeReason ?? null,
+    skill: input.skill,
+    class: input.class,
+    scope: input.scope,
+    status: 'open',
+    holder: null,
+    leaseUntil: null,
+    attempts: 0,
+    reason: null,
+    createdAt: new Date().toISOString(),
+  }
+
+  db.prepare(
+    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, created_at) ' +
+      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    task.id,
+    task.stageId,
+    task.title,
+    task.kind,
+    task.severity,
+    JSON.stringify(task.dod),
+    task.checkCmd,
+    task.size,
+    task.sizeReason,
+    task.skill,
+    task.class,
+    task.scope === 'exclusive' ? 'exclusive' : JSON.stringify(task.scope),
+    task.status,
+    null,
+    null,
+    0,
+    null,
+    task.createdAt,
+  )
+
+  appendEvent(db, {
+    type: 'task.created',
+    actor: 'system',
+    subject: task.id,
+    after: { title: task.title, size: task.size, warnings },
+  })
+
+  return task
+  })
+}
+
+export function getTask(db: DatabaseSync, id: string): Task | null {
+  const row = db.prepare('select * from tasks where id = ?').get(id) as Row | undefined
+  return row ? toTask(row) : null
+}
+
+export function listTasks(
+  db: DatabaseSync,
+  filter: { stageId?: string; status?: TaskStatus; holder?: string } = {},
+): Task[] {
+  const where: string[] = []
+  const params: string[] = []
+
+  if (filter.stageId) {
+    where.push('stage_id = ?')
+    params.push(filter.stageId)
+  }
+  if (filter.status) {
+    where.push('status = ?')
+    params.push(filter.status)
+  }
+  if (filter.holder) {
+    where.push('holder = ?')
+    params.push(filter.holder)
+  }
+
+  const sql =
+    'select * from tasks' +
+    (where.length ? ' where ' + where.join(' and ') : '') +
+    ' order by created_at, id'
+
+  return (db.prepare(sql).all(...params) as unknown as Row[]).map(toTask)
+}
+
+export function updateTask(db: DatabaseSync, id: string, patch: Partial<{
+  status: TaskStatus
+  holder: string | null
+  leaseUntil: string | null
+  attempts: number
+  reason: string | null
+}>): Task {
+  const current = getTask(db, id)
+  if (!current) throw new UserError(3, `задача ${id} не найдена`)
+
+  const next: Task = {
+    ...current,
+    ...patch,
+  }
+
+  db.prepare(
+    'update tasks set status = ?, holder = ?, lease_until = ?, attempts = ?, reason = ? where id = ?',
+  ).run(next.status, next.holder, next.leaseUntil, next.attempts, next.reason, id)
+
+  return next
+}
+
+export function attempt(db: DatabaseSync, id: string, maxAttempts = 3): Task {
+  const task = getTask(db, id)
+  if (!task) throw new UserError(3, `задача ${id} не найдена`)
+
+  const next = updateTask(db, id, { attempts: task.attempts + 1 })
+  if (next.attempts >= maxAttempts && next.status !== 'needs_owner') {
+    const escalated = updateTask(db, id, { status: 'needs_owner', holder: null, leaseUntil: null })
+    appendEvent(db, {
+      type: 'task.attempts_exhausted',
+      actor: 'system',
+      subject: id,
+      note: `${next.attempts} попыток`,
+    })
+    void escalated
+  }
+
+  return getTask(db, id)!
+}
