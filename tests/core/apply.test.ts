@@ -66,3 +66,24 @@ test('неутверждённый план не применяется', () => 
   const { db, request } = fixture()
   assert.throws(() => applyPlan(db, { requestId: request.id }), /утвержд/)
 })
+
+test('deps вне этапа даёт ошибку с номером шага', () => {
+  const { plan } = fixture([{ ...step, deps: [5] }, { ...step, title: 'Второй' }])
+
+  const errors = validatePlan(plan).join('\n')
+  assert.match(errors, /Каркас\/1: зависимость 5 вне этапа/)
+})
+
+test('deps на самого себя отвергается', () => {
+  const { plan } = fixture([{ ...step, deps: [0] }])
+
+  assert.match(validatePlan(plan).join('\n'), /Каркас\/1: зависимость на самого себя/)
+})
+
+test('корректные deps проходят проверку и план применяется', () => {
+  const { db, request } = fixture([{ ...step, deps: [1] }, { ...step, title: 'Второй' }])
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+
+  const result = applyPlan(db, { requestId: request.id })
+  assert.equal(result.tasks.length, 2)
+})
