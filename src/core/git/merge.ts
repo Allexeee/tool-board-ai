@@ -111,8 +111,20 @@ export function mergeStage(
   appendEvent(db, { type: 'stage.merged', actor: 'system', subject: stage.id, after: { commit } })
 
   const remaining = listStages(db, feature.id).filter((item) => item.status === 'planned')
-  if (remaining.length === 0) db.prepare("update features set status = 'done' where id = ?").run(feature.id)
-  else activateNextStage(db, feature.id)
+  if (remaining.length === 0) {
+    db.prepare("update features set status = 'done' where id = ?").run(feature.id)
+    if (feature.requestId) {
+      db.prepare("update requests set status = 'closed' where id = ?").run(feature.requestId)
+      appendEvent(db, {
+        type: 'request.closed',
+        actor: 'system',
+        subject: feature.requestId,
+        note: `фича ${feature.id} закрыта`,
+      })
+    }
+  } else {
+    activateNextStage(db, feature.id)
+  }
 
   if (original && original !== dev) {
     try {

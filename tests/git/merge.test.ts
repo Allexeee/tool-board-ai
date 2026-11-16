@@ -1,4 +1,4 @@
-﻿import test from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -7,6 +7,7 @@ import { initProject } from '../../src/core/project.ts'
 import { openDb } from '../../src/core/db.ts'
 import { readConfig } from '../../src/core/config.ts'
 import { addFeature, setFeatureCheck, getFeature } from '../../src/core/features.ts'
+import { addRequest, getRequest } from '../../src/core/requests.ts'
 import { addStage, activateNextStage, getStage } from '../../src/core/stages.ts'
 import { createTask, getTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
@@ -29,7 +30,8 @@ export function mergedReadyFixture(options: {
   const config = readConfig(join(root, '.toolbox-al/config.json'))
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
 
-  const feature = addFeature(db, { name: 'Оплата', rank: 1 })
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
   if (options.check) setFeatureCheck(db, feature.id, options.check)
   const stage = addStage(db, {
     featureId: feature.id,
@@ -84,4 +86,12 @@ test('упавшая проверка не сливает этап', () => {
 test('нет ветки dev — понятная ошибка', () => {
   const { root, db, config, stage } = mergedReadyFixture({ skipDev: true })
   assert.throws(() => mergeStage(db, { root, stageId: stage.id, config }), /ветк/)
+})
+
+test('после слияния последнего этапа запрос закрывается', () => {
+  const { root, db, config, stage, feature } = mergedReadyFixture()
+  mergeStage(db, { root, stageId: stage.id, config })
+
+  const request = getRequest(db, feature.requestId!)
+  assert.equal(request?.status, 'closed')
 })
