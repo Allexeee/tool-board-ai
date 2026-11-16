@@ -1,6 +1,7 @@
 ﻿import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { toolVersion as currentToolVersion } from './version.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -24,7 +25,7 @@ function asset(name: string): string {
   return readFileSync(join(here, name), 'utf8').replace(/^\uFEFF/, '')
 }
 
-export function pluginSource(toolVersion = '1.0.2'): string {
+export function pluginSource(toolVersion = currentToolVersion()): string {
   return asset('opencode-plugin.txt').replace('__VERSION__', toolVersion)
 }
 
@@ -48,7 +49,7 @@ function writeFile(path: string, content: string, created: string[], skipped: st
 
 export function writeOpenCodeFiles(
   root: string,
-  toolVersion = '1.0.2',
+  toolVersion = currentToolVersion(),
 ): { created: string[]; skipped: string[] } {
   const created: string[] = []
   const skipped: string[] = []
@@ -261,3 +262,4 @@ export function refreshOpenCode(
 
   return result
 }
+

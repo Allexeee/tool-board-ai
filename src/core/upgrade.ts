@@ -5,19 +5,10 @@ import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION, migrate } from './schema.ts'
 import { refreshOpenCode } from './opencode.ts'
+import { toolRoot, toolVersion } from './version.ts'
 import { UserError } from '../cli/errors.ts'
 
-const here = dirname(fileURLToPath(import.meta.url))
-export const toolRoot = join(here, '..', '..')
-
-export function toolVersion(root = toolRoot): string {
-  const path = join(root, 'package.json')
-  if (!existsSync(path)) return '0.0.0'
-
-  const raw = readFileSync(path, 'utf8').replace(/^\uFEFF/, '')
-  const pkg = JSON.parse(raw) as { version?: string }
-  return pkg.version ?? '0.0.0'
-}
+export { toolRoot, toolVersion }
 
 export function schemaVersion(db: DatabaseSync): number {
   const row = db.prepare("select value from meta where key = 'schemaVersion'").get() as
