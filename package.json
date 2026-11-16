@@ -1,0 +1,15 @@
+{
+  "name": "toolbox-al",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "toolbox-al": "bin/toolbox-al.ts"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
