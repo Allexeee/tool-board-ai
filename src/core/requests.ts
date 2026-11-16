@@ -74,6 +74,37 @@ export function listRequests(db: DatabaseSync): Request[] {
   return (db.prepare('select * from requests order by created_at, id').all() as unknown as Row[]).map(toRequest)
 }
 
+export function closeRequest(
+  db: DatabaseSync,
+  input: { id: string; reason: string; actor: string },
+): Request {
+  const reason = input.reason?.trim()
+  if (!reason) throw new UserError(3, 'нужна причина закрытия: --reason "почему"')
+
+  return tx(db, () => {
+    const request = getRequest(db, input.id)
+    if (!request) throw new UserError(3, `запрос ${input.id} не найден`)
+    if (request.status === 'closed') throw new UserError(1, `запрос ${request.id} уже закрыт`)
+
+    const open = db
+      .prepare("select count(*) as c from features where request_id = ? and status != 'done'")
+      .get(request.id) as { c: number }
+    if (open.c > 0) {
+      throw new UserError(1, `у запроса ${request.id} есть незакрытые фичи: слейте их или отмените`)
+    }
+
+    db.prepare("update requests set status = 'closed', review_at = null where id = ?").run(request.id)
+    appendEvent(db, {
+      type: 'request.closed',
+      actor: input.actor,
+      subject: request.id,
+      note: reason,
+    })
+
+    return getRequest(db, request.id)!
+  })
+}
+
 export function editRequest(
   db: DatabaseSync,
   input: { id: string; title?: string; body?: string; actor: string },
@@ -81,6 +112,9 @@ export function editRequest(
   return tx(db, () => {
     const request = getRequest(db, input.id)
     if (!request) throw new UserError(3, `запрос ${input.id} не найден`)
+    if (request.status === 'closed') {
+      throw new UserError(1, `запрос ${request.id} закрыт: сначала request reopen`)
+    }
 
     const next: Request = {
       ...request,
@@ -177,6 +211,9 @@ export function removeRequest(db: DatabaseSync, input: { id: string; actor: stri
   return tx(db, () => {
     const request = getRequest(db, input.id)
     if (!request) throw new UserError(3, `запрос ${input.id} не найден`)
+    if (request.status === 'closed') {
+      throw new UserError(1, `запрос ${request.id} закрыт: сначала request reopen`)
+    }
 
     const features = db
       .prepare('select count(*) as c from features where request_id = ?')
