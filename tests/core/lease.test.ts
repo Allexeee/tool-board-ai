@@ -74,3 +74,14 @@ test('WIP: вторая задача тому же исполнителю не �
 
   assert.throws(() => takeTask(db, { executor: 'w1', taskId: `${stageId}-2` }), /WIP/)
 })
+
+test('третье истечение аренды уходит владельцу', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare('update tasks set attempts = 2 where id = ?').run(`${stageId}-1`)
+
+  takeTask(db, { executor: 'w1', taskId: `${stageId}-1` })
+  advanceTime(db, plusMinutes(31))
+
+  assert.equal(getTask(db, `${stageId}-1`)!.status, 'needs_owner')
+})

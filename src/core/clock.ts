@@ -4,6 +4,7 @@ import { appendEvent } from './events.ts'
 import { refreshReady } from './deps.ts'
 import { getExecutor } from './executors.ts'
 import { expireQuestions } from './questions.ts'
+import { attempt } from './tasks.ts'
 
 export interface AdvanceResult {
   expired: string[]
@@ -35,8 +36,9 @@ export function advanceTime(db: DatabaseSync, now = new Date().toISOString()): A
 
     for (const task of expired) {
       db.prepare(
-        "update tasks set status = 'ready', holder = null, lease_until = null, attempts = attempts + 1 where id = ? and status = 'active'",
+        "update tasks set status = 'ready', holder = null, lease_until = null where id = ? and status = 'active'",
       ).run(task.id)
+      attempt(db, task.id)
       appendEvent(db, {
         type: 'task.lease_expired',
         actor: 'system',

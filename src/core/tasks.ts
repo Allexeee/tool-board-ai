@@ -199,3 +199,22 @@ export function updateTask(db: DatabaseSync, id: string, patch: Partial<{
 
   return next
 }
+
+export function attempt(db: DatabaseSync, id: string, maxAttempts = 3): Task {
+  const task = getTask(db, id)
+  if (!task) throw new UserError(3, `задача ${id} не найдена`)
+
+  const next = updateTask(db, id, { attempts: task.attempts + 1 })
+  if (next.attempts >= maxAttempts && next.status !== 'needs_owner') {
+    const escalated = updateTask(db, id, { status: 'needs_owner', holder: null, leaseUntil: null })
+    appendEvent(db, {
+      type: 'task.attempts_exhausted',
+      actor: 'system',
+      subject: id,
+      note: `${next.attempts} попыток`,
+    })
+    void escalated
+  }
+
+  return getTask(db, id)!
+}
