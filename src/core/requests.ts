@@ -100,3 +100,71 @@ export function editRequest(
     return next
   })
 }
+
+export function mergeRequests(
+  db: DatabaseSync,
+  input: { from: string; to: string; actor: string },
+): Request {
+  return tx(db, () => {
+    const source = getRequest(db, input.from)
+    const target = getRequest(db, input.to)
+
+    if (!source) throw new UserError(3, `запрос ${input.from} не найден`)
+    if (!target) throw new UserError(3, `запрос ${input.to} не найден`)
+    if (source.id === target.id) throw new UserError(3, 'нельзя объединить запрос с собой')
+    if (target.status === 'closed') throw new UserError(1, `запрос ${target.id} уже закрыт`)
+
+    const body = `${target.body}\n\n---\nИз ${source.id}: ${source.body}`
+    db.prepare('update requests set body = ? where id = ?').run(body, target.id)
+    db.prepare("update requests set status = 'closed' where id = ?").run(source.id)
+
+    appendEvent(db, {
+      type: 'request.merged',
+      actor: input.actor,
+      subject: source.id,
+      after: { into: target.id },
+    })
+    appendEvent(db, {
+      type: 'request.merged_into',
+      actor: input.actor,
+      subject: target.id,
+      after: { from: source.id },
+    })
+
+    return getRequest(db, target.id)!
+  })
+}
+
+export function splitRequest(
+  db: DatabaseSync,
+  input: { id: string; into: string[]; actor: string },
+): Request[] {
+  return tx(db, () => {
+    const request = getRequest(db, input.id)
+    if (!request) throw new UserError(3, `запрос ${input.id} не найден`)
+
+    const applied = db
+      .prepare('select count(*) as c from plans where request_id = ? and applied_at is not null')
+      .get(request.id) as { c: number }
+    if (applied.c > 0) {
+      throw new UserError(1, `запрос ${request.id} уже в работе: разделить нельзя`)
+    }
+
+    const titles = input.into.map((title) => title.trim()).filter(Boolean)
+    if (titles.length === 0) throw new UserError(3, 'нужен хотя бы один заголовок для --into')
+
+    const created = titles.map((title) =>
+      addRequest(db, { title, body: `Часть запроса ${request.id}`, author: input.actor }),
+    )
+
+    db.prepare("update requests set status = 'closed' where id = ?").run(request.id)
+    appendEvent(db, {
+      type: 'request.split',
+      actor: input.actor,
+      subject: request.id,
+      after: { into: created.map((item) => item.id) },
+    })
+
+    return created
+  })
+}

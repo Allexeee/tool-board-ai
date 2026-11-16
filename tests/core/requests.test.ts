@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { addRequest, editRequest } from '../../src/core/requests.ts'
+import { addRequest, editRequest, mergeRequests, getRequest, splitRequest } from '../../src/core/requests.ts'
+import { addPlan, approvePlan } from '../../src/core/plans.ts'
 
 test('правка запроса меняет текст и пишет before/after', () => {
   const db = openDb(':memory:')
@@ -21,4 +22,48 @@ test('правка запроса меняет текст и пишет before/a
 test('правка несуществующего запроса отвергается', () => {
   const db = openDb(':memory:')
   assert.throws(() => editRequest(db, { id: 'R99', title: 'x', actor: 'owner' }), /не найден/)
+})
+
+test('merge склеивает текст и закрывает второй запрос', () => {
+  const db = openDb(':memory:')
+  const first = addRequest(db, { title: 'Оплата', body: 'карты', author: 'owner' })
+  const second = addRequest(db, { title: 'Подписка', body: 'продление', author: 'owner' })
+
+  const merged = mergeRequests(db, { from: second.id, to: first.id, actor: 'owner' })
+
+  assert.match(merged.body, /карты/)
+  assert.match(merged.body, /продление/)
+  assert.equal(getRequest(db, second.id)!.status, 'closed')
+
+  const event = db
+    .prepare("select after from events where type = 'request.merged' order by id desc limit 1")
+    .get() as { after: string }
+  assert.match(event.after, new RegExp(first.id))
+})
+
+test('нельзя объединить запрос с самим собой', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  assert.throws(() => mergeRequests(db, { from: request.id, to: request.id, actor: 'owner' }), /с собой/)
+})
+
+test('split создаёт части и закрывает исходный', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата и профиль', body: '', author: 'owner' })
+
+  const parts = splitRequest(db, { id: request.id, into: ['Оплата', 'Профиль'], actor: 'owner' })
+
+  assert.equal(parts.length, 2)
+  assert.equal(getRequest(db, request.id)!.status, 'closed')
+  assert.equal(parts[0].status, 'inbox')
+})
+
+test('split запроса в работе отвергается', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  addPlan(db, { requestId: request.id, title: 'Оплата', assumptions: [], stages: [] })
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+  db.prepare('update plans set applied_at = ? where request_id = ?').run(new Date().toISOString(), request.id)
+
+  assert.throws(() => splitRequest(db, { id: request.id, into: ['часть'], actor: 'owner' }), /в работе/)
 })
