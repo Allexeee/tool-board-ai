@@ -1,8 +1,9 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
-import { addRequest, closeKind, closeRequest, editRequest, openRequests, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
+import { addRequest, closeKind, closeRequest, editRequest, landState, openRequests, mergeRequests, getRequest, laterRequest, removeRequest, reopenRequest, splitRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
+import { addStage } from '../../src/core/stages.ts'
 import { addPlan, approvePlan } from '../../src/core/plans.ts'
 
 test('правка запроса меняет текст и пишет before/after', () => {
@@ -226,6 +227,56 @@ test('закрытие без фич и без вида остаётся без 
 
   assert.equal(closeKind(db, request.id), null)
 })
+
+function mergedFixture(releaseAt?: string) {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '1 день' })
+  db.prepare("update stages set status = 'merged', merged_at = ? where id = ?").run(
+    '2026-11-16T20:00:00.000Z',
+    stage.id,
+  )
+
+  if (releaseAt) {
+    db.prepare('insert into releases (version, tag, changelog, at) values (?, ?, ?, ?)').run(
+      '0.2.0',
+      'v0.2.0',
+      'x',
+      releaseAt,
+    )
+  }
+
+  return { db, request, feature, stage }
+}
+
+test('пока ничего не слито, отметки о заливке нет', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
+
+  assert.equal(landState(db, request.id), null)
+})
+
+test('слитый этап без релиза — это dev', () => {
+  const { db, request } = mergedFixture()
+
+  assert.equal(landState(db, request.id), 'dev')
+})
+
+test('всё слито до релиза и фича done — это main', () => {
+  const { db, request } = mergedFixture('2999-01-01T00:00:00.000Z')
+  db.prepare("update features set status = 'done'").run()
+
+  assert.equal(landState(db, request.id), 'main')
+})
+
+test('фича не закрыта — всё равно dev, даже если релиз был позже', () => {
+  const { db, request } = mergedFixture('2999-01-01T00:00:00.000Z')
+
+  assert.equal(landState(db, request.id), 'dev')
+})
+
 
 
 

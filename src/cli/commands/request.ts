@@ -1,6 +1,6 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, closeKind, closeRequest, editRequest, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
+import { addRequest, closeKind, closeRequest, editRequest, landState, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
@@ -125,6 +125,8 @@ export default async function command(args: ParsedArgs) {
 
     const lines = [`${request.id}  ${request.title}`, `статус: ${request.status}`]
     if (closedEvent?.note) lines.push(`закрыт: ${closedEvent.note}`)
+    const land = landState(db, request.id)
+    if (land) lines.push(`залито: ${land}`)
     lines.push('', request.body)
 
     lines.push('', '## Фичи')
@@ -183,13 +185,19 @@ export default async function command(args: ParsedArgs) {
       ? 'запросов нет'
       : requests
           .map((r) => {
+            const parts: string[] = []
             const kind = r.status === 'closed' ? closeKind(db, r.id) : null
-            const suffix = kind ? `  (${kind === 'merged' ? 'объединён' : kind})` : ''
+            if (kind) parts.push(kind === 'merged' ? 'объединён' : kind)
+            const land = landState(db, r.id)
+            if (land) parts.push(land)
+
+            const suffix = parts.length > 0 ? `  (${parts.join(' · ')})` : ''
             return `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}${suffix}`
           })
           .join('\n'),
   )
   return 0
 }
+
 
 
