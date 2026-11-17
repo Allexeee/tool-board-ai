@@ -1,8 +1,9 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { branchExists, currentBranch, resolveBranches, runGit } from './git.ts'
 import { appendEvent } from '../events.ts'
+import { availableVersions } from '../upgrade.ts'
 import { UserError } from '../../cli/errors.ts'
 
 export type ReleaseLevel = 'major' | 'minor' | 'patch'
@@ -38,7 +39,7 @@ export interface LevelSuggestion {
 }
 
 /** Что выпустим и каким уровнем: новые возможности — minor, только исправления — patch. */
-export function suggestLevel(db: DatabaseSync): LevelSuggestion | null {
+export function suggestLevel(db: DatabaseSync, root: string): LevelSuggestion | null {
   const stages = pendingRelease(db)
   if (stages.length === 0) return null
 
@@ -51,7 +52,7 @@ export function suggestLevel(db: DatabaseSync): LevelSuggestion | null {
   const fixes = rows.length - features
 
   return {
-    version: currentVersion(db),
+    version: currentVersion(db, root),
     level: features > 0 ? 'minor' : 'patch',
     tasks: rows.length,
     features,
@@ -67,9 +68,35 @@ export interface ReleaseResult {
   reason?: string
 }
 
-function currentVersion(db: DatabaseSync): string {
+function metaVersion(db: DatabaseSync): string | null {
   const row = db.prepare("select value from meta where key = 'version'").get() as { value: string } | undefined
-  return row?.value ?? '0.1.0'
+  return row?.value ?? null
+}
+
+function releasedVersion(db: DatabaseSync): string | null {
+  const row = db.prepare('select max(version) as version from releases').get() as
+    | { version: string | null }
+    | undefined
+  return row?.version ?? null
+}
+
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+/** База — наибольшее из сохранённых версий и тегов репозитория: тег переживает потерю базы. */
+function currentVersion(db: DatabaseSync, root: string): string {
+  const candidates = [metaVersion(db), releasedVersion(db), ...availableVersions(root)]
+    .filter((value): value is string => Boolean(value && /^\d+\.\d+\.\d+$/.test(value)))
+    .sort(compareVersions)
+
+  return candidates.at(-1) ?? '0.1.0'
 }
 
 function bump(version: string, level: ReleaseLevel): string {
@@ -109,7 +136,7 @@ export function release(
   if (!branchExists(input.root, main)) throw new UserError(3, `ветки ${main} нет`)
   if (!branchExists(input.root, dev)) throw new UserError(3, `ветки ${dev} нет`)
 
-  const version = bump(currentVersion(db), input.level)
+  const version = bump(currentVersion(db, input.root), input.level)
   const tag = `v${version}`
   const date = new Date().toISOString().slice(0, 10)
   const changelog =
@@ -168,3 +195,4 @@ export function release(
 
   return { released: true, version, tag, changelog }
 }
+

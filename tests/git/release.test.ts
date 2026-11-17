@@ -106,19 +106,19 @@ test('pending на свежем проекте пуст', () => {
 })
 
 test('suggestLevel предлагает minor, когда есть новая возможность', () => {
-  const { db } = repoWithMergedStage()
+  const { db, root } = repoWithMergedStage()
 
-  const suggestion = suggestLevel(db)!
+  const suggestion = suggestLevel(db, root)!
   assert.equal(suggestion.level, 'minor')
   assert.equal(suggestion.features, 1)
   assert.equal(suggestion.tasks, 1)
 })
 
 test('suggestLevel предлагает patch, когда закрыты только дефекты', () => {
-  const { db } = repoWithMergedStage()
+  const { db, root } = repoWithMergedStage()
   db.prepare("update tasks set kind = 'defect', severity = 'S2'").run()
 
-  const suggestion = suggestLevel(db)!
+  const suggestion = suggestLevel(db, root)!
   assert.equal(suggestion.level, 'patch')
   assert.equal(suggestion.features, 0)
   assert.equal(suggestion.fixes, 1)
@@ -128,7 +128,7 @@ test('suggestLevel молчит, когда релизить нечего', () =
   const { db, root, config } = repoWithMergedStage()
   release(db, { root, level: 'minor', config, actor: 'owner' })
 
-  assert.equal(suggestLevel(db), null)
+  assert.equal(suggestLevel(db, root), null)
 })
 
 test('причина уровня попадает в changelog и событие', () => {
@@ -150,6 +150,25 @@ test('причина уровня попадает в changelog и событи�
   assert.equal(after.level, 'minor')
   assert.equal(after.reason, 'новые команды')
 })
+
+test('существующий тег v1.0.2 задаёт базу релиза', () => {
+  const { db, root } = repoWithMergedStage()
+  runGit(root, ['tag', 'v1.0.2'])
+
+  const suggestion = suggestLevel(db, root)!
+  assert.equal(suggestion.version, '1.0.2')
+
+  const result = release(db, { root, level: 'minor', reason: 'новое', config: readConfig(join(root, '.toolbox-al/config.json')), actor: 'owner' })
+  assert.equal(result.version, '1.1.0')
+  assert.equal(result.tag, 'v1.1.0')
+})
+
+test('без тегов база остаётся 0.1.0', () => {
+  const { db, root } = repoWithMergedStage()
+
+  assert.equal(suggestLevel(db, root)!.version, '0.1.0')
+})
+
 
 
 
