@@ -50,6 +50,23 @@ test('now показывает фичу в работе', () => {
   assert.match(view.out, /В работе/)
 })
 
+test('now показывает решение рядом с фичей', () => {
+  const dir = project()
+  run(dir, ['feature', 'add', 'Оплата'])
+  run(dir, ['decide', 'add', 'Провайдер', '--choice', 'ЮKassa', '--reason', 'договор', '--subject', 'F1'])
+
+  const view = run(dir, ['now'])
+  assert.match(view.out, /Провайдер → ЮKassa/)
+})
+
+test('фича без решений печатается как раньше', () => {
+  const dir = project()
+  run(dir, ['feature', 'add', 'Без решений'])
+
+  const view = run(dir, ['now'])
+  assert.doesNotMatch(view.out, /→/)
+})
+
 test('now показывает свободного исполнителя и пустую руку', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
