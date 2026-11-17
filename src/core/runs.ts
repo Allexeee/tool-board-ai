@@ -441,3 +441,25 @@ export function reviewState(run: RunRecord, review: RunReview | null): RunReview
   if (review) return review.verdict === 'found' ? 'found' : 'ready'
   return run.reviewRequired ? 'needs_review' : 'not_required'
 }
+
+export interface RunReviewGap {
+  run: RunRecord
+  state: RunReviewState
+  review: RunReview | null
+}
+
+/**
+ * Долг ревью: последний закрытый прогон, который ревью требовал, но до ok не
+ * дошёл — ни разу не смотрели или смотрели и нашли. Релиз об этом говорит,
+ * но не отменяет: релиз — команда владельца.
+ */
+export function unreviewedRun(db: DatabaseSync): RunReviewGap | null {
+  const run = lastClosedRun(db)
+  if (!run) return null
+
+  const review = reviewOf(db, run.id)
+  const state = reviewState(run, review)
+  if (state !== 'needs_review' && state !== 'found') return null
+
+  return { run, state, review }
+}

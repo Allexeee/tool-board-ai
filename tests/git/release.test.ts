@@ -25,6 +25,7 @@ import {
   suggestLevel,
 } from '../../src/core/git/release.ts'
 import { runGit } from '../../src/core/git/git.ts'
+import { endRun, reviewRun, startRun } from '../../src/core/runs.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
 function repoWithMergedStage() {
@@ -336,6 +337,76 @@ test('новая секция changelog встаёт после заголовк
   assert.match(lines[2], /^## v0\.2\.0 — \d{2}\.\d{2}\.\d{4}$/)
   assert.ok(text.indexOf('## v0.2.0') < text.indexOf('## v0.1.0'), 'свежая секция должна быть выше старой')
   assert.match(text, /- старое/)
+})
+
+test('release предупреждает, что ревью прогона не было', () => {
+  const { db, root } = repoWithMergedStage()
+
+  const run = startRun(db, { mode: 'plan' })
+  endRun(db, { id: run.id, reason: 'tasks' })
+
+  const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /РЕВЬЮ ПРОГОНА:/)
+  assert.match(dry.stdout, /ревью не было: 1 этап не проверялся, предлагаю run review RUN1/)
+
+  // после пройденного ревью предупреждения нет: релиз снова чист
+  reviewRun(db, { id: run.id, verdict: 'ok', actor: 'reviewer' })
+  const after = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(after.status, 0, after.stderr)
+  assert.doesNotMatch(after.stdout, /ревью не было/)
+  assert.doesNotMatch(after.stdout, /run review/)
+})
+
+test('ревью с находками тоже оставляет предупреждение у релиза', () => {
+  const { db, root } = repoWithMergedStage()
+
+  const run = startRun(db, { mode: 'plan' })
+  endRun(db, { id: run.id, reason: 'decision' })
+  reviewRun(db, { id: run.id, verdict: 'found', note: 'плавающий тест', actor: 'reviewer' })
+
+  const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /ревью прогона RUN1 нашло замечания/)
+  assert.match(dry.stdout, /предлагаю повторить run review RUN1/)
+})
+
+test('настоящий релиз предупреждает о ревью, но не отменяется', () => {
+  const { db, root } = repoWithMergedStage()
+
+  const run = startRun(db, { mode: 'plan' })
+  endRun(db, { id: run.id, reason: 'tasks' })
+
+  const released = spawnSync(
+    process.execPath,
+    [resolve('bin/toolbox-al.ts'), 'release', 'minor', '--reason', 'прогон закончен', '--review', 'none'],
+    { cwd: root, encoding: 'utf8' },
+  )
+
+  assert.equal(released.status, 0, released.stderr)
+  assert.match(released.stdout, /v0\.2\.0/)
+  assert.match(released.stderr, /ревью не было: 1 этап не проверялся, предлагаю run review RUN1/)
+  assert.match(runGit(root, ['tag']), /v0\.2\.0/, 'предупреждение не отменило релиз')
+})
+
+test('релиз без закрытого прогона о ревью молчит', () => {
+  const { root } = repoWithMergedStage()
+
+  const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.doesNotMatch(dry.stdout, /РЕВЬЮ ПРОГОНА/)
 })
 
 test('запись релиза в базу откатывается целиком, если не легла в releases', () => {
