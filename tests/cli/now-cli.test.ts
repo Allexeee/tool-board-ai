@@ -99,9 +99,33 @@ test('now показывает этапы, ожидающие релиза', () 
   db.close()
 
   const view = run(dir, ['now'])
-  assert.match(view.out, /^\tОЖИДАЕТ РЕЛИЗА: 1 этапов$/m)
+  assert.match(view.out, /^\tОЖИДАЕТ РЕЛИЗА: 1 этап$/m)
   assert.match(view.out, /^\t\s+F1\.S1\s+S1/m)
   assert.doesNotMatch(view.out, /НЕ ВЫПУЩЕНО|release pending/)
+})
+
+test('now согласует число этапов ожидающих релиза', () => {
+  for (const [count, word] of [
+    [1, 'этап'],
+    [2, 'этапа'],
+    [5, 'этапов'],
+    [11, 'этапов'],
+    [21, 'этап'],
+  ] as const) {
+    const dir = project()
+    run(dir, ['request', 'add', 'Оплата'])
+    run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+    for (let i = 1; i <= count; i++) {
+      run(dir, ['stage', 'add', 'F1', `S${i}`, '--goal', 'g', '--appetite', '1 день'])
+    }
+
+    const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+    db.prepare("update stages set status = 'merged', merged_at = ?").run(new Date().toISOString())
+    db.close()
+
+    const view = run(dir, ['now'])
+    assert.match(view.out, new RegExp(`ОЖИДАЕТ РЕЛИЗА: ${count} ${word}`), `${count} → ${word}`)
+  }
 })
 
 test('now на пустом проекте говорит, что работы нет', () => {
