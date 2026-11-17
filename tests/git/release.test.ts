@@ -205,3 +205,17 @@ test('выбор ревью попадает в changelog и событие', ()
     .get() as { after: string }
   assert.equal((JSON.parse(event.after) as { review: string }).review, 'fresh')
 })
+
+test('релиз бампает версию в package.json проекта', () => {
+  const { db, root, config } = repoWithMergedStage()
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app', version: '0.1.0' }), 'utf8')
+  runGit(root, ['add', 'package.json'])
+  runGit(root, ['commit', '-m', 'pkg'], { AL_ALLOW: '1' })
+
+  const result = release(db, { root, level: 'minor', reason: 'новое', config, actor: 'owner' })
+
+  assert.equal(result.version, '0.2.0')
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string; name: string }
+  assert.equal(pkg.version, '0.2.0')
+  assert.equal(pkg.name, 'app')
+})

@@ -189,7 +189,15 @@ export function release(
     const changelogPath = join(input.root, 'CHANGELOG.md')
     const previous = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '# Changelog\n\n'
     writeFileSync(changelogPath, previous.trimEnd() + '\n\n' + changelog + '\n')
-    runGit(input.root, ['add', 'CHANGELOG.md'])
+
+    const pkgPath = join(input.root, 'package.json')
+    const hasPackage = existsSync(pkgPath)
+    if (hasPackage) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8').replace(/^\uFEFF/, '')) as Record<string, unknown>
+      writeFileSync(pkgPath, JSON.stringify({ ...pkg, version }, null, 2) + '\n', 'utf8')
+    }
+
+    runGit(input.root, ['add', 'CHANGELOG.md', ...(hasPackage ? ['package.json'] : [])])
     runGit(input.root, ['commit', '-m', `chore: release ${tag}`], { AL_ALLOW: '1' })
     runGit(input.root, ['tag', tag])
   } catch (error) {
