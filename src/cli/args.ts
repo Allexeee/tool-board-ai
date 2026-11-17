@@ -12,7 +12,7 @@ const KNOWN_FLAGS = new Set([
   'check', 'deps', 'dep', 'review', 'verdict', 'choice', 'subject', 'reason', 'note', 'report', 'severity', 'version',
   'deadline', 'options', 'addressee', 'policy', 'timeout', 'appetite',
   'schedule', 'window', 'guard', 'action', 'cmd', 'on-missing', 'once', 'days', 'history', 'until',
-  'id', 'task', 'stage', 'feature', 'request', 'executor',
+  'id', 'task', 'stage', 'feature', 'request', 'executor', 'session',
   'limit', 'from', 'main', 'dev', 'branch', 'summary', 'checks', 'left', 'status',
 ])
 
@@ -111,4 +111,5 @@ export function listFlag(args: ParsedArgs, name: string): string[] {
 export function boolFlag(args: ParsedArgs, name: string): boolean {
   return args.flags[name] === true || args.flags[name] === 'true'
 }
+
 

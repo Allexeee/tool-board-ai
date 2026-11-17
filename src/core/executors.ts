@@ -94,3 +94,41 @@ export function assertSkill(executor: Executor, skill: string): void {
     throw new UserError(3, `навык ${skill} не найден у исполнителя ${executor.id}`)
   }
 }
+
+export function bindSession(
+  db: DatabaseSync,
+  input: { executorId: string; session: string; actor: string },
+): Executor {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+    if (!input.session.trim()) throw new UserError(3, 'нужен идентификатор сессии: --session <id>')
+
+    db.prepare('update executors set session = ? where id = ?').run(input.session.trim(), executor.id)
+    appendEvent(db, {
+      type: 'executor.session_bound',
+      actor: input.actor,
+      subject: executor.id,
+      after: { session: input.session.trim() },
+    })
+
+    return getExecutor(db, executor.id)!
+  })
+}
+
+export function resetSession(db: DatabaseSync, input: { executorId: string; actor: string }): Executor {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    db.prepare('update executors set session = null where id = ?').run(executor.id)
+    appendEvent(db, {
+      type: 'executor.session_reset',
+      actor: input.actor,
+      subject: executor.id,
+      before: { session: executor.session },
+    })
+
+    return getExecutor(db, executor.id)!
+  })
+}
