@@ -277,6 +277,17 @@ test('фича не закрыта — всё равно dev, даже если 
   assert.equal(landState(db, request.id), 'dev')
 })
 
+test('запрос с отменённой фичей закрывается', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  addFeature(db, { requestId: request.id, name: 'Оплата', rank: 1 })
+  db.prepare("update features set status = 'cancelled'").run()
+
+  const closed = closeRequest(db, { id: request.id, reason: 'фича отменена', kind: 'cancelled', actor: 'owner' })
+
+  assert.equal(closed.status, 'closed')
+})
+
 
 
 
