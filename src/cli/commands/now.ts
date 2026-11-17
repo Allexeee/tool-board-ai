@@ -1,16 +1,26 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, type OwnerStageRow } from '../../core/views.ts'
+import { nowView, ownerView, type OwnerStageRow, type OwnerStageStatus } from '../../core/views.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
-import { ok } from '../output.ts'
+import { ok, paint, setColorMode, type ColorName } from '../output.ts'
 import { UserError } from '../errors.ts'
+
+// цвет несёт только смысл: готово — можно не читать, в работе — смотри сюда, очередь — фон.
+const stageColor: Record<OwnerStageStatus, ColorName> = {
+  done: 'green',
+  wip: 'yellow',
+  pending: 'gray',
+}
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
   const db = openDb(project.dbPath)
   advanceTime(db)
+
+  // флаг ждёт своей строки в args.ts; здесь он уже включён в одну команду.
+  if (boolFlag(args, 'no-color')) setColorMode(false)
 
   const all = boolFlag(args, 'all')
   const view = nowView(db, { all })
@@ -50,7 +60,7 @@ export default async function command(args: ParsedArgs) {
       row.featureId.padEnd(featureWidth),
       mark.padEnd(stageWidth),
       progress.padEnd(progressWidth),
-      row.status.padEnd(7),
+      paint(row.status.padEnd(7), stageColor[row.status]),
       row.name,
     ]
       .join('  ')
@@ -64,7 +74,10 @@ export default async function command(args: ParsedArgs) {
   const pool = view.pool.map((task) => `  ${task.id.padEnd(12)} ${task.title}`)
 
   const holders = view.holders.map((holder) => {
-    const active = holder.active.length > 0 ? `держит ${holder.active.join(', ')}` : 'свободен'
+    const active =
+      holder.active.length > 0
+        ? paint(`держит ${holder.active.join(', ')}`, 'cyan')
+        : paint('свободен', 'gray')
     const hand = holder.hand.length > 0 ? `рука: ${holder.hand.join(', ')}` : 'рука пуста'
     return `  ${holder.executor.padEnd(12)} ${active} · ${hand}`
   })

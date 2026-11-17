@@ -8,8 +8,12 @@ import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/toolbox-al.ts')
 
-function run(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+function run(dir: string, args: string[], env: Record<string, string> = {}) {
+  const result = spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 
@@ -213,5 +217,45 @@ test('now показывает очередь руки исполнителя', 
 
   const view = run(dir, ['now'])
   assert.match(view.out, /w1\s+свободен · рука: T1/)
+})
+
+test('now в пайпе печатает чистый текст без escape-последовательностей', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Платежи'])
+  run(dir, ['feature', 'add', 'Платежи', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'Каркас', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['task', 'add', 'F1.S1', 'Шаг', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'active' where id = 'F1.S1'").run()
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'F1.S1-1'").run()
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /\u001b\[/)
+  assert.match(view.out, /^F1\s+\[1\/1\]\s+1\/1\s+wip\s+Каркас$/m)
+  assert.match(view.out, /w1\s+держит F1\.S1-1 · рука пуста/)
+})
+
+test('now --json не добавляет цветовых кодов', () => {
+  const dir = project()
+  run(dir, ['feature', 'add', 'Оплата'])
+
+  const view = run(dir, ['now', '--json'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /\u001b\[/)
+  assert.doesNotThrow(() => JSON.parse(view.out))
+})
+
+test('now с NO_COLOR печатает чистый текст', () => {
+  const dir = project()
+  run(dir, ['feature', 'add', 'Оплата'])
+
+  const view = run(dir, ['now'], { NO_COLOR: '1' })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /\u001b\[/)
+  assert.match(view.out, /Оплата/)
 })
 
