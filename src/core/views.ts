@@ -7,6 +7,8 @@ import { listTasks, type TaskStatus } from './tasks.ts'
 import { getHand, fillHand, nextTask } from './hands.ts'
 import { ownerHand } from './questions.ts'
 import { listDecisions } from './decisions.ts'
+import { listRequests } from './requests.ts'
+import { pendingRelease } from './git/release.ts'
 
 export interface NowView {
   features: Array<{
@@ -20,6 +22,9 @@ export interface NowView {
   pool: Array<{ id: string; title: string }>
   holders: Array<{ executor: string; task: string | null; active: string[]; hand: string[]; session: string | null }>
   waitingOwner: number
+  requests: Array<{ id: string; title: string }>
+  plans: Array<{ id: string; requestId: string; title: string }>
+  unreleased: number
 }
 
 export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowView {
@@ -84,7 +89,25 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     }
   })
 
-  return { features, pool, holders, waitingOwner: ownerHand(db).length }
+  const requests = listRequests(db)
+    .filter((request) => request.status === 'inbox')
+    .map((request) => ({ id: request.id, title: request.title }))
+
+  const plans = db
+    .prepare(
+      "select id, request_id as requestId, title from plans where approved_at is null and applied_at is null order by id",
+    )
+    .all() as Array<{ id: string; requestId: string; title: string }>
+
+  return {
+    features,
+    pool,
+    holders,
+    waitingOwner: ownerHand(db).length,
+    requests,
+    plans,
+    unreleased: pendingRelease(db).length,
+  }
 }
 
 export interface DispatchEntry {

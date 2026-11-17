@@ -19,6 +19,33 @@ function project() {
   return dir
 }
 
+test('now показывает запрос в inbox и план на утверждение', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+
+  const view = run(dir, ['now'])
+  assert.match(view.out, /ЗАПРОСЫ В INBOX/)
+  assert.match(view.out, /Оплата/)
+})
+
+test('now показывает, сколько этапов не выпущено', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'S1', '--goal', 'g', '--appetite', '1 день'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'merged', merged_at = ? where id = 'F1.S1'").run(
+    new Date().toISOString(),
+  )
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.match(view.out, /НЕ ВЫПУЩЕНО/)
+  assert.match(view.out, /release pending/)
+})
+
 test('now на пустом проекте говорит, что работы нет', () => {
   const dir = project()
   const view = run(dir, ['now'])

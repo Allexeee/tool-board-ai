@@ -36,6 +36,9 @@ export default async function command(args: ParsedArgs) {
     return `  ${holder.executor.padEnd(12)} ${active} · ${hand}`
   })
 
+  const requests = view.requests.map((request) => `  ${request.id.padEnd(5)} ${request.title}`)
+  const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
+
   const text =
     'ФИЧИ\n' +
     (features.length
@@ -43,6 +46,9 @@ export default async function command(args: ParsedArgs) {
       : all
         ? '  фич нет'
         : '  фич в работе нет') +
+    (view.requests.length ? '\n\nЗАПРОСЫ В INBOX\n' + requests.join('\n') : '') +
+    (view.plans.length ? '\n\nПЛАНЫ НА УТВЕРЖДЕНИЕ\n' + plans.join('\n') : '') +
+    (view.unreleased > 0 ? `\n\nНЕ ВЫПУЩЕНО\n  этапов в dev: ${view.unreleased} → release pending` : '') +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
     (holders.length ? holders.join('\n') : '  нет') +
