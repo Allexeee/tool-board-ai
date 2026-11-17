@@ -127,6 +127,35 @@ test('скилл: уровень релиза выбирает агент с п�
   assert.match(skill, /major/)
 })
 
+test('refresh обновляет блок AGENTS.md по маркерам', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const path = join(root, 'AGENTS.md')
+  writeFileSync(path, `# Мой проект\n\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nхвост\n`, 'utf8')
+
+  refreshOpenCode(root, '9.9.9', { yes: true })
+
+  const after = readFileSync(path, 'utf8')
+  assert.match(after, /Мой проект/)
+  assert.match(after, /хвост/)
+  assert.doesNotMatch(after, /старое/)
+  assert.match(after, /toolbox-al/)
+})
+
+test('плагин не перезаписывается, рядом появляется .new', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const path = join(root, '.opencode/plugins/toolbox-al/index.ts')
+  writeFileSync(path, '// моя правка\n', 'utf8')
+
+  const result = refreshOpenCode(root, '9.9.9', { yes: true })
+  const plugin = result.find((item) => item.path.endsWith('index.ts'))!
+
+  assert.equal(plugin.status, 'pending')
+  assert.equal(readFileSync(path, 'utf8'), '// моя правка\n')
+  assert.match(readFileSync(`${path}.new`, 'utf8'), /9\.9\.9/)
+})
+
 test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
   const current = `---\nname: x\n---\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nмоя заметка\n`
   const next = `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`

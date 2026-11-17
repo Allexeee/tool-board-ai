@@ -247,9 +247,11 @@ export function applyUpgrade(
     schemaFrom: plan.schemaFrom,
     schemaTo: plan.schemaTo,
     backup,
-    files: projectRoot === toolRoot ? [] : refreshOpenCode(projectRoot, installed, { yes: true })
-      .filter((item) => item.status !== 'same')
-      .map((item) => item.path),
+    files: projectRoot === toolRoot
+      ? []
+      : refreshOpenCode(projectRoot, installed, { yes: true }).map(
+          (item) => `${item.path}: ${item.status}`,
+        ),
     now: input.now,
   })
   void journal

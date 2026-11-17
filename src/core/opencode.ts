@@ -163,6 +163,7 @@ export function planOpenCode(root: string, toolVersion: string): ManagedPlanItem
     ['.opencode/plugins/toolbox-al/index.ts', pluginSource(toolVersion), false],
     ['.opencode/skills/toolbox-al/SKILL.md', skillSource(), true],
     ['.opencode/skills/toolbox-al-setup/SKILL.md', setupSkillSource(), true],
+    ['AGENTS.md', AGENTS_BLOCK, true],
   ]
 
   return files.map(([relative, next, merge]) => {
@@ -205,6 +206,7 @@ export function refreshOpenCode(
     ['.opencode/plugins/toolbox-al/index.ts', pluginSource(toolVersion), false],
     ['.opencode/skills/toolbox-al/SKILL.md', skillSource(), true],
     ['.opencode/skills/toolbox-al-setup/SKILL.md', setupSkillSource(), true],
+    ['AGENTS.md', AGENTS_BLOCK, true],
   ]
 
   const result: ManagedUpdate[] = []
@@ -251,12 +253,7 @@ export function refreshOpenCode(
       continue
     }
 
-    if (options.yes) {
-      writeFileSync(path, next, 'utf8')
-      result.push({ path: relative, status: 'updated' })
-      continue
-    }
-
+    // плагин не перезаписываем: рядом кладём .new, чтобы правки не потерялись
     writeFileSync(`${path}.new`, next, 'utf8')
     result.push({ path: relative, status: 'pending' })
   }
