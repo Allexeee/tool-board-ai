@@ -144,12 +144,8 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       }
     }
 
-    const reserved = db.prepare('select executor_id from hand where task_id = ?').get(task.id) as
-      | { executor_id: string }
-      | undefined
-    if (reserved && reserved.executor_id !== executor.id) {
-      throw new UserError(2, `задача ${task.id} зарезервирована за ${reserved.executor_id}`)
-    }
+    // резерв не переживает взятие: задача одна, и держатель теперь известен.
+    // чужой резерв снимается ниже вместе с остальными записями руки.
 
     const leaseUntil = new Date(Date.now() + (options.leaseMinutes ?? 30) * 60_000).toISOString()
     const snapshot = task.scope === 'exclusive' ? snapshotOf(db, task) : null
