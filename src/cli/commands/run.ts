@@ -13,11 +13,21 @@ import {
   type RunRecord,
   type RunReviewState,
 } from '../../core/runs.ts'
+import {
+  HIBERNATE_COUNTDOWN_SECONDS,
+  hibernateSupported,
+  planRunPower,
+  schedulePower,
+  setRunPower,
+  type CommandRunner,
+  type PowerOutcome,
+} from '../../core/power.ts'
 import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
-import { ok } from '../output.ts'
+import { isJsonMode, ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 import { renderRunReport, writeRunReport } from '../../core/run-report.ts'
 import { relative } from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 const MODE_LABEL = { plan: 'по плану', all: 'доталово' } as const
 const POWER_LABEL = { none: 'не трогать', hibernate: 'гибернация', shutdown: 'выключение' } as const
@@ -34,8 +44,19 @@ const REVIEW_LABEL: Record<RunReviewState, string | null> = {
 
 const USAGE =
   'использование: run start --mode plan|all [--request R1 …] [--nearest] [--approve] ' +
-  '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision · ' +
-  'run review <id> --verdict ok|found [--note "…"] · run report <id> · run show'
+  '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision ' +
+  '[--power hibernate|shutdown] · run review <id> --verdict ok|found [--note "…"] · ' +
+  'run report <id> · run power <id> · run show'
+
+/** Настоящие системные команды: только из CLI, в тестах runner подменяется. */
+const systemRunner: CommandRunner = (command, args) => {
+  const result = spawnSync(command, args, { encoding: 'utf8', windowsHide: true })
+  return {
+    status: result.status ?? null,
+    output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
+  }
+}
+
 
 function stamp(iso: string): string {
   const at = new Date(iso)
@@ -82,18 +103,23 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'end') {
     const id = args.positionals[0]
     const reason = stringFlag(args, 'reason')
+    const power = stringFlag(args, 'power')
     if (!id || !reason) {
       throw new UserError(3, 'использование: run end RUN1 --reason owner|tasks|decision')
     }
 
-    const run = endRun(db, {
-      id,
-      reason: reason as RunEndReason,
-      actor: stringFlag(args, 'as') ?? 'owner',
-    })
+    const actor = stringFlag(args, 'as') ?? 'owner'
+    const ended = endRun(db, { id, reason: reason as RunEndReason, actor })
+    // питание можно заказать и на конце: ночной прогон знает, что гасить машину
+    const run = power ? setRunPower(db, { runId: ended.id, power: power as RunPower, actor }) : ended
 
     const state = reviewState(run, reviewOf(db, run.id))
-    ok(run, `${run.id}  закрыт · причина: ${reasonText(run)} · ${REVIEW_LABEL[state] ?? ''}`.trim())
+    const lines = [`${run.id}  закрыт · причина: ${reasonText(run)} · ${REVIEW_LABEL[state] ?? ''}`.trim()]
+    if (power) {
+      lines.push(`питание: ${POWER_LABEL[run.power]} после отчёта, выполнит run power ${run.id}`)
+    }
+
+    ok(run, lines.join('\n'))
     return 0
   }
 
@@ -132,6 +158,60 @@ export default async function command(args: ParsedArgs) {
     ok(
       { ...report, path: shown },
       `${renderRunReport(report)}\nотчёт: ${shown}`,
+    )
+    return 0
+  }
+
+  if (args.sub === 'power') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: run power RUN1')
+    if (process.platform !== 'win32') {
+      throw new UserError(1, 'питание после прогона сделано для Windows: powercfg /a и shutdown')
+    }
+
+    // гибернации может не быть: тогда честно выключаемся, а не ждём ночь впустую
+    const probe = systemRunner('powercfg', ['/a'])
+    const plan = planRunPower(db, project.root, id, {
+      hibernateAvailable: probe.status === 0 && hibernateSupported(probe.output),
+    })
+
+    const shown = relative(process.cwd(), plan.reportPath).replace(/\\/g, '/')
+    const lines = [`${plan.run.id}  ${POWER_LABEL[plan.requested]} после отчёта`, `отчёт: ${shown}`]
+    if (plan.note) lines.push(plan.note)
+    if (plan.action === 'shutdown') lines.push('выключаюсь сразу: shutdown /s /t 0')
+
+    // отмена по Ctrl+C: 90 секунд гибернации существуют ровно для этого
+    const controller = new AbortController()
+    const onSigint = () => controller.abort()
+    process.once('SIGINT', onSigint)
+
+    let outcome: PowerOutcome
+    try {
+      outcome = await schedulePower({
+        action: plan.action,
+        runner: systemRunner,
+        seconds: HIBERNATE_COUNTDOWN_SECONDS,
+        signal: controller.signal,
+        onTick: (left) => {
+          if (!isJsonMode()) process.stdout.write(`\rгибернация через ${left} с, Ctrl+C отменяет   `)
+        },
+      })
+    } finally {
+      process.off('SIGINT', onSigint)
+    }
+
+    if (!isJsonMode() && plan.action === 'hibernate') process.stdout.write('\n')
+
+    const performed = POWER_LABEL[outcome as 'hibernate' | 'shutdown'] ?? 'питание'
+    lines.push(
+      outcome === 'cancelled'
+        ? 'питание отменено: машина остаётся включённой'
+        : `питание: ${performed} выполнена`,
+    )
+
+    ok(
+      { run: plan.run, requested: plan.requested, action: plan.action, reportPath: shown, outcome },
+      lines.join('\n'),
     )
     return 0
   }
