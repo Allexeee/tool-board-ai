@@ -95,7 +95,7 @@ export default async function command(args: ParsedArgs) {
   // пустая строка сверху и табуляция в начале каждой строки: вывод читается как блок, а не как эхо команды.
   const pending = pendingRelease(db)
   const pendingBlock = pending.length
-    ? `\n\nОЖИДАЕТ РЕЛИЗА: ${pending.length} этапов\n` +
+    ? `\n\nОЖИДАЕТ РЕЛИЗА: ${pending.length} ${stagesWord(pending.length)}\n` +
       pending
         .map((stage) => {
           const count = listTasks(db, { stageId: stage.stageId }).length
@@ -120,6 +120,16 @@ export default async function command(args: ParsedArgs) {
 
   ok(view, '\n' + indent(text))
   return 0
+}
+
+/** Согласование с числом: 1 этап, 2 этапа, 5 этапов, 21 этап, но 11-14 всегда этапов. */
+function stagesWord(count: number): string {
+  const mod100 = count % 100
+  const mod10 = count % 10
+  if (mod100 >= 11 && mod100 <= 14) return 'этапов'
+  if (mod10 === 1) return 'этап'
+  if (mod10 >= 2 && mod10 <= 4) return 'этапа'
+  return 'этапов'
 }
 
 /** Пустые строки остаются разделителями, содержательные — начинаются с табуляции. */
