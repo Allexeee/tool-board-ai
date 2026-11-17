@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -215,6 +215,19 @@ export function migrate(db: DatabaseSync): number {
       db.exec('alter table executors add column model text')
       db.exec("alter table executors add column permissions text not null default '[]'")
       db.exec('alter table executors add column steps integer not null default 20')
+    }
+    if (from < 9) {
+      // задача помнит сессию, в которой её делают: доработка возвращается туда же
+      db.exec('alter table tasks add column session text')
+      // этап ушёл в dev — помнить сессии его задач больше не нужно
+      db.exec(
+        'create trigger if not exists trg_stage_merged_clears_task_sessions ' +
+          'after update of status on stages ' +
+          "when new.status = 'merged' and old.status <> 'merged' " +
+          'begin ' +
+          'update tasks set session = null where stage_id = new.id; ' +
+          'end',
+      )
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +

@@ -36,15 +36,18 @@ test('новая база создаётся сразу на текущей сх
   assert.ok(Number(row.value) > 0)
 })
 
-test('миграция 7 → 8 добавляет модель, права и шаги без потери исполнителей', () => {
+test('миграция 7 → 9 добавляет модель, права, шаги и сессию задачи без потери исполнителей', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-v7-'))
   const path = join(dir, 'tracker.db')
   const old = openDb(path)
 
-  // приводим таблицу исполнителей к виду схемы 7
+  // приводим базу к виду схемы 7: у исполнителя нет модели, прав и шага,
+  // у задачи нет сессии — её сторожит триггер слияния этапа
   old.exec('alter table executors drop column model')
   old.exec('alter table executors drop column permissions')
   old.exec('alter table executors drop column steps')
+  old.exec('drop trigger if exists trg_stage_merged_clears_task_sessions')
+  old.exec('alter table tasks drop column session')
   old
     .prepare(
       'insert into executors (id, kind, skills, wip_limit, hand_size, session, last_seen) values (?, ?, ?, ?, ?, ?, ?)',
@@ -56,10 +59,10 @@ test('миграция 7 → 8 добавляет модель, права и ш
   assert.throws(() => openDb(path), /устарела/)
 
   const db = openDb(path, { allowOutdated: true })
-  assert.equal(migrate(db), 8)
+  assert.equal(migrate(db), 9)
 
   const version = db.prepare("select value from meta where key = 'schemaVersion'").get() as { value: string }
-  assert.equal(Number(version.value), 8)
+  assert.equal(Number(version.value), 9)
 
   const executor = getExecutor(db, 'w1')
   assert.ok(executor, 'исполнитель пережил миграцию')
@@ -71,5 +74,13 @@ test('миграция 7 → 8 добавляет модель, права и ш
   assert.equal(executor!.model, null)
   assert.deepEqual(executor!.permissions, [])
   assert.equal(executor!.steps, 20)
+
+  // схема 9 вернула сессию задачи и сторожевой триггер
+  const column = db.prepare("select 1 as found from pragma_table_info('tasks') where name = 'session'").get()
+  assert.ok(column, 'у задачи снова есть колонка session')
+  const trigger = db
+    .prepare("select 1 as found from sqlite_master where type = 'trigger' and name = 'trg_stage_merged_clears_task_sessions'")
+    .get()
+  assert.ok(trigger, 'триггер сброса сессий на месте')
   db.close()
 })

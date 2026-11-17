@@ -37,6 +37,7 @@ export interface Task {
   attempts: number
   reason: string | null
   review: 'none' | 'agent' | 'owner'
+  session: string | null
   createdAt: string
 }
 
@@ -59,6 +60,7 @@ interface Row {
   attempts: number
   reason: string | null
   review: 'none' | 'agent' | 'owner'
+  session: string | null
   created_at: string
 }
 
@@ -81,6 +83,7 @@ const toTask = (row: Row): Task => ({
   attempts: row.attempts,
   reason: row.reason,
   review: (row.review as 'none' | 'agent' | 'owner') ?? 'agent',
+  session: row.session ?? null,
   createdAt: row.created_at,
 })
 
@@ -132,12 +135,13 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     attempts: 0,
     reason: null,
     review: input.review ?? 'none',
+    session: null,
     createdAt: new Date().toISOString(),
   }
 
   db.prepare(
-    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, review, created_at) ' +
-      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, review, session, created_at) ' +
+      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     task.id,
     task.stageId,
@@ -157,6 +161,7 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     0,
     null,
     task.review,
+    null,
     task.createdAt,
   )
 
@@ -313,6 +318,36 @@ export function updateTask(db: DatabaseSync, id: string, patch: Partial<{
   if (next.status !== 'ready') db.prepare('delete from hand where task_id = ?').run(id)
 
   return next
+}
+
+/**
+ * Задача помнит сессию, в которой её делают: следующая доработка начинается там же.
+ * `null` стирает: сессии больше нет (или этап слит).
+ */
+export function setTaskSession(
+  db: DatabaseSync,
+  input: { id: string; session: string | null; actor: string },
+): Task {
+  return tx(db, () => {
+    const current = getTask(db, input.id)
+    if (!current) throw new UserError(3, `задача ${input.id} не найдена`)
+
+    const next = input.session === null ? null : input.session.trim()
+    if (next === '') throw new UserError(3, 'пустой идентификатор сессии: нужен --session ses_…')
+
+    if (next === current.session) return current
+
+    db.prepare('update tasks set session = ? where id = ?').run(next, current.id)
+    appendEvent(db, {
+      type: next ? 'task.session_bound' : 'task.session_reset',
+      actor: input.actor,
+      subject: current.id,
+      before: { session: current.session },
+      after: { session: next },
+    })
+
+    return getTask(db, current.id)!
+  })
 }
 
 export function attempt(db: DatabaseSync, id: string, maxAttempts = 3): Task {
