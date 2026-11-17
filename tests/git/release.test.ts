@@ -414,6 +414,68 @@ test('релиз без закрытого прогона о ревью молч
   assert.doesNotMatch(dry.stdout, /РЕВЬЮ ПРОГОНА/)
 })
 
+test('закрытый владельцем прогон не прячет непроверенный предыдущий', () => {
+  const { db, root } = repoWithMergedStage()
+
+  // RUN1 закрыт по задачам и ревью не проходил, RUN2 закрыт владельцем — ревью ему не нужно
+  const first = startRun(db, { mode: 'plan', now: new Date('2026-11-17T08:00:00.000Z') })
+  endRun(db, { id: first.id, reason: 'tasks', now: new Date('2026-11-17T20:00:00.000Z') })
+  const second = startRun(db, { mode: 'plan', now: new Date('2026-11-18T08:00:00.000Z') })
+  endRun(db, { id: second.id, reason: 'owner', now: new Date('2026-11-18T20:00:00.000Z') })
+  assert.equal(first.id, 'RUN1')
+  assert.equal(second.id, 'RUN2')
+
+  // долг ревью первого прогона не спрятан свежим концом владельца
+  const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /ревью не было: 1 этап не проверялся, предлагаю run review RUN1/)
+  assert.doesNotMatch(dry.stdout, /run review RUN2/)
+
+  // после ревью RUN1 предупреждения нет: RUN2 ревью не требует и долга не создаёт
+  reviewRun(db, { id: first.id, verdict: 'ok', actor: 'reviewer' })
+  const after = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(after.status, 0, after.stderr)
+  assert.doesNotMatch(after.stdout, /РЕВЬЮ ПРОГОНА/)
+  assert.doesNotMatch(after.stdout, /run review/)
+})
+
+test('непроверенных прогонов несколько — предупреждаем про самый свежий', () => {
+  const { db, root } = repoWithMergedStage()
+
+  for (const day of ['17', '18']) {
+    const run = startRun(db, { mode: 'plan', now: new Date(`2026-11-${day}T08:00:00.000Z`) })
+    endRun(db, { id: run.id, reason: 'tasks', now: new Date(`2026-11-${day}T20:00:00.000Z`) })
+  }
+
+  const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /предлагаю run review RUN2/)
+
+  // старший прогон ревью прошёл, но младший всё ещё должен ревью
+  reviewRun(db, { id: 'RUN1', verdict: 'ok', actor: 'reviewer' })
+  const middle = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.match(middle.stdout, /предлагаю run review RUN2/)
+
+  reviewRun(db, { id: 'RUN2', verdict: 'ok', actor: 'reviewer' })
+  const after = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.doesNotMatch(after.stdout, /РЕВЬЮ ПРОГОНА/)
+})
+
 test('запись релиза в базу откатывается целиком, если не легла в releases', () => {
   const { db, root, config } = repoWithMergedStage()
   db.exec("create trigger reject_release before insert on releases begin select raise(abort, 'нет места'); end")

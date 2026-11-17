@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
 import { appendEvent } from './events.ts'
-import { getRunRecord, type RunPower, type RunRecord } from './runs.ts'
+import { getRunRecord, runPowerOf, type RunPower, type RunRecord } from './runs.ts'
 
 // ─── питание после прогона ───────────────────────────────────────────────────
 //
@@ -73,8 +73,34 @@ export function reportFile(root: string, runId: string): string | null {
 }
 
 /**
- * План питания: прогон закрыт, питание заказано, отчёт записан. Иначе отказ
- * с подсказкой — что именно ещё не сделано.
+ * Допуск на свежесть: отчёт, записанный с точностью до секунды, не должен
+ * считаться старым из-за округления mtime файловой системы.
+ */
+export const REPORT_FRESHNESS_TOLERANCE_MS = 1000
+
+/** Когда отчёт записан: mtime файла, а не дата в имени и не содержимое. */
+function reportWrittenAt(path: string): number | null {
+  try {
+    return statSync(path).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+/** Старше ли отчёт конца прогона: по такой бумаге питание не выполняется. */
+function reportIsStale(writtenAt: number, endedAt: string): boolean {
+  const ended = Date.parse(endedAt)
+  if (Number.isNaN(ended)) return false
+
+  // конец из будущего (сбитые часы) — сверяемся с текущим моментом: иначе
+  // отчёт, написанный прямо сейчас, был бы «старым» всегда и питание не сработало бы
+  const reference = Math.min(ended, Date.now())
+  return writtenAt + REPORT_FRESHNESS_TOLERANCE_MS < reference
+}
+
+/**
+ * План питания: прогон закрыт, питание заказано, отчёт записан после конца.
+ * Иначе отказ с подсказкой — что именно ещё не сделано.
  */
 export function planRunPower(
   db: DatabaseSync,
@@ -93,6 +119,17 @@ export function planRunPower(
   }
 
   const reportPath = reportFile(root, run.id)
+
+  // «не заказано» отвечаем раньше отчёта: иначе подсказка ведёт в два шага —
+  // сначала run report, потом всё равно run power --power
+  const requested = run.power as PowerAction
+  if (requested === 'none') {
+    throw new UserError(
+      1,
+      `у прогона ${run.id} питание не заказано: run power ${run.id} --power hibernate|shutdown`,
+    )
+  }
+
   if (!reportPath) {
     throw new UserError(
       1,
@@ -100,11 +137,19 @@ export function planRunPower(
     )
   }
 
-  const requested = run.power as PowerAction
-  if (requested === 'none') {
+  // отчёт до конца прогона — это бумага без всего, что слилось после: её переписывают
+  const writtenAt = reportWrittenAt(reportPath)
+  if (writtenAt === null) {
     throw new UserError(
       1,
-      `у прогона ${run.id} питание не заказано: run end ${run.id} --power hibernate или --power shutdown`,
+      `отчёта прогона ${run.id} нет: питание срабатывает только после отчёта, сначала run report ${run.id}`,
+    )
+  }
+  if (reportIsStale(writtenAt, run.endedAt)) {
+    throw new UserError(
+      1,
+      `отчёт прогона ${run.id} старше конца прогона: в нём нет того, что случилось позже, ` +
+        `перепишите его — run report ${run.id}`,
     )
   }
 
@@ -127,28 +172,49 @@ export function setRunPower(
   db: DatabaseSync,
   input: { runId: string; power: RunPower; actor?: string },
 ): RunRecord {
-  if (!['none', 'hibernate', 'shutdown'].includes(input.power)) {
-    throw new UserError(
-      3,
-      `питание после прогона: none, hibernate или shutdown, а не ${String(input.power)}`,
-    )
-  }
+  const power = runPowerOf(input.power)
 
   const run = getRunRecord(db, input.runId)
   if (!run) throw new UserError(3, `прогон ${input.runId} не найден`)
 
-  if (run.power !== input.power) {
-    db.prepare('update runs set power = ? where id = ?').run(input.power, run.id)
+  if (run.power !== power) {
+    db.prepare('update runs set power = ? where id = ?').run(power, run.id)
     appendEvent(db, {
       type: 'run.power',
       actor: input.actor ?? 'owner',
       subject: run.id,
       before: { power: run.power },
-      after: { power: input.power },
+      after: { power },
     })
   }
 
   return getRunRecord(db, run.id)!
+}
+
+/**
+ * Заказать питание закрытому прогону: `run power RUN1 --power hibernate`.
+ * Открытому прогону заказ не ставится — там сначала run end (питание в нём же),
+ * иначе «ой, я ещё тут» превращалось бы в выключение посреди работы.
+ * Отчёт здесь не проверяется: заказ — это намерение, исполнение ждёт отчёта.
+ */
+export function orderRunPower(
+  db: DatabaseSync,
+  input: { runId: string; power: RunPower; actor?: string },
+): RunRecord {
+  const power = runPowerOf(input.power)
+
+  const run = getRunRecord(db, input.runId)
+  if (!run) throw new UserError(3, `прогон ${input.runId} не найден`)
+
+  if (!run.endedAt) {
+    throw new UserError(
+      1,
+      `прогон ${run.id} ещё идёт: питание заказывается закрытому прогону, ` +
+        `сначала run end ${run.id} --power hibernate|shutdown`,
+    )
+  }
+
+  return setRunPower(db, { runId: run.id, power, actor: input.actor })
 }
 
 /** Ждём секунду; отмена будит сразу, чтобы Ctrl+C не ждал конца отсчёта. */

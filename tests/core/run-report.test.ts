@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
@@ -12,6 +12,7 @@ import { ask } from '../../src/core/questions.ts'
 import { createTask } from '../../src/core/tasks.ts'
 import { endRun, startRun } from '../../src/core/runs.ts'
 import { collectRunReport, writeRunReport } from '../../src/core/run-report.ts'
+import { planRunPower } from '../../src/core/power.ts'
 
 function root(): string {
   return mkdtempSync(join(tmpdir(), 'al-report-'))
@@ -92,6 +93,7 @@ test('отчёт прогона перечисляет слитый этап и 
 test('пустой прогон даёт шапку без разделов-пустышек', () => {
   const db = openDb(':memory:')
   const run = startRun(db, { mode: 'plan' })
+  endRun(db, { id: run.id, reason: 'owner' })
 
   const report = writeRunReport(db, run.id, { root: root() })
 
@@ -130,6 +132,7 @@ test('отчёт называет нужные владельцу решения
   })
 
   const run = startRun(db, { mode: 'all', now: new Date('2026-11-18T08:00:00.000Z') })
+  endRun(db, { id: run.id, reason: 'tasks', now: new Date('2026-11-18T20:00:00.000Z') })
 
   const data = collectRunReport(db, run.id, { now: new Date('2026-11-18T21:00:00.000Z') })
   assert.equal(data.pending.length, 1)
@@ -153,4 +156,61 @@ test('отчёт неизвестного прогона — отказ, фай�
 
   assert.throws(() => writeRunReport(db, 'RUN9', { root: dir }), /прогон RUN9 не найден/)
   assert.equal(existsSync(join(dir, '.toolbox-al', 'reports')), false)
+})
+
+test('отчёт открытого прогона не пишется: сначала run end', () => {
+  const db = openDb(':memory:')
+  const dir = root()
+  const run = startRun(db, { mode: 'plan' })
+
+  assert.throws(
+    () => writeRunReport(db, run.id, { root: dir }),
+    /прогон RUN1 ещё идёт:.*сначала run end RUN1/s,
+  )
+  assert.throws(
+    () => collectRunReport(db, run.id),
+    /прогон RUN1 ещё идёт:.*сначала run end RUN1/s,
+  )
+
+  // отказ не оставил ни отчёта, ни каталога под него
+  assert.equal(existsSync(join(dir, '.toolbox-al', 'reports')), false)
+
+  // после конца та же команда проходит
+  endRun(db, { id: run.id, reason: 'tasks' })
+  assert.ok(existsSync(writeRunReport(db, run.id, { root: dir }).path))
+})
+
+test('питание не идёт по отчёту старше конца прогона', () => {
+  const db = openDb(':memory:')
+  const dir = root()
+  const run = startRun(db, { mode: 'plan', power: 'hibernate' })
+  endRun(db, { id: run.id, reason: 'tasks' })
+
+  // отчёт, переписанный после конца, — свежий: питание разрешено
+  const report = writeRunReport(db, run.id, { root: dir })
+  assert.equal(planRunPower(db, dir, run.id, { hibernateAvailable: true }).action, 'hibernate')
+
+  // подложенный файл с прошлой датой (написан до конца) — отказ с подсказкой
+  const yesterday = new Date(Date.now() - 24 * 3_600_000)
+  utimesSync(report.path, yesterday, yesterday)
+  assert.throws(
+    () => planRunPower(db, dir, run.id, { hibernateAvailable: true }),
+    /отчёт прогона RUN1 старше конца прогона:.*run report RUN1/s,
+  )
+
+  // переписали — снова годится
+  writeRunReport(db, run.id, { root: dir })
+  assert.equal(planRunPower(db, dir, run.id, { hibernateAvailable: true }).action, 'hibernate')
+})
+
+test('конец прогона из будущего не делает свежий отчёт вечно старым', () => {
+  const db = openDb(':memory:')
+  const dir = root()
+
+  // часы могли уехать: конец «завтра», отчёт написан сейчас
+  const run = startRun(db, { mode: 'plan', power: 'shutdown' })
+  endRun(db, { id: run.id, reason: 'owner', now: new Date(Date.now() + 24 * 3_600_000) })
+  writeRunReport(db, run.id, { root: dir })
+
+  assert.equal(planRunPower(db, dir, run.id, { hibernateAvailable: true }).action, 'shutdown')
 })

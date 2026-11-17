@@ -16,9 +16,9 @@ import {
 import {
   HIBERNATE_COUNTDOWN_SECONDS,
   hibernateSupported,
+  orderRunPower,
   planRunPower,
   schedulePower,
-  setRunPower,
   type CommandRunner,
   type PowerOutcome,
 } from '../../core/power.ts'
@@ -46,7 +46,7 @@ const USAGE =
   'использование: run start --mode plan|all [--request R1 …] [--nearest] [--approve] ' +
   '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision ' +
   '[--power hibernate|shutdown] · run review <id> --verdict ok|found [--note "…"] · ' +
-  'run report <id> · run power <id> · run show'
+  'run report <id> · run power <id> [--power hibernate|shutdown] · run show'
 
 /** Настоящие системные команды: только из CLI, в тестах runner подменяется. */
 const systemRunner: CommandRunner = (command, args) => {
@@ -109,9 +109,13 @@ export default async function command(args: ParsedArgs) {
     }
 
     const actor = stringFlag(args, 'as') ?? 'owner'
-    const ended = endRun(db, { id, reason: reason as RunEndReason, actor })
-    // питание можно заказать и на конце: ночной прогон знает, что гасить машину
-    const run = power ? setRunPower(db, { runId: ended.id, power: power as RunPower, actor }) : ended
+    // питание идёт в тот же коммит, что и конец: неверный заказ прогон не закрывает
+    const run = endRun(db, {
+      id,
+      reason: reason as RunEndReason,
+      power: power === undefined ? undefined : (power as RunPower),
+      actor,
+    })
 
     const state = reviewState(run, reviewOf(db, run.id))
     const lines = [`${run.id}  закрыт · причина: ${reasonText(run)} · ${REVIEW_LABEL[state] ?? ''}`.trim()]
@@ -164,9 +168,19 @@ export default async function command(args: ParsedArgs) {
 
   if (args.sub === 'power') {
     const id = args.positionals[0]
-    if (!id) throw new UserError(3, 'использование: run power RUN1')
+    if (!id) throw new UserError(3, 'использование: run power RUN1 [--power hibernate|shutdown]')
     if (process.platform !== 'win32') {
       throw new UserError(1, 'питание после прогона сделано для Windows: powercfg /a и shutdown')
+    }
+
+    // заказ можно поставить и на уже закрытом прогоне: подсказка run power --power не тупик
+    const requested = stringFlag(args, 'power')
+    if (requested !== undefined) {
+      orderRunPower(db, {
+        runId: id,
+        power: requested as RunPower,
+        actor: stringFlag(args, 'as') ?? 'owner',
+      })
     }
 
     // гибернации может не быть: тогда честно выключаемся, а не ждём ночь впустую

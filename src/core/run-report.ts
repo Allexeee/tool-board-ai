@@ -134,6 +134,15 @@ export function collectRunReport(
   const run = getRunRecord(db, runId)
   if (!run) throw new UserError(3, `прогон ${runId} не найден`)
 
+  // отчёт — про закрытый прогон: пока он идёт, «сделано» меняется каждую минуту,
+  // а питание сработало бы по бумаге без всего, что слилось после
+  if (!run.endedAt) {
+    throw new UserError(
+      1,
+      `прогон ${run.id} ещё идёт: отчёт пишется по закрытому прогону, сначала run end ${run.id}`,
+    )
+  }
+
   const now = options.now ?? new Date()
   const review = reviewOf(db, run.id)
   const merged = mergedInRun(db, run, now)
@@ -256,7 +265,10 @@ export function renderRunReport(report: RunReportData): string {
   return blocks.join('\n\n') + '\n'
 }
 
-/** Отчёт пишется файлом до питания: владелец читает его утром, а не ищет в чате. */
+/**
+ * Отчёт пишется файлом до питания: владелец читает его утром, а не ищет в
+ * чате. Только по закрытому прогону — это проверяет collectRunReport.
+ */
 export function writeRunReport(
   db: DatabaseSync,
   runId: string,
