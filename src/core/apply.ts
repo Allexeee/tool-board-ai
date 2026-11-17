@@ -30,6 +30,12 @@ export function validatePlan(plan: Plan): string[] {
       if (step.size === 'L') errors.push(`${place}: размер L не допускается в плане, нарежьте на M`)
       if (!['XS', 'S', 'M'].includes(step.size)) errors.push(`${place}: неизвестный размер ${step.size}`)
 
+      const checksByTest = (step.dod ?? []).some((line) => /тест/i.test(line))
+      const hasTests = (step.scope ?? []).some((path) => /(^|[\\/])tests?([\\/]|$)/i.test(path))
+      if (checksByTest && !hasTests) {
+        errors.push(`${place}: шаг проверяется тестом — добавьте tests/ в область`)
+      }
+
       for (const dep of step.deps ?? []) {
         if (!Number.isInteger(dep) || dep < 0 || dep >= stage.steps.length) {
           errors.push(`${place}: зависимость ${dep} вне этапа (шагов ${stage.steps.length})`)
