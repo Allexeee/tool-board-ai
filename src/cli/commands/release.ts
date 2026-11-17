@@ -1,9 +1,40 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
+import type { DatabaseSync } from 'node:sqlite'
 import { deferredInRelease, pendingRelease, release, suggestLevel, type ReleaseLevel } from '../../core/git/release.ts'
+import { unreviewedRun } from '../../core/runs.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
+
+/** «1 этап не проверялся», «2 этапа не проверялись», «5 этапов не проверялись». */
+function unreviewedStages(count: number): string {
+  const tail = count % 100
+  const last = count % 10
+  if (last === 1 && tail !== 11) return `${count} этап не проверялся`
+  if (last >= 2 && last <= 4 && (tail < 12 || tail > 14)) return `${count} этапа не проверялись`
+  return `${count} этапов не проверялись`
+}
+
+/**
+ * Предупреждение о долге ревью: последний прогон закрыт, ревью требует, а
+ * вердикта ok нет. Релиз этим не отменяется — владелец решает сам, — но
+ * молчать об этом нельзя: в main поедет непроверенное.
+ */
+function reviewGapWarning(db: DatabaseSync, pendingCount: number): string | null {
+  const gap = unreviewedRun(db)
+  if (!gap) return null
+
+  const stages = unreviewedStages(pendingCount)
+  if (gap.state === 'found') {
+    return (
+      `ревью прогона ${gap.run.id} нашло замечания: ${stages} до конца, ` +
+      `предлагаю повторить run review ${gap.run.id}`
+    )
+  }
+
+  return `ревью не было: ${stages}, предлагаю run review ${gap.run.id}`
+}
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
@@ -45,6 +76,7 @@ export default async function command(args: ParsedArgs) {
 
     const pending = pendingRelease(db)
     const deferred = deferredInRelease(db)
+    const warning = reviewGapWarning(db, pending.length)
     const changes = pending.map((stage) => `  ${stage.featureId}  ${stage.featureName} — ${stage.stageName}`)
     const level: ReleaseLevel = words.includes(requested as ReleaseLevel)
       ? (requested as ReleaseLevel)
@@ -55,13 +87,14 @@ export default async function command(args: ParsedArgs) {
         : `только исправления: ${suggestion.fixes} задач`
 
     ok(
-      { suggestion, pending, deferred },
+      { suggestion, pending, deferred, reviewWarning: warning },
       [
         `после v${suggestion.version}: задач ${suggestion.tasks}, из них новых возможностей ${suggestion.features}, дефектов и инцидентов ${suggestion.fixes}`,
         `предлагаю: ${level} — ${reason}`,
         '',
         'ИЗМЕНЕНИЯ РЕЛИЗА',
         ...changes,
+        ...(warning ? ['', 'РЕВЬЮ ПРОГОНА:', `  ${warning}`] : []),
         ...(deferred.length === 0
           ? []
           : [
@@ -104,6 +137,10 @@ export default async function command(args: ParsedArgs) {
   if (!['same', 'fresh', 'none'].includes(review)) {
     throw new UserError(3, `неизвестный вариант ревью ${review}: same, fresh или none`)
   }
+
+  // предупреждение не отменяет релиз: владелец увидит долг ревью, но решение его
+  const warning = reviewGapWarning(db, pendingRelease(db).length)
+  if (warning) process.stderr.write(warning + '\n')
 
   const result = release(db, {
     root: project.root,
