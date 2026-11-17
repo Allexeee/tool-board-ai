@@ -474,17 +474,22 @@ export interface RunReviewGap {
 }
 
 /**
- * Долг ревью: последний закрытый прогон, который ревью требовал, но до ok не
- * дошёл — ни разу не смотрели или смотрели и нашли. Релиз об этом говорит,
- * но не отменяет: релиз — команда владельца.
+ * Долг ревью: самый свежий закрытый прогон, который ревью требовал, но до ok не
+ * дошёл — ни разу не смотрели или смотрели и нашли. Смотрим все закрытые
+ * прогоны, а не только последний: прогон, закрытый владельцем, ревью не
+ * требует, но не должен прятать непроверенный предыдущий. Релиз об этом
+ * говорит, но не отменяет: релиз — команда владельца.
  */
 export function unreviewedRun(db: DatabaseSync): RunReviewGap | null {
-  const run = lastClosedRun(db)
-  if (!run) return null
+  const closed = runList(db, 'ended_at is not null', [])
 
-  const review = reviewOf(db, run.id)
-  const state = reviewState(run, review)
-  if (state !== 'needs_review' && state !== 'found') return null
+  // свежие первыми: предупреждаем про ближайший к релизу непроверенный прогон
+  for (let index = closed.length - 1; index >= 0; index--) {
+    const run = closed[index]
+    const review = reviewOf(db, run.id)
+    const state = reviewState(run, review)
+    if (state === 'needs_review' || state === 'found') return { run, state, review }
+  }
 
-  return { run, state, review }
+  return null
 }
