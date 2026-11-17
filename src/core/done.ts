@@ -9,6 +9,7 @@ export interface Report {
   summary: string
   checks: string[]
   left?: string
+  commit?: string
 }
 
 export function doneTask(db: DatabaseSync, input: { taskId: string; executor: string; report: Report }): Task {

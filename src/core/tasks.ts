@@ -23,6 +23,7 @@ export interface Task {
   stageId: string | null
   title: string
   kind: TaskKind
+  severity: TaskSeverity | null
   dod: string[]
   checkCmd: string | null
   size: TaskSize
@@ -44,6 +45,7 @@ interface Row {
   stage_id: string | null
   title: string
   kind: TaskKind
+  severity: TaskSeverity | null
   dod: string
   check_cmd: string | null
   size: TaskSize
@@ -65,6 +67,7 @@ const toTask = (row: Row): Task => ({
   stageId: row.stage_id,
   title: row.title,
   kind: row.kind,
+  severity: row.severity,
   dod: JSON.parse(row.dod) as string[],
   checkCmd: row.check_cmd,
   size: row.size,
@@ -335,4 +338,5 @@ export function attempt(db: DatabaseSync, id: string, maxAttempts = 3): Task {
 
   return getTask(db, id)!
 }
+
 
