@@ -320,6 +320,51 @@ test('причина свободной задачи: ждёт зависимо�
   assert.equal(reasonOf(db, `${stageId}-2`), `ждёт ${stageId}-1`)
 })
 
+test('цепочка зависимостей идёт по порядку: 1, 2, 3', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  // глубина считается по зависимостям, а не по последователям: цепочка не переворачивается
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  addDep(db, `${stageId}-3`, `${stageId}-2`)
+  refreshReady(db)
+
+  assert.deepEqual(
+    taskQueue(db).map((row) => row.taskId),
+    [`${stageId}-1`, `${stageId}-2`, `${stageId}-3`],
+  )
+})
+
+test('зависимость между фичами: блокер выше, хоть у зависимой лучше ранг', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  // вторая фича ниже по рангу: по прежнему порядку её задачи шли бы после
+  const request = addRequest(db, { title: 'Вторая', body: '...', author: 'owner' })
+  const second = addFeature(db, { requestId: request.id, name: 'B', rank: 2 })
+  const secondStage = addStage(db, { featureId: second.id, name: 'S1', goal: 'g', appetite: 'день' })
+  activateNextStage(db, second.id)
+  const blocker = createTask(db, {
+    stageId: secondStage.id,
+    title: 'Блокер другой фичи',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+
+  // зависимая — задача первой фичи с лучшим рангом; блокер обязан быть выше
+  addDep(db, `${stageId}-1`, blocker.id)
+  refreshReady(db)
+
+  const order = taskQueue(db).map((row) => row.taskId)
+  assert.ok(
+    order.indexOf(blocker.id) < order.indexOf(`${stageId}-1`),
+    `блокер ${blocker.id} должен идти выше зависимой ${stageId}-1: ${order.join(', ')}`,
+  )
+})
+
 test('причина свободной задачи: этап не активен', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)
