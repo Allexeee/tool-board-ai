@@ -55,8 +55,92 @@ export function addIdea(
   })
 }
 
-export function listIdeas(db: DatabaseSync): Idea[] {
-  return (db.prepare('select * from ideas order by created_at, id').all() as unknown as Row[]).map(toIdea)
+export function listIdeas(db: DatabaseSync, options: { all?: boolean } = {}): Idea[] {
+  const ideas = (db.prepare('select * from ideas order by created_at, id').all() as unknown as Row[]).map(toIdea)
+  if (options.all) return ideas
+
+  return ideas.filter((idea) => !isRealized(db, idea))
+}
+
+/** Реализована — есть событие idea.realized или продвинутый запрос уже закрыт. */
+export function isRealized(db: DatabaseSync, idea: Idea): boolean {
+  const event = db
+    .prepare("select 1 as found from events where type = 'idea.realized' and subject = ? limit 1")
+    .get(idea.id)
+  if (event) return true
+
+  if (!idea.promotedTo) return false
+  const request = db.prepare('select status from requests where id = ?').get(idea.promotedTo) as
+    | { status: string }
+    | undefined
+  return request?.status === 'closed'
+}
+
+export function editIdea(
+  db: DatabaseSync,
+  input: { ideaId: string; text?: string; reviewAt?: string | null; actor: string },
+): Idea {
+  return tx(db, () => {
+    const idea = getIdea(db, input.ideaId)
+    if (!idea) throw new UserError(3, `идея ${input.ideaId} не найдена`)
+    if (isRealized(db, idea)) throw new UserError(1, `идея ${idea.id} уже реализована: править нельзя`)
+
+    const text = input.text?.trim() || idea.text
+    const reviewAt = input.reviewAt === undefined ? idea.reviewAt : input.reviewAt
+
+    db.prepare('update ideas set text = ?, review_at = ? where id = ?').run(text, reviewAt, idea.id)
+    appendEvent(db, {
+      type: 'idea.edited',
+      actor: input.actor,
+      subject: idea.id,
+      before: { text: idea.text, reviewAt: idea.reviewAt },
+      after: { text, reviewAt },
+    })
+
+    return getIdea(db, idea.id)!
+  })
+}
+
+export function removeIdea(db: DatabaseSync, input: { ideaId: string; actor: string }): void {
+  return tx(db, () => {
+    const idea = getIdea(db, input.ideaId)
+    if (!idea) throw new UserError(3, `идея ${input.ideaId} не найдена`)
+    if (isRealized(db, idea)) {
+      throw new UserError(1, `идея ${idea.id} реализована: удалять нельзя, связь с запросом важна`)
+    }
+    if (idea.promotedTo) {
+      throw new UserError(1, `идея ${idea.id} стала запросом ${idea.promotedTo}: удалять нельзя`)
+    }
+
+    db.prepare('delete from ideas where id = ?').run(idea.id)
+    appendEvent(db, {
+      type: 'idea.removed',
+      actor: input.actor,
+      subject: idea.id,
+      before: { text: idea.text },
+    })
+  })
+}
+
+export function realizeIdea(
+  db: DatabaseSync,
+  input: { ideaId: string; actor: string; note?: string },
+): Idea {
+  return tx(db, () => {
+    const idea = getIdea(db, input.ideaId)
+    if (!idea) throw new UserError(3, `идея ${input.ideaId} не найдена`)
+    if (isRealized(db, idea)) throw new UserError(1, `идея ${idea.id} уже реализована`)
+
+    appendEvent(db, {
+      type: 'idea.realized',
+      actor: input.actor,
+      subject: idea.id,
+      note: input.note,
+      after: { request: idea.promotedTo },
+    })
+
+    return idea
+  })
 }
 
 export function getIdea(db: DatabaseSync, id: string): Idea | null {
