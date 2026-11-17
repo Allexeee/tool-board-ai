@@ -1,7 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, taskQueue, type OwnerStageRow, type OwnerStageStatus } from '../../core/views.ts'
+import { nowView, ownerView, taskQueue, queueFreeReason, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
 import { pendingRelease } from '../../core/git/release.ts'
 import { listTasks } from '../../core/tasks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
@@ -14,6 +14,15 @@ const stageColor: Record<OwnerStageStatus, ColorName> = {
   merge: 'cyan',
   wip: 'magenta',
   pending: 'gray',
+}
+
+// цвет строки очереди отвечает на один вопрос: можно ли брать эту задачу сейчас.
+// зелёная — можно, жёлтая — уже в чьей-то руке, циан — в работе, серая — чего-то ждёт.
+export const queueColor = (row: QueueRow): ColorName => {
+  if (row.status === 'active' || row.holder !== null) return 'cyan'
+  if (row.hand !== null) return 'yellow'
+  if (row.status !== 'ready' || row.waitsFor.length > 0) return 'gray'
+  return row.reason === queueFreeReason ? 'green' : 'gray'
 }
 
 export default async function command(args: ParsedArgs) {
@@ -85,9 +94,29 @@ export default async function command(args: ParsedArgs) {
   )
   const queueLines = queue.map((row) => {
     const assign = row.holder ?? row.hand ?? 'свободна'
-    const waits = row.waitsFor.length > 0 ? ` · ждёт ${row.waitsFor.join(', ')}` : ''
-    return `  ${row.taskId.padEnd(queueIdWidth)}  ${assign.padEnd(assignWidth)}  ${row.title}${waits}`
+    // у свободной задачи причина стоит на месте пустоты: владелец сразу видит, чего она ждёт.
+    const note = row.reason
+      ? ` · ${row.reason}`
+      : row.waitsFor.length > 0
+        ? ` · ждёт ${row.waitsFor.join(', ')}`
+        : ''
+    return `  ${row.taskId.padEnd(queueIdWidth)}  ${paint(assign.padEnd(assignWidth), queueColor(row))}  ${row.title}${note}`
   })
+
+  // сводка внизу: сколько задач стоит на каждой причине. Цифра важнее отдельной строки.
+  const reasons = new Map<string, number>()
+  for (const row of queue) {
+    if (row.reason === null) continue
+    reasons.set(row.reason, (reasons.get(row.reason) ?? 0) + 1)
+  }
+  const reasonWidth = Math.max(0, ...[...reasons.keys()].map((reason) => reason.length))
+  const unassigned = reasons.size
+    ? '\n\nНЕ РАЗДАНО\n' +
+      [...reasons.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([reason, count]) => `  ${reason.padEnd(reasonWidth)}  ${count}`)
+        .join('\n')
+    : ''
 
   const holders = view.holders.map((holder) => {
     // занятость без задачи видна так же ясно, как выданная задача: причина и срок.
@@ -129,7 +158,8 @@ export default async function command(args: ParsedArgs) {
     (queue.length ? `\n\nОЧЕРЕДЬ\n` + queueLines.join('\n') : '') +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
-    (holders.length ? holders.join('\n') : '  нет')
+    (holders.length ? holders.join('\n') : '  нет') +
+    unassigned
 
   ok(view, '\n' + indent(text))
   return 0

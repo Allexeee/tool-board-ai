@@ -7,7 +7,9 @@ import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { addExecutor, clearBusy, setBusy } from '../../src/core/executors.ts'
-import { nowView, dispatchPlan, ownerView } from '../../src/core/views.ts'
+import { setHand } from '../../src/core/hands.ts'
+import { addDep } from '../../src/core/deps.ts'
+import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
@@ -261,4 +263,83 @@ test('снятая занятость исчезает из now', () => {
 
   clearBusy(db, { executorId: 'w1', actor: 'owner' })
   assert.equal(nowView(db).holders[0].busy, null)
+})
+
+const reasonOf = (db: DatabaseSync, taskId: string): string | null | undefined =>
+  taskQueue(db).find((row) => row.taskId === taskId)?.reason
+
+test('у свободной готовой задачи причина — ждёт раздачи', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  assert.equal(reasonOf(db, `${stageId}-1`), queueFreeReason)
+})
+
+test('у назначенной задачи причины нет: держатель и рука', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(`${stageId}-1`)
+  setHand(db, 'w1', [`${stageId}-2`], 'owner')
+
+  assert.equal(reasonOf(db, `${stageId}-1`), null, 'держатель — назначена')
+  assert.equal(reasonOf(db, `${stageId}-2`), null, 'в руке — назначена')
+})
+
+test('причина свободной задачи: нет исполнителя с навыком', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  createTask(db, {
+    stageId,
+    title: 'Записать выстрелы',
+    dod: ['a'],
+    size: 'S',
+    skill: 'audio',
+    class: 'standard',
+    scope: ['assets/**'],
+  })
+  refreshReady(db)
+
+  assert.equal(reasonOf(db, `${stageId}-4`), 'нет исполнителя: audio')
+})
+
+test('причина свободной задачи: все исполнители с навыком заняты', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(`${stageId}-1`)
+
+  assert.equal(reasonOf(db, `${stageId}-2`), 'исполнители заняты')
+})
+
+test('причина свободной задачи: ждёт зависимость', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  refreshReady(db)
+
+  assert.equal(reasonOf(db, `${stageId}-2`), `ждёт ${stageId}-1`)
+})
+
+test('причина свободной задачи: этап не активен', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update stages set status = 'accepted' where id = ?").run(stageId)
+
+  assert.equal(reasonOf(db, `${stageId}-1`), 'этап не активен')
+})
+
+test('причина свободной задачи: у фичи нет каталога', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update features set worktree = null where id = 'F1'").run()
+
+  assert.equal(reasonOf(db, `${stageId}-1`), 'нет каталога фичи')
+})
+
+test('причина свободной задачи: статус не ready', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update tasks set status = 'blocked' where id = ?").run(`${stageId}-1`)
+
+  assert.equal(reasonOf(db, `${stageId}-1`), 'не готова: blocked')
 })

@@ -4,6 +4,7 @@ import { listFeatures } from './features.ts'
 import { listStages, type StageStatus } from './stages.ts'
 import { busyOf, listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
+import { depsOf, isSatisfied } from './deps.ts'
 import { getHand, dispatchHands, nextTask } from './hands.ts'
 import { ownerHand } from './questions.ts'
 import { listDecisions } from './decisions.ts'
@@ -21,7 +22,12 @@ export interface QueueRow {
   /** кому назначена: держатель или исполнитель, в чьей руке лежит */
   holder: string | null
   hand: string | null
+  /** почему задачу никто не взял; null — задача уже назначена */
+  reason: string | null
 }
+
+/** Причина у задачи, которой ничто не мешает: не хватает только раздачи. */
+export const queueFreeReason = 'ждёт раздачи'
 
 /**
  * Порядок, в котором задачи будут взяты: ранг фичи, номер этапа, затем зависимости.
@@ -32,10 +38,11 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
 
   const features = listFeatures(db)
   const rankOf = new Map(features.map((feature) => [feature.id, feature.rank]))
-  const seqOf = new Map<string, { featureId: string; seq: number }>()
+  const featureOf = new Map(features.map((feature) => [feature.id, feature]))
+  const seqOf = new Map<string, { featureId: string; seq: number; status: StageStatus }>()
   for (const feature of features) {
     for (const stage of listStages(db, feature.id)) {
-      seqOf.set(stage.id, { featureId: feature.id, seq: stage.seq })
+      seqOf.set(stage.id, { featureId: feature.id, seq: stage.seq, status: stage.status })
     }
   }
 
@@ -65,17 +72,34 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
   }>
   const handOf = new Map(hand.map((row) => [row.task_id, row.executor_id]))
 
+  // занятость для раздачи: держит задачу или рука полна — брать некуда.
+  const executors = listExecutors(db)
+  const handLoad = new Map<string, number>()
+  for (const row of hand) {
+    // рука считается по тем же задачам, что видит getHand: закрытая задача место не держит.
+    const held = byId.get(row.task_id)
+    if (!held || (held.status !== 'ready' && held.status !== 'open')) continue
+    handLoad.set(row.executor_id, (handLoad.get(row.executor_id) ?? 0) + 1)
+  }
+  const hasWork = new Set(
+    (db.prepare("select distinct holder as id from tasks where status = 'active' and holder is not null").all() as Array<{
+      id: string
+    }>).map((row) => row.id),
+  )
+  const isBusy = (executorId: string, handSize: number): boolean =>
+    hasWork.has(executorId) || (handLoad.get(executorId) ?? 0) >= handSize
+
   return tasks
     .map((task) => {
       const place = task.stageId ? seqOf.get(task.stageId) : undefined
       const featureId = place?.featureId ?? null
-      const deps = (db.prepare('select from_id from deps where to_id = ?').all(task.id) as Array<{
-        from_id: string
-      }>).map((row) => row.from_id)
-      const waitsFor = deps.filter((dep) => {
-        const blocker = byId.get(dep)
-        return blocker ? blocker.status !== 'done' : false
-      })
+      const waitsFor = depsOf(db, task.id).filter((dep) => !isSatisfied(db, dep))
+
+      // назначенная задача никого не ждёт: причина есть только у свободной.
+      const reason =
+        task.holder !== null || handOf.has(task.id)
+          ? null
+          : reasonOf({ task, place, waitsFor, feature: featureId ? featureOf.get(featureId) : undefined, executors, isBusy })
 
       return {
         row: {
@@ -87,6 +111,7 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
           waitsFor,
           holder: task.holder,
           hand: handOf.get(task.id) ?? null,
+          reason,
         } satisfies QueueRow,
         sort: {
           rank: featureId ? (rankOf.get(featureId) ?? 99) : 999,
@@ -98,6 +123,43 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
     })
     .sort((a, b) => a.sort.rank - b.sort.rank || a.sort.seq - b.sort.seq || a.sort.depth - b.sort.depth || a.sort.id.localeCompare(b.sort.id))
     .map((item) => item.row)
+}
+
+/**
+ * Порядок проверок — от того, что можно исправить, к тому, что просто ждёт:
+ * зависимость, статус, этап, каталог, навык, занятость. Всё остальное — недораздача.
+ */
+function reasonOf(input: {
+  task: { status: TaskStatus; stageId: string | null; skill: string }
+  place: { status: StageStatus } | undefined
+  waitsFor: string[]
+  feature: { worktree: string | null } | undefined
+  executors: Array<{ id: string; skills: string[]; handSize: number }>
+  isBusy: (executorId: string, handSize: number) => boolean
+}): string {
+  const { task, place, waitsFor, feature, executors, isBusy } = input
+
+  if (waitsFor.length > 0) return `ждёт ${waitsFor.join(', ')}`
+
+  if (task.status !== 'ready') {
+    // refreshReady превращает задачи неактивного этапа в planned:
+    // владельцу важна причина «этап не активен», а не название статуса.
+    if (task.status === 'planned' && task.stageId !== null && place?.status !== 'active') {
+      return 'этап не активен'
+    }
+    return `не готова: ${task.status}`
+  }
+
+  if (task.stageId !== null) {
+    if (!place || place.status !== 'active') return 'этап не активен'
+    if (!feature || feature.worktree === null) return 'нет каталога фичи'
+  }
+
+  const skilled = executors.filter((executor) => executor.skills.includes(task.skill))
+  if (skilled.length === 0) return `нет исполнителя: ${task.skill}`
+  if (skilled.every((executor) => isBusy(executor.id, executor.handSize))) return 'исполнители заняты'
+
+  return queueFreeReason
 }
 
 export interface NowView {
