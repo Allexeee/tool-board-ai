@@ -1,10 +1,10 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { advanceTime } from './clock.ts'
 import { listFeatures } from './features.ts'
 import { listStages } from './stages.ts'
 import { listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
-import { fillHand, nextTask } from './hands.ts'
+import { getHand, fillHand, nextTask } from './hands.ts'
 import { ownerHand } from './questions.ts'
 
 export interface NowView {
@@ -17,7 +17,7 @@ export interface NowView {
     stage: { id: string; seq: number; total: number; done: number; counts: Record<string, number> }
   }>
   pool: Array<{ id: string; title: string }>
-  holders: Array<{ executor: string; task: string | null }>
+  holders: Array<{ executor: string; task: string | null; active: string[]; hand: string[] }>
   waitingOwner: number
 }
 
@@ -69,8 +69,13 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     .map((task) => ({ id: task.id, title: task.title }))
 
   const holders = listExecutors(db).map((executor) => {
-    const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })[0]
-    return { executor: executor.id, task: active?.id ?? null }
+    const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
+    return {
+      executor: executor.id,
+      task: active[0]?.id ?? null,
+      active: active.map((task) => task.id),
+      hand: getHand(db, executor.id).map((task) => task.id),
+    }
   })
 
   return { features, pool, holders, waitingOwner: ownerHand(db).length }
@@ -117,3 +122,4 @@ export function dispatchPlan(db: DatabaseSync): DispatchPlan {
 
   return { assignments, warnings }
 }
+

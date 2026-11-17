@@ -28,9 +28,11 @@ export default async function command(args: ParsedArgs) {
 
   const pool = view.pool.map((task) => `  ${task.id.padEnd(12)} ${task.title}`)
 
-  const holders = view.holders.map((holder) =>
-    holder.task ? `  ${holder.executor.padEnd(12)} держит ${holder.task}` : `  ${holder.executor.padEnd(12)} свободен`,
-  )
+  const holders = view.holders.map((holder) => {
+    const active = holder.active.length > 0 ? `держит ${holder.active.join(', ')}` : 'свободен'
+    const hand = holder.hand.length > 0 ? `рука: ${holder.hand.join(', ')}` : 'рука пуста'
+    return `  ${holder.executor.padEnd(12)} ${active} · ${hand}`
+  })
 
   const text =
     'ФИЧИ\n' +

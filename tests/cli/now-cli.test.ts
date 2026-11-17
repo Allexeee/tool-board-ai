@@ -49,3 +49,22 @@ test('now показывает фичу в работе', () => {
   const view = run(dir, ['now'])
   assert.match(view.out, /В работе/)
 })
+
+test('now показывает свободного исполнителя и пустую руку', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const view = run(dir, ['now'])
+  assert.match(view.out, /w1\s+свободен · рука пуста/)
+})
+
+test('now показывает очередь руки исполнителя', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'list'])
+  run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
+
+  const view = run(dir, ['now'])
+  assert.match(view.out, /w1\s+свободен · рука: T1/)
+})
