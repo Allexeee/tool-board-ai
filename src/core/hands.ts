@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
+import { depsOf, isSatisfied } from './deps.ts'
 import { getExecutor, type Executor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 
@@ -127,6 +128,7 @@ function candidateOrder(db: DatabaseSync, executor: Executor): Task[] {
   return ordered
 }
 
+/** Задачи руки в её порядке: готовые к работе и следующие шаги, ждущие своей очереди. */
 export function getHand(db: DatabaseSync, executorId: string): Task[] {
   const rows = db
     .prepare('select task_id from hand where executor_id = ? order by position, task_id')
@@ -134,20 +136,41 @@ export function getHand(db: DatabaseSync, executorId: string): Task[] {
 
   return rows
     .map((row) => getTask(db, row.task_id))
-    .filter((task): task is Task => task !== null && task.status === 'ready')
+    .filter((task): task is Task => task !== null && (task.status === 'ready' || task.status === 'open'))
+}
+
+/** Первая незакрытая зависимость задачи, которой нет в руке; null — задача никого не ждёт. */
+function unmetDep(db: DatabaseSync, taskId: string, hand: Set<string>): string | null {
+  for (const dep of depsOf(db, taskId)) {
+    if (isSatisfied(db, dep)) continue
+    if (hand.has(dep)) continue
+    return dep
+  }
+  return null
 }
 
 export function setHand(db: DatabaseSync, executorId: string, taskIds: string[], actor: string): Task[] {
   return tx(db, () => {
-    if (!getExecutor(db, executorId)) throw new UserError(3, `исполнитель ${executorId} не найден`)
+    const executor = getExecutor(db, executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${executorId} не найден`)
 
     // повтор в списке — не ошибка: одна задача занимает в руке одно место
-    const ids = [...new Set(taskIds)]
+    // лишнее за размером руки просто не влезает: цепочка обрывается на границе, это не ошибка
+    const wanted = [...new Set(taskIds)]
+    const ids = wanted.slice(0, executor.handSize)
+    const hand = new Set(ids)
 
     for (const id of ids) {
       const task = getTask(db, id)
       if (!task) throw new UserError(3, `задача ${id} не найдена`)
-      if (task.status !== 'ready') throw new UserError(3, `задача ${id} не готова: ${task.status}`)
+      if (task.status !== 'ready' && task.status !== 'open') {
+        throw new UserError(3, `задача ${id} не в очереди: ${task.status}`)
+      }
+
+      const waiting = unmetDep(db, id, hand)
+      if (waiting) {
+        throw new UserError(3, `задача ${id} ждёт зависимость ${waiting}: она не закрыта и не лежит в руке`)
+      }
 
       const reserved = db
         .prepare('select executor_id from hand where task_id = ? and executor_id != ?')

@@ -5,7 +5,7 @@ import { addRequest } from '../../src/core/requests.ts'
 import { abandonFeature, addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask, updateTask } from '../../src/core/tasks.ts'
-import { refreshReady } from '../../src/core/deps.ts'
+import { refreshReady, addDep } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { addExecutor } from '../../src/core/executors.ts'
@@ -138,6 +138,53 @@ test('setHand не падает, если задача в списке повт�
   const stageId = seed(db)
   const hand = setHand(db, 'w1', [`${stageId}-1`, `${stageId}-1`], 'orchestrator')
   assert.deepEqual(hand.map((task) => task.id), [`${stageId}-1`])
+})
+
+test('setHand принимает шаг, чья зависимость уже лежит в руке', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  refreshReady(db)
+
+  const hand = setHand(db, 'w1', [`${stageId}-1`, `${stageId}-2`], 'owner')
+
+  assert.deepEqual(hand.map((task) => task.id), [`${stageId}-1`, `${stageId}-2`])
+  assert.equal(hand[1].status, 'open', 'следующий шаг виден в руке до своей готовности')
+})
+
+test('setHand принимает шаг с уже закрытой зависимостью', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  db.prepare("update tasks set status = 'done' where id = ?").run(`${stageId}-1`)
+  refreshReady(db)
+
+  const hand = setHand(db, 'w1', [`${stageId}-2`], 'owner')
+
+  assert.deepEqual(hand.map((task) => task.id), [`${stageId}-2`])
+})
+
+test('setHand отказывает, если зависимость не закрыта и её нет в руке', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  refreshReady(db)
+
+  assert.throws(
+    () => setHand(db, 'w1', [`${stageId}-2`], 'owner'),
+    (error: Error) => error.message.includes('ждёт зависимость') && error.message.includes(`${stageId}-1`),
+    'в тексте отказа названа мешающая зависимость',
+  )
+})
+
+test('setHand обрезает цепочку по размеру руки', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addExecutor(db, { id: 'w3', kind: 'agent', skills: ['backend'], handSize: 2 })
+
+  const hand = setHand(db, 'w3', [`${stageId}-1`, `${stageId}-2`, `${stageId}-3`], 'owner')
+
+  assert.deepEqual(hand.map((task) => task.id), [`${stageId}-1`, `${stageId}-2`])
 })
 
 test('пул набирается после блока фичи', () => {
