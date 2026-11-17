@@ -84,3 +84,8 @@ export function listDecisions(db: DatabaseSync, filter: { subjectId?: string } =
 
   return rows.map(toDecision)
 }
+
+/** Решения по нескольким субъектам в заданном порядке: задача, этап, фича. */
+export function decisionsFor(db: DatabaseSync, subjectIds: string[]): Decision[] {
+  return subjectIds.flatMap((id) => listDecisions(db, { subjectId: id }))
+}

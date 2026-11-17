@@ -6,6 +6,7 @@ import { listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
 import { getHand, fillHand, nextTask } from './hands.ts'
 import { ownerHand } from './questions.ts'
+import { listDecisions } from './decisions.ts'
 
 export interface NowView {
   features: Array<{
@@ -54,6 +55,10 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
       rank: feature.rank,
       status: feature.status,
       finished: finished || feature.status === 'done',
+      decisions: listDecisions(db, { subjectId: feature.id }).map((decision) => ({
+        question: decision.question,
+        choice: decision.choice,
+      })),
       stage: {
         id: stage?.id ?? '',
         seq: stages.length === 0 ? 0 : finished ? stages.length : done + 1,
@@ -122,4 +127,5 @@ export function dispatchPlan(db: DatabaseSync): DispatchPlan {
 
   return { assignments, warnings }
 }
+
 

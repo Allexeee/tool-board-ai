@@ -23,7 +23,9 @@ export default async function command(args: ParsedArgs) {
     const mark = feature.finished
       ? `[${feature.stage.done}/${feature.stage.total}] завершена`
       : `[${feature.stage.seq}/${feature.stage.total}]`
-    return `${feature.rank}. ${feature.id.padEnd(5)} ${feature.name}  ${mark} ${counts}`.trimEnd()
+    const line = `${feature.rank}. ${feature.id.padEnd(5)} ${feature.name}  ${mark} ${counts}`.trimEnd()
+    const decisions = feature.decisions.map((decision) => `   · ${decision.question} → ${decision.choice}`)
+    return [line, ...decisions].join('\n')
   })
 
   const pool = view.pool.map((task) => `  ${task.id.padEnd(12)} ${task.title}`)

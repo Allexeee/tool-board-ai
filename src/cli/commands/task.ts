@@ -2,6 +2,8 @@
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { listEvents } from '../../core/events.ts'
+import { getStage } from '../../core/stages.ts'
+import { decisionsFor } from '../../core/decisions.ts'
 import { createTask, editTask, getTask, listTasks, openTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -117,6 +119,21 @@ export default async function command(args: ParsedArgs) {
       `область: ${task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')}`,
     ]
 
+    const subjects = [task.id]
+    if (task.stageId) {
+      subjects.push(task.stageId)
+      const stage = getStage(db, task.stageId)
+      if (stage) subjects.push(stage.featureId)
+    }
+
+    const decisions = decisionsFor(db, subjects)
+    if (decisions.length > 0) {
+      lines.push('', '## Решения')
+      for (const decision of decisions) {
+        lines.push(`${decision.id}  ${decision.question} → ${decision.choice}`)
+      }
+    }
+
     if (args.flags.history === true) {
       const format = (value: unknown): string => {
         if (value === undefined || value === null) return '—'
@@ -157,4 +174,5 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
 
