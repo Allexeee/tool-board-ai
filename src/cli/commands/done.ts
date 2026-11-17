@@ -60,9 +60,19 @@ export default async function command(args: ParsedArgs) {
     if (!existsSync(feature.worktree)) {
       throw new UserError(3, `рабочий каталог фичи ${feature.id} пропал: выполните feature start`)
     }
-    commitTask({ worktree: feature.worktree, task, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
+    commitTask({
+      worktree: feature.worktree,
+      task,
+      report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
+      expectedBranch: feature.branch,
+    })
   } else {
-    commitTask({ worktree: project.root, task, report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') } })
+    commitTask({
+      worktree: project.root,
+      task,
+      report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
+      forbiddenBranches: [project.config.branches.main],
+    })
   }
 
   const closed = doneTask(db, {

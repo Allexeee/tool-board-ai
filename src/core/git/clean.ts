@@ -1,4 +1,5 @@
 ﻿import { existsSync, rmSync } from 'node:fs'
+import { isAbsolute, relative as relativePath } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
@@ -42,14 +43,21 @@ export function cleanWorktree(
   }
 
   const registered = isRegisteredWorktree(input.root, dir)
+  const ignored = registered
+    ? runGit(dir, ['ls-files', '--others', '--ignored', '--exclude-standard'])
+        .split('\n')
+        .filter(Boolean)
+    : []
   const dirty =
-    registered && runGit(dir, ['status', '--porcelain', '--untracked-files=normal']).length > 0
+    registered &&
+    (runGit(dir, ['status', '--porcelain', '--untracked-files=normal']).length > 0 || ignored.length > 0)
   let tag: string | null = null
   let rescued = false
 
   if (dirty) {
     try {
       runGit(dir, ['add', '-A'])
+      if (ignored.length > 0) runGit(dir, ['add', '-f', '.'])
       runGit(dir, ['commit', '-m', `wip: остатки ${feature.id} перед уборкой`])
       tag = archiveTag(feature)
       runGit(dir, ['tag', '-f', tag, 'HEAD'])
@@ -63,6 +71,21 @@ export function cleanWorktree(
         note: reason,
       })
       return { removed: false, rescued: false, tag: null, reason }
+    }
+  }
+
+  // каталог, снятый с учёта git, можно удалять напрямую — но только если он наш
+  if (!registered) {
+    const relative = relativePath(input.root, dir)
+    if (!relative || relative.startsWith('..') || isAbsolute(relative)) {
+      const reason = `каталог ${dir} вне .worktrees проекта: удалять его нельзя`
+      appendEvent(db, {
+        type: 'feature.cleanup_skipped',
+        actor: input.actor,
+        subject: feature.id,
+        note: reason,
+      })
+      return { removed: false, rescued, tag, reason }
     }
   }
 
@@ -280,5 +303,6 @@ export function cleanFeature(
 
   return { ...cleaned, branchDeleted: true }
 }
+
 
 

@@ -1,4 +1,4 @@
-﻿import { runGit } from './git.ts'
+﻿import { currentBranch, runGit } from './git.ts'
 import { scopesOverlap } from './scope.ts'
 import { UserError } from '../../cli/errors.ts'
 import type { Task } from '../tasks.ts'
@@ -19,6 +19,32 @@ function changedFiles(worktree: string): string[] {
     .flatMap((part) => part.split('\n'))
     .map((line) => line.trim())
     .filter(Boolean)
+}
+
+export function assertSafeBranch(
+  worktree: string,
+  options: { expected?: string | null; forbidden?: string[] } = {},
+): void {
+  const branch = currentBranch(worktree)
+
+  if (!branch) {
+    throw new UserError(
+      3,
+      'рабочий каталог в detached HEAD: коммит потеряется, переключитесь на ветку фичи',
+    )
+  }
+  if (options.expected && branch !== options.expected) {
+    throw new UserError(
+      3,
+      `рабочий каталог стоит на ${branch}, а задача в ветке ${options.expected}: переключитесь обратно`,
+    )
+  }
+  if (options.forbidden?.includes(branch)) {
+    throw new UserError(
+      3,
+      `коммит в защищённую ветку ${branch} запрещён: работайте в ветке фичи или в dev`,
+    )
+  }
 }
 
 export function assertScopeRespected(worktree: string, task: Task): void {
@@ -48,7 +74,13 @@ export function commitTask(input: {
   worktree: string
   task: Task
   report: { summary: string; checks: string[]; left?: string }
+  expectedBranch?: string | null
+  forbiddenBranches?: string[]
 }): string | null {
+  assertSafeBranch(input.worktree, {
+    expected: input.expectedBranch,
+    forbidden: input.forbiddenBranches,
+  })
   assertScopeRespected(input.worktree, input.task)
   const { specs, staged } = stage(input.worktree, input.task)
   if (!staged) return null
@@ -79,3 +111,4 @@ export function saveDraft(input: { worktree: string; task: Task; summary: string
 
   return runGit(input.worktree, ['rev-parse', 'HEAD'])
 }
+
