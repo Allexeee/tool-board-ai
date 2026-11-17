@@ -113,3 +113,30 @@ test('задачи плана создаются без ревью', () => {
   const result = applyPlan(db, { requestId: request.id })
   assert.equal(result.tasks[0].review, 'none')
 })
+
+test('закрытый запрос применить нельзя', () => {
+  const { db, request } = fixture()
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+  db.prepare("update requests set status = 'closed' where id = ?").run(request.id)
+
+  assert.throws(() => applyPlan(db, { requestId: request.id }), /закрыт/)
+})
+
+test('второй план по запросу не применяется', () => {
+  const { db, request } = fixture()
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+  applyPlan(db, { requestId: request.id })
+
+  const plan = addPlan(db, { requestId: request.id, title: 'Второй', assumptions: [], stages: [{ name: 'E', goal: 'g', appetite: '1 день', steps: [step] }] })
+  approvePlan(db, { requestId: request.id, version: plan.version, actor: 'owner' })
+
+  assert.throws(() => applyPlan(db, { requestId: request.id, version: plan.version }), /уже есть фича/)
+})
+
+test('устаревший план требует переутверждения', () => {
+  const { db, request } = fixture()
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+  db.prepare('update plans set stale_at = ? where request_id = ?').run(new Date().toISOString(), request.id)
+
+  assert.throws(() => applyPlan(db, { requestId: request.id }), /устарел/)
+})

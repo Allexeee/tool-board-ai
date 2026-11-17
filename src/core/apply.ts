@@ -57,6 +57,27 @@ export function applyPlan(
     const plan = getPlan(db, { requestId: input.requestId, version: input.version })
     if (!plan) throw new UserError(3, `план для запроса ${input.requestId} не найден`)
     if (plan.appliedAt) throw new UserError(1, `план ${plan.id} уже применён`)
+    if (plan.staleAt) {
+      throw new UserError(1, `план ${plan.id} устарел после правки запроса: переутвердите его`)
+    }
+
+    const request = db.prepare('select status from requests where id = ?').get(plan.requestId) as
+      | { status: string }
+      | undefined
+    if (!request) throw new UserError(3, `запрос ${plan.requestId} не найден`)
+    if (request.status === 'closed') {
+      throw new UserError(1, `запрос ${plan.requestId} закрыт: план применять нельзя, сначала request reopen`)
+    }
+
+    const existing = db
+      .prepare('select id from features where request_id = ? limit 1')
+      .get(plan.requestId) as { id: string } | undefined
+    if (existing) {
+      throw new UserError(
+        1,
+        `у запроса ${plan.requestId} уже есть фича ${existing.id}: второй план не применяется`,
+      )
+    }
 
     const errors = validatePlan(plan)
     if (errors.length > 0) {
