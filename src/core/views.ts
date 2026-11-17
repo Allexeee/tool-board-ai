@@ -10,6 +10,96 @@ import { listDecisions } from './decisions.ts'
 import { listRequests } from './requests.ts'
 import { pendingRelease } from './git/release.ts'
 
+export interface QueueRow {
+  taskId: string
+  title: string
+  status: TaskStatus
+  featureId: string | null
+  stageId: string | null
+  /** чего ждёт: незакрытые зависимости */
+  waitsFor: string[]
+  /** кому назначена: держатель или исполнитель, в чьей руке лежит */
+  holder: string | null
+  hand: string | null
+}
+
+/**
+ * Порядок, в котором задачи будут взяты: ранг фичи, номер этапа, затем зависимости.
+ * Владельцу нужен порядок, а не разбивка по рукам.
+ */
+export function taskQueue(db: DatabaseSync): QueueRow[] {
+  advanceTime(db)
+
+  const features = listFeatures(db)
+  const rankOf = new Map(features.map((feature) => [feature.id, feature.rank]))
+  const seqOf = new Map<string, { featureId: string; seq: number }>()
+  for (const feature of features) {
+    for (const stage of listStages(db, feature.id)) {
+      seqOf.set(stage.id, { featureId: feature.id, seq: stage.seq })
+    }
+  }
+
+  const tasks = listTasks(db).filter(
+    (task) => task.status !== 'done' && task.status !== 'cancelled' && task.status !== 'deferred',
+  )
+
+  const depth = new Map<string, number>()
+  const byId = new Map(tasks.map((task) => [task.id, task]))
+  const depthOf = (id: string, seen = new Set<string>()): number => {
+    if (depth.has(id)) return depth.get(id)!
+    if (seen.has(id)) return 0
+    seen.add(id)
+
+    const deps = (db.prepare('select from_id from deps where to_id = ?').all(id) as Array<{ from_id: string }>)
+      .map((row) => row.from_id)
+      .filter((dep) => byId.has(dep))
+
+    const value = deps.length === 0 ? 0 : Math.max(...deps.map((dep) => depthOf(dep, seen) + 1))
+    depth.set(id, value)
+    return value
+  }
+
+  const hand = db.prepare('select task_id, executor_id from hand').all() as Array<{
+    task_id: string
+    executor_id: string
+  }>
+  const handOf = new Map(hand.map((row) => [row.task_id, row.executor_id]))
+
+  return tasks
+    .map((task) => {
+      const place = task.stageId ? seqOf.get(task.stageId) : undefined
+      const featureId = place?.featureId ?? null
+      const deps = (db.prepare('select from_id from deps where to_id = ?').all(task.id) as Array<{
+        from_id: string
+      }>).map((row) => row.from_id)
+      const waitsFor = deps.filter((dep) => {
+        const blocker = byId.get(dep)
+        return blocker ? blocker.status !== 'done' : false
+      })
+
+      return {
+        row: {
+          taskId: task.id,
+          title: task.title,
+          status: task.status,
+          featureId,
+          stageId: task.stageId,
+          waitsFor,
+          holder: task.holder,
+          hand: handOf.get(task.id) ?? null,
+        } satisfies QueueRow,
+        sort: {
+          rank: featureId ? (rankOf.get(featureId) ?? 99) : 999,
+          seq: place?.seq ?? 999,
+          depth: depthOf(task.id),
+          id: task.id,
+        },
+      }
+    })
+    .sort((a, b) => a.sort.rank - b.sort.rank || a.sort.seq - b.sort.seq || a.sort.depth - b.sort.depth || a.sort.id.localeCompare(b.sort.id))
+    .map((item) => item.row)
+}
+
 export interface NowView {
   features: Array<{
     id: string

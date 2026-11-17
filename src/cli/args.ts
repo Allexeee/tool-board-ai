@@ -4,6 +4,7 @@ import { UserError } from './errors.ts'
 const COMMANDS_WITH_SUB = new Set([
   'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
   'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan', 'pool', 'release',
+  'run',
 ])
 
 const TEXT_FILE_COMMANDS = new Set(['idea', 'request'])
@@ -18,9 +19,11 @@ const KNOWN_FLAGS = new Set([
   'id', 'task', 'stage', 'feature', 'request', 'executor', 'session',
   'limit', 'from', 'main', 'dev', 'branch', 'force-outside', 'summary', 'checks', 'left', 'status',
   'write', 'brief', 'no-color', 'model', 'steps', 'allow', 'deny', 'clear',
+  // прогон (RUN): режим, добор ближайших, утверждение начального плана, питание
+  'mode', 'nearest', 'approve', 'power',
 ])
 
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all', 'branch', 'pin', 'force-outside', 'write', 'brief', 'no-color', 'clear'])
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all', 'branch', 'pin', 'force-outside', 'write', 'brief', 'no-color', 'clear', 'nearest', 'approve'])
 
 export type FlagValue = string | boolean | string[]
 
