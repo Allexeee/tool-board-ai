@@ -1,7 +1,7 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { advanceTime } from './clock.ts'
 import { listFeatures } from './features.ts'
-import { listStages } from './stages.ts'
+import { listStages, type StageStatus } from './stages.ts'
 import { listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
 import { getHand, fillHand, nextTask } from './hands.ts'
@@ -115,6 +115,80 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     plans,
     unreleased: pendingRelease(db).length,
   }
+}
+
+// владельцу нужен не журнал, а картина работы: строка на каждый этап.
+// группы не выносятся в заголовки — порядок строк и есть группировка.
+export type OwnerStageStatus = 'done' | 'wip' | 'pending'
+
+export interface OwnerStageRow {
+  featureId: string
+  featureName: string
+  stageId: string
+  seq: number
+  total: number
+  progress: { current: number; total: number }
+  status: OwnerStageStatus
+  name: string
+}
+
+export interface OwnerView {
+  stages: OwnerStageRow[]
+}
+
+const ownerStageStatus = (status: StageStatus): OwnerStageStatus | null => {
+  if (status === 'merged') return 'done'
+  if (status === 'planned') return 'pending'
+  if (status === 'abandoned') return null
+  return 'wip'
+}
+
+const ownerStatusRank: Record<OwnerStageStatus, number> = { done: 0, wip: 1, pending: 2 }
+
+// прогресс — текущая задача из всех задач этапа: до работы 1/3, после двух закрытых 3/3.
+const stageProgress = (db: DatabaseSync, stageId: string): { current: number; total: number } => {
+  const tasks = listTasks(db, { stageId })
+  const total = tasks.length
+  const completed = tasks.filter((task) => task.status === 'done' || task.status === 'cancelled').length
+  return { current: total === 0 ? 0 : Math.min(total, completed + 1), total }
+}
+
+export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): OwnerView {
+  const rows: Array<{ rank: number; row: OwnerStageRow }> = []
+
+  for (const feature of listFeatures(db)) {
+    if (options.all !== true && (feature.status === 'done' || feature.status === 'cancelled')) continue
+
+    const stages = listStages(db, feature.id)
+    for (const stage of stages) {
+      const status = ownerStageStatus(stage.status)
+      if (!status) continue
+
+      rows.push({
+        rank: feature.rank,
+        row: {
+          featureId: feature.id,
+          featureName: feature.name,
+          stageId: stage.id,
+          seq: stage.seq,
+          total: stages.length,
+          progress: stageProgress(db, stage.id),
+          status,
+          name: stage.name,
+        },
+      })
+    }
+  }
+
+  rows.sort(
+    (a, b) =>
+      ownerStatusRank[a.row.status] - ownerStatusRank[b.row.status] ||
+      a.rank - b.rank ||
+      a.row.featureId.localeCompare(b.row.featureId) ||
+      a.row.seq - b.row.seq,
+  )
+
+  return { stages: rows.map((item) => item.row) }
 }
 
 export interface DispatchEntry {
