@@ -2,7 +2,7 @@
 
 Ящик инструментов для работы по фичам: очереди на исполнителей, где исполнитель — и человек, и ИИ-агент.
 
-Требуется Node 26. Внешних зависимостей нет.
+Требуется Node 24 или новее: используется встроенный `node:sqlite` и запуск TypeScript без сборки. Внешних зависимостей нет.
 
 ## Установка
 
@@ -21,12 +21,41 @@ $env:Path += ";$env:USERPROFILE\tools\toolbox-al"
 
 ```bash
 git submodule add https://github.com/Allexeee/toolbox-al.git tools/toolbox-al
-git -C tools/toolbox-al checkout v1.0.1
+git -C tools/toolbox-al checkout v1.1.0
 git add .gitmodules tools/toolbox-al
-git commit -m "chore: pin toolbox-al 1.0.1"
+git commit -m "chore: pin toolbox-al 1.1.0"
 ```
 
 Команды в проекте: `node tools/toolbox-al/bin/toolbox-al.ts …`. Плагин находит локальную копию сам — по пути `tools/toolbox-al/bin/toolbox-al.ts`. Переменная `TOOLBOX_AL_CLI` перекрывает всё, если нужен другой путь.
+
+## Первый запуск на проекте
+
+```bash
+node tools/toolbox-al/bin/toolbox-al.ts init
+```
+
+Что сделать сразу после:
+
+1. **Закоммитьте скелет.** `init` печатает готовую команду `git add … && git commit …`. Без коммита первая задача пула на `main` упрётся в хук.
+2. **Заведите ветку `dev`,** если её нет: `git branch dev`. Слияние этапов идёт туда.
+3. **Добавьте исполнителя:** `executor add worker --skills backend` (или ваши навыки).
+4. **Проверьте настройку:** `doctor` — он скажет, чего не хватает.
+
+Дальше обычный путь: `request add` → `plan new/approve/apply` → `feature start` → задачи.
+
+## Обновление инструмента
+
+Фиксированная версия живёт в `tools/toolbox-al` (submodule). Обновление:
+
+```bash
+git -C tools/toolbox-al fetch --tags
+git -C tools/toolbox-al checkout v1.1.0
+node tools/toolbox-al/bin/toolbox-al.ts init        # хуки и скиллы
+node tools/toolbox-al/bin/toolbox-al.ts upgrade --yes
+node tools/toolbox-al/bin/toolbox-al.ts doctor
+```
+
+Если `doctor` показывает «ждут переноса» — рядом с управляемыми файлами появились `.new`: перенесите нужное и удалите `.new`. Файлы без маркеров не перезаписываются никогда.
 
 ## Быстрый старт
 
@@ -124,12 +153,12 @@ pool merge T1 T2     # DoD переносится в T2, T1 отменяется
 | Команда | Что делает |
 |---|---|
 | `init [каталог]` | создаёт `.toolbox-al/`, базу, `.gitignore` |
-| `request add\|list\|show` | запросы: то, что пишет человек словами |
-| `feature add\|list\|show\|rank` | фичи и их ранг |
-| `stage add\|list\|activate\|merge` | этапы: единица слияния и приёмки; `--appetite` обязателен |
+| `request add\|list\|open\|show\|close` | запросы: открытые, карточка, закрытие с причиной |
+| `feature add\|list\|show\|rank\|clean` | фичи, ранг, уборка каталога и ветки |
+| `stage add\|list\|show\|activate\|accept\|merge` | этапы: единица слияния и приёмки; `--appetite` обязателен |
 | `feature start\|abandon` | ветка и рабочий каталог фичи; отмена без слияния |
 | `save id --summary` | черновик в пределах области |
-| `release major\|minor\|patch` | changelog, тег и слияние dev в main |
+| `release [pending\|minor\|patch]` | релиз: показать изменения, выбрать ревью, слить dev в main, поставить тег |
 | `plan new\|show\|approve\|apply` | версии плана и атомарное создание работы |
 | `idea add\|list\|promote` | идеи без обязательств |
 | `decide add\|list` | журнал решений |
@@ -137,8 +166,8 @@ pool merge T1 T2     # DoD переносится в T2, T1 отменяется
 | `stage accept\|reject` | приёмка этапа владельцем |
 | `template save\|show\|list` | шаблоны разбиения |
 | `similar "запрос"` | похожие прошлые фичи |
-| `task add\|show\|list` | задачи; без DoD не создаются |
-| `executor add\|list` | исполнители и их навыки |
+| `task add\|show\|list\|open\|unblock` | задачи; без DoD не создаются |
+| `executor add\|list\|bind\|session\|reset` | исполнители, навыки и сессия |
 | `hand show\|set\|add` | руки исполнителей |
 | `next --as w1` | что делать дальше |
 | `take [id] --as w1` | взять задачу в работу |
@@ -153,6 +182,18 @@ pool merge T1 T2     # DoD переносится в T2, T1 отменяется
 | `doctor` | проверка настройки |
 
 Все команды принимают `--json` и возвращают `0` при успехе, `1` когда делать нечего, `2` когда нужно решение владельца, `3` при ошибке.
+
+## Правила ревью
+
+Ревью отдельных задач не проводится: шаг закрывается командой `done` и уходит в `done`. Если нужен контроль — задача создаётся с `--review owner` и ждёт владельца.
+
+Перед релизом `release` без аргумента показывает изменения и три варианта:
+
+1. ревью делает тот же оркестратор — дешевле, точность ниже;
+2. ревью делает свежий агент — дороже, точнее;
+3. без ревью.
+
+Выбор обязателен: `release minor --reason "почему" --review same|fresh|none`. Критические находки исправляются до выпуска, остальные записываются запросом, затем идёт слияние в `main`.
 
 ## Правила, которые проверяет код
 
@@ -191,3 +232,4 @@ node bin/toolbox-al.ts scheduler enable --yes
 Плагин не содержит логики: он вызывает `node bin/toolbox-al.ts … --json`. Если плагина нет, всё работает через CLI.
 
 В OpenCode: «выполни первичную настройку toolbox-al», затем «разбери inbox».
+

@@ -120,3 +120,11 @@ test('done без аргументов отвечает кодом 3, а не п
 
 
 
+
+test('init подсказывает создать dev, если её нет', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-init-dev-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+
+  const text = runInit(dir)
+  assert.match(text, /git branch dev/)
+})
