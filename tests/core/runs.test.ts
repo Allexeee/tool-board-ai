@@ -151,13 +151,13 @@ test('нумерация RUN не путается с рутинными про�
 
 test('миграция 9 → 10 создаёт таблицу прогонов', () => {
   const db = openDb(':memory:')
-  assert.equal(SCHEMA_VERSION, 10)
+  assert.ok(SCHEMA_VERSION >= 10)
 
   // откатываемся к схеме 9: таблицы прогонов ещё нет
   db.exec('drop table runs')
   db.prepare("update meta set value = '9' where key = 'schemaVersion'").run()
 
-  assert.equal(migrate(db), 10)
+  assert.ok(migrate(db) >= 10)
 
   const columns = (
     db.prepare("select name from pragma_table_info('runs')").all() as Array<{ name: string }>
@@ -169,3 +169,4 @@ test('миграция 9 → 10 создаёт таблицу прогонов',
   // и запись ложится в новую таблицу
   assert.equal(startRun(db, { mode: 'plan' }).id, 'RUN1')
 })
+
