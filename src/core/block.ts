@@ -48,23 +48,24 @@ export function blockTask(
       reason: input.reason,
     })
 
+    const question = needsOwner
+      ? ask(db, {
+          addressee: 'owner',
+          text: `${task.id}: ${input.note}`,
+          subjectType: 'task',
+          subjectId: task.id,
+          deadline: null,
+          timeoutPolicy: 'block',
+        })
+      : null
+
     appendEvent(db, {
       type: 'task.blocked',
       actor: input.executor,
       subject: task.id,
       note: `${input.reason}: ${input.note}`,
+      after: question ? { questionId: question.id } : undefined,
     })
-
-    if (needsOwner) {
-      ask(db, {
-        addressee: 'owner',
-        text: `${task.id}: ${input.note}`,
-        subjectType: 'task',
-        subjectId: task.id,
-        deadline: null,
-        timeoutPolicy: 'block',
-      })
-    }
 
     return updated
   })
@@ -89,12 +90,23 @@ export function unblockTask(
       note: input.note,
     })
 
-    // причина снята — вопросы, заданные ради неё, больше не ждут владельца
+    // гасим только вопрос, созданный этой блокировкой: чужие вопросы остаются владельцу
+    const blocked = db
+      .prepare("select after from events where type = 'task.blocked' and subject = ? order by id desc limit 1")
+      .get(task.id) as { after: string | null } | undefined
+    let questionId: string | null = null
+    try {
+      questionId = blocked?.after ? ((JSON.parse(blocked.after) as { questionId?: string }).questionId ?? null) : null
+    } catch {
+      questionId = null
+    }
+
     closeQuestionsFor(db, {
       subjectType: 'task',
       subjectId: task.id,
       actor: input.actor,
       note: 'задача разблокирована',
+      questionId,
     })
 
     return updated

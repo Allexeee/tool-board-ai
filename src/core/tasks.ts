@@ -373,6 +373,14 @@ export function undeferTask(db: DatabaseSync, input: { id: string; actor: string
       throw new UserError(1, `задача ${current.id} не отложена: ${current.status}`)
     }
 
+    // возврат в слитый этап дал бы тупик: взять нельзя, закрыть нельзя, а из отчёта релиза она уже ушла
+    const stage = db
+      .prepare('select status from stages where id = (select stage_id from tasks where id = ?)')
+      .get(current.id) as { status: string } | undefined
+    if (stage?.status === 'merged') {
+      throw new UserError(1, `этап ${current.stageId} уже слит: заведите новую задачу вместо возврата`)
+    }
+
     updateTask(db, current.id, { status: 'open', holder: null, leaseUntil: null, reason: null })
     refreshReady(db)
 

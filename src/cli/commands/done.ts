@@ -118,13 +118,15 @@ export default async function command(args: ParsedArgs) {
     },
   })
 
-  // задача закрыта — вопросы, заданные по ней, больше не ждут владельца
-  closeQuestionsFor(db, {
-    subjectType: 'task',
-    subjectId: taskId,
-    actor: executor,
-    note: 'задача закрыта',
-  })
+  // задача закрыта — вопросы, заданные по ней, больше не ждут владельца; на ревью задача ещё не закрыта
+  if (closed.status === 'done') {
+    closeQuestionsFor(db, {
+      subjectType: 'task',
+      subjectId: taskId,
+      actor: executor,
+      note: 'задача закрыта',
+    })
+  }
 
   // промах не отменяет закрытие, но остаётся в журнале: doctor потом покажет его
   if (outside.length > 0) {
