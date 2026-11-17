@@ -1,9 +1,10 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/toolbox-al.ts')
 
@@ -43,9 +44,35 @@ test('task show печатает решения задачи, этапа и фи
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'от частного к общему')
 })
 
+test('task show печатает сессию держателя', () => {
+  const dir = stageTask()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['executor', 'bind', 'w1', '--session', 'ses_42'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'F1.S1-1'").run()
+  db.close()
+
+  const shown = run(dir, ['task', 'show', 'F1.S1-1'])
+  assert.match(shown.out, /сессия: ses_42/)
+})
+
+test('без сессии строки нет', () => {
+  const dir = stageTask()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'F1.S1-1'").run()
+  db.close()
+
+  const shown = run(dir, ['task', 'show', 'F1.S1-1'])
+  assert.doesNotMatch(shown.out, /сессия:/)
+})
+
 test('у задачи без решений секции нет', () => {
   const dir = stageTask()
 
   const shown = run(dir, ['task', 'show', 'F1.S1-1'])
   assert.doesNotMatch(shown.out, /## Решения/)
 })
+

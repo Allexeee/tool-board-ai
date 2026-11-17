@@ -1,6 +1,6 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addExecutor, listExecutors } from '../../core/executors.ts'
+import { addExecutor, bindSession, getExecutor, listExecutors, resetSession } from '../../core/executors.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -28,6 +28,36 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'bind') {
+    const id = args.positionals[0]
+    const session = stringFlag(args, 'session')
+    if (!id || !session) throw new UserError(3, 'использование: executor bind w1 --session <ses_id>')
+
+    const executor = bindSession(db, { executorId: id, session, actor: 'orchestrator' })
+    ok(executor, `${executor.id}: сессия ${executor.session}`)
+    return 0
+  }
+
+  if (args.sub === 'session') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor session w1')
+
+    const executor = getExecutor(db, id)
+    if (!executor) throw new UserError(3, `исполнитель ${id} не найден`)
+
+    ok(executor, executor.session ? `${executor.id}: ${executor.session}` : `${executor.id}: сессия не привязана`)
+    return 0
+  }
+
+  if (args.sub === 'reset') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor reset w1')
+
+    const executor = resetSession(db, { executorId: id, actor: 'orchestrator' })
+    ok(executor, `${executor.id}: сессия отвязана`)
+    return 0
+  }
+
   const rows = listExecutors(db)
   ok(
     rows,
@@ -37,3 +67,4 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+

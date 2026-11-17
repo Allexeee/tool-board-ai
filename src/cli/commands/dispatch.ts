@@ -13,7 +13,8 @@ export default async function command() {
 
   const lines = plan.assignments.map((entry) => {
     const hand = entry.tasks.length ? entry.tasks.join(', ') : '—'
-    return `${entry.executor.padEnd(12)} рука: ${hand}${entry.newTask ? '  → ' + entry.newTask : ''}`
+    const session = entry.session ? `  сессия: ${entry.session}` : ''
+    return `${entry.executor.padEnd(12)} рука: ${hand}${entry.newTask ? '  → ' + entry.newTask : ''}${session}`
   })
 
   const text =
