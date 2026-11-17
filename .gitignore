@@ -1,5 +1,6 @@
 node_modules/
 .toolbox-al/
+.opencode/agents/
 .worktrees/
 .superpowers/
 *.log
