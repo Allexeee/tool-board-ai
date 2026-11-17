@@ -42,6 +42,27 @@ test('без --yes ничего не меняется и копия не соз�
   assert.equal(readFileSync(configPath, 'utf8'), before)
 })
 
+test('--from не закрепляет версию, которой нет на диске', () => {
+  const { dir, db, dbPath, configPath } = project()
+
+  const result = applyUpgrade(db, {
+    dbPath,
+    configPath,
+    projectRoot: dir,
+    toolRoot: toolRootPath,
+    from: sourceWith('99.0.0'),
+    yes: true,
+  })
+
+  assert.equal(result.applied, true)
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as { toolVersion: string }
+  assert.equal(config.toolVersion, toolVersion(toolRootPath))
+  assert.notEqual(config.toolVersion, '99.0.0')
+
+  const plugin = readFileSync(join(dir, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
+  assert.match(plugin, new RegExp(`toolbox-al-plugin-version: ${toolVersion(toolRootPath)}`))
+})
+
 test('с --yes создаётся копия базы и обновляется закреплённая версия', () => {
   const { dir, db, dbPath, configPath } = project()
 
@@ -58,7 +79,7 @@ test('с --yes создаётся копия базы и обновляется 
   assert.ok(result.backup && existsSync(result.backup))
 
   const config = JSON.parse(readFileSync(configPath, 'utf8')) as { toolVersion: string }
-  assert.equal(config.toolVersion, '99.0.0')
+  assert.equal(config.toolVersion, toolVersion(toolRootPath))
 })
 
 test('схема из будущего отвергается', () => {

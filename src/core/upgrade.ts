@@ -1,10 +1,11 @@
-import { execFileSync } from 'node:child_process'
+﻿import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION, migrate } from './schema.ts'
 import { refreshOpenCode } from './opencode.ts'
+import { saveConfig } from './config.ts'
 import { toolRoot, toolVersion } from './version.ts'
 import { UserError } from '../cli/errors.ts'
 
@@ -238,31 +239,31 @@ export function applyUpgrade(
 
   migrate(db)
 
+  // закрепляем ровно ту версию, которая лежит на диске, а не найденную в тегах или --from
+  const installed = toolVersion(input.toolRoot ?? toolRoot)
+
   const journal = writeUpgradeJournal(projectRoot, {
     from: plan.current.current,
-    to: plan.current.latest ?? plan.current.current,
+    to: installed,
     schemaFrom: plan.schemaFrom,
     schemaTo: plan.schemaTo,
     backup,
-    files: input.root === toolRoot
+    files: projectRoot === toolRoot
       ? []
-      : refreshOpenCode(projectRoot, plan.current.latest ?? plan.current.current, { yes: true })
-          .filter((item) => item.status !== 'same')
-          .map((item) => item.path),
+      : refreshOpenCode(projectRoot, installed, { yes: true }).map(
+          (item) => `${item.path}: ${item.status}`,
+        ),
     now: input.now,
   })
   void journal
 
-  const target = plan.current.latest ?? plan.current.current
+  const target = installed
   if (existsSync(input.configPath)) {
     const raw = readFileSync(input.configPath, 'utf8').replace(/^\uFEFF/, '')
     const config = JSON.parse(raw) as Record<string, unknown>
-    writeFileSync(
-      input.configPath,
-      JSON.stringify({ ...config, toolVersion: target, schemaVersion: plan.schemaTo }, null, 2) + '\n',
-      'utf8',
-    )
+    saveConfig(input.configPath, { ...config, toolVersion: target, schemaVersion: plan.schemaTo })
   }
 
   return { applied: true, backup, plan }
 }
+

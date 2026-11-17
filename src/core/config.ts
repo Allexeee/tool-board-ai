@@ -1,5 +1,6 @@
 ﻿import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { toolVersion } from './version.ts'
+import { UserError } from '../cli/errors.ts'
 
 export interface Config {
   toolVersion: string
@@ -30,12 +31,26 @@ export const DEFAULT_CONFIG: Config = {
 }
 
 export function readConfig(path: string): Config {
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<Config>
+  const raw = readFileSync(path, 'utf8').replace(/^\uFEFF/, '')
+  let parsed: Partial<Config>
+  try {
+    parsed = JSON.parse(raw) as Partial<Config>
+  } catch (error) {
+    throw new UserError(3, `конфиг ${path} повреждён: ${(error as Error).message}`)
+  }
+
   return {
     ...DEFAULT_CONFIG,
-    ...raw,
-    branches: { ...DEFAULT_CONFIG.branches, ...(raw.branches ?? {}) },
+    ...parsed,
+    branches: { ...DEFAULT_CONFIG.branches, ...(parsed.branches ?? {}) },
   }
+}
+
+/** Пишет конфиг, сохраняя BOM, если он был: иначе PowerShell снова его добавит. */
+export function saveConfig(path: string, config: Record<string, unknown>): void {
+  const raw = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  const bom = raw.startsWith('\uFEFF') ? '\uFEFF' : ''
+  writeFileSync(path, bom + JSON.stringify(config, null, 2) + '\n', 'utf8')
 }
 
 export function writeConfig(path: string, config: Config): void {
