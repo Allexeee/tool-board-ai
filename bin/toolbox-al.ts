@@ -11,6 +11,7 @@ const HELP = `toolbox-al — ящик инструментов для работ
   stage list|show|add|accept|merge этапы: список, карточка, добавление, приёмка, слияние в dev
   plan new|show|approve|apply планы: создать, показать, утвердить, применить
   task add|show|list|open задачи: добавить, карточка, список, открытые
+  task context <id>       контекст задачи: файлы области, решения, коммиты
   pool list|stale|merge   пул задач без фич
   executor add|list       исполнители
   hand show|set|add       руки исполнителей
@@ -21,6 +22,7 @@ const HELP = `toolbox-al — ящик инструментов для работ
   review <id> --verdict   вердикт по задаче на ревью
   ask / answer            вопросы
   now / inbox / cal       состояние, ожидание, календарь
+  map [каталог] [--write] карта модулей: экспорт, импорты, файл для агента
   upgrade [--yes]         обновить инструмент в проекте
   release [уровень]       релиз: pending, major, minor или patch
   version                 версия инструмента
