@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
 import { getFeature, listFeatures, type Feature } from '../features.ts'
 import { appendEvent } from '../events.ts'
-import { branchExists, resolveBranches, runGit } from './git.ts'
+import { branchExists, isRepo, resolveBranches, runGit } from './git.ts'
 import { UserError } from '../../cli/errors.ts'
 
 export function featureSlug(feature: Feature): string {
@@ -42,7 +42,7 @@ export function cleanWorktree(
     return { removed: false, rescued: false, tag: null }
   }
 
-  const registered = isRegisteredWorktree(input.root, dir)
+  const registered = isRepo(input.root) && isRegisteredWorktree(input.root, dir)
   const ignored = registered
     ? runGit(dir, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'])
         .split('\0')
@@ -324,6 +324,7 @@ export function cleanFeature(
 
   return { ...cleaned, branchDeleted: true }
 }
+
 
 
 
