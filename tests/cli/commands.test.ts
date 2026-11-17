@@ -1,10 +1,11 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { runInit } from '../../src/cli/commands/init.ts'
 
 const bin = resolve('bin/toolbox-al.ts')
 const tmp = () => mkdtempSync(join(tmpdir(), 'tbal-cli-'))
@@ -76,6 +77,16 @@ test('release pending на свежем проекте говорит, что р
   assert.match(pending.out, /нечего релизить/)
 })
 
+test('init подсказывает закоммитить скелет в git-репозитории', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-init-git-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+
+  const text = runInit(dir)
+
+  assert.match(text, /git add/)
+  assert.match(text, /git commit/)
+})
+
 test('init --dry-run ничего не создаёт', () => {
   const dir = tmp()
   const result = run(dir, ['init', '--dry-run'])
@@ -91,3 +102,4 @@ test('done без аргументов отвечает кодом 3, а не п
   assert.equal(result.code, 3)
   assert.match(result.err, /использование/)
 })
+

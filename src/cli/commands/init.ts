@@ -1,4 +1,5 @@
-import { initProject } from '../../core/project.ts'
+﻿import { initProject } from '../../core/project.ts'
+import { isRepo, runGit } from '../../core/git/git.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
 
 const PLAN = [
@@ -28,6 +29,12 @@ export function runInit(dir: string, options: { dryRun?: boolean } = {}): string
   lines.push('')
   lines.push('Проект: ' + root)
 
+  if (isRepo(root) && runGit(root, ['status', '--porcelain']).length > 0) {
+    lines.push('')
+    lines.push('Скелет инструмента ещё не закоммичен. Закоммитьте его, чтобы первая задача не спотыкалась:')
+    lines.push('  git add .gitignore AGENTS.md .opencode .toolbox-al && git commit -m "toolbox-al: init"')
+  }
+
   return lines.join('\n')
 }
 
@@ -36,3 +43,4 @@ export default async function command(args: ParsedArgs) {
   process.stdout.write(runInit(dir, { dryRun: boolFlag(args, 'dry-run') }) + '\n')
   return 0
 }
+
