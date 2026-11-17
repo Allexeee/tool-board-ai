@@ -1,8 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { getExecutor } from './executors.ts'
+import { assertSkill, getExecutor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
+import { isReady } from './deps.ts'
+import { scopesOverlap } from './git/scope.ts'
 import { UserError } from '../cli/errors.ts'
 
 export function preempt(
@@ -20,6 +22,38 @@ export function preempt(
     }
     if (urgent.status !== 'ready') {
       throw new UserError(1, `задача ${urgent.id} не готова: ${urgent.status}`)
+    }
+
+    assertSkill(executor, urgent.skill)
+
+    if (urgent.stageId) {
+      const stage = db.prepare('select status from stages where id = ?').get(urgent.stageId) as
+        | { status: string }
+        | undefined
+      if (!stage || stage.status !== 'active') {
+        throw new UserError(1, `этап ${urgent.stageId} не активен: ${stage?.status ?? 'нет'}`)
+      }
+    }
+
+    if (!isReady(db, urgent.id)) {
+      throw new UserError(1, `у задачи ${urgent.id} не закрыты зависимости`)
+    }
+
+    const reserved = db.prepare('select executor_id from hand where task_id = ?').get(urgent.id) as
+      | { executor_id: string }
+      | undefined
+    if (reserved && reserved.executor_id !== executor.id) {
+      throw new UserError(1, `задача ${urgent.id} зарезервирована за ${reserved.executor_id}`)
+    }
+
+    const foreign = db
+      .prepare("select id, scope from tasks where status = 'active' and holder != ?")
+      .all(executor.id) as Array<{ id: string; scope: string }>
+    for (const other of foreign) {
+      const otherScope = other.scope === 'exclusive' ? 'exclusive' : JSON.parse(other.scope)
+      if (scopesOverlap(urgent.scope, otherScope)) {
+        throw new UserError(1, `область задачи ${urgent.id} пересекается с ${other.id}: прерывать нельзя`)
+      }
     }
 
     const active = db

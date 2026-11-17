@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -163,3 +163,34 @@ test('задачу фичи с пропавшим каталогом взять 
   assert.throws(() => assertFeatureWorktree(db, getTask(db, `${stageId}-1`)!), /пропал/)
 })
 
+
+test('две задачи пула с одной областью не берутся одновременно', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
+
+  const first = createTask(db, {
+    title: 'Правка А',
+    dod: ['а'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/x.ts'],
+  })
+  createTask(db, {
+    title: 'Правка Б',
+    dod: ['б'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/x.ts'],
+  })
+  refreshReady(db)
+
+  takeTask(db, { executor: 'w1', taskId: first.id })
+
+  assert.throws(
+    () => takeTask(db, { executor: 'w2', taskId: 'T2' }),
+    /пересекается/,
+  )
+})

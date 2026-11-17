@@ -71,6 +71,11 @@ export function executeRun(
             outcome = outcome === 'done' ? 'partial' : outcome
             continue
           }
+          if (step.scope.length === 0) {
+            results.push({ step, result: 'пропущено: у шага нет области' })
+            outcome = outcome === 'done' ? 'partial' : outcome
+            continue
+          }
           const task = createTask(db, {
             id: `${run.id}-${step.seq}`,
             stageId: null,
@@ -79,7 +84,7 @@ export function executeRun(
             size: 'S',
             skill: step.skill ?? 'general',
             class: 'standard',
-            scope: step.scope.length ? step.scope : 'exclusive',
+            scope: step.scope,
           })
           results.push({ step, result: `передано вручную: задача ${task.id}` })
           continue
@@ -110,6 +115,12 @@ export function executeRun(
         continue
       }
 
+      if (step.scope.length === 0) {
+        results.push({ step, result: 'пропущено: у шага нет области' })
+        outcome = outcome === 'done' ? 'partial' : outcome
+        continue
+      }
+
       const task = createTask(db, {
         id: `${run.id}-${step.seq}`,
         stageId: null,
@@ -118,7 +129,7 @@ export function executeRun(
         size: 'S',
         skill: step.skill ?? 'general',
         class: 'standard',
-        scope: step.scope.length ? step.scope : 'exclusive',
+        scope: step.scope,
       })
       results.push({ step, result: `задача ${task.id}` })
     }

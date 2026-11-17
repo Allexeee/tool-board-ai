@@ -3,20 +3,22 @@ import { scopesOverlap } from './scope.ts'
 import { UserError } from '../../cli/errors.ts'
 import type { Task } from '../tasks.ts'
 
-function pathspecs(task: Task): string[] {
-  if (task.scope === 'exclusive') return ['.']
-  return task.scope.map((pattern) => `:(glob)${pattern}`)
+function pathspecs(task: Task, limitTo?: string[]): string[] {
+  if (task.scope === 'exclusive') return limitTo && limitTo.length > 0 ? limitTo : ['.']
+  // каталог без глобов git понимает как префикс; шаблону нужен glob-магик
+  return task.scope.map((pattern) => (/[*?[]/.test(pattern) ? `:(glob)${pattern}` : pattern))
 }
 
 function changedFiles(worktree: string): string[] {
   const parts = [
-    runGit(worktree, ['diff', '--name-only']),
-    runGit(worktree, ['diff', '--cached', '--name-only']),
-    runGit(worktree, ['ls-files', '--others', '--exclude-standard']),
+    runGit(worktree, ['diff', '--name-only', '-z']),
+    runGit(worktree, ['diff', '--cached', '--name-only', '-z']),
+    runGit(worktree, ['ls-files', '--others', '--exclude-standard', '-z']),
   ]
 
+  // -z снимает квотирование: русские имена приходят как есть
   return parts
-    .flatMap((part) => part.split('\n'))
+    .flatMap((part) => part.split('\0'))
     .map((line) => line.trim())
     .filter(Boolean)
 }
@@ -47,21 +49,14 @@ export function assertSafeBranch(
   }
 }
 
-export function assertScopeRespected(worktree: string, task: Task): void {
-  if (task.scope === 'exclusive') return
-
-  const outside = changedFiles(worktree).filter((path) => !scopesOverlap(task.scope, [path]))
-  if (outside.length > 0) {
-    throw new UserError(
-      3,
-      `изменены файлы вне области задачи ${task.id}: ${outside.join(', ')}. ` +
-        'Верните их или заведите отдельную задачу с этой областью',
-    )
-  }
+/** Файлы вне области, которые коммит не тронет: их оставляем хозяину. */
+export function filesOutsideScope(worktree: string, task: Task): string[] {
+  if (task.scope === 'exclusive') return []
+  return changedFiles(worktree).filter((path) => !scopesOverlap(task.scope, [path]))
 }
 
-function stage(worktree: string, task: Task): { specs: string[]; staged: string } {
-  const specs = pathspecs(task).filter(
+function stage(worktree: string, task: Task, limitTo?: string[]): { specs: string[]; staged: string } {
+  const specs = pathspecs(task, limitTo).filter(
     (spec) => runGit(worktree, ['status', '--porcelain', '--', spec]).length > 0,
   )
   if (specs.length === 0) return { specs, staged: '' }
@@ -76,13 +71,14 @@ export function commitTask(input: {
   report: { summary: string; checks: string[]; left?: string }
   expectedBranch?: string | null
   forbiddenBranches?: string[]
+  limitTo?: string[]
 }): string | null {
   assertSafeBranch(input.worktree, {
     expected: input.expectedBranch,
     forbidden: input.forbiddenBranches,
   })
-  assertScopeRespected(input.worktree, input.task)
-  const { specs, staged } = stage(input.worktree, input.task)
+
+  const { specs, staged } = stage(input.worktree, input.task, input.limitTo)
   if (!staged) return null
 
   const body = [input.report.summary, ...input.report.checks.map((check) => `проверено: ${check}`)]
@@ -99,7 +95,7 @@ export function commitTask(input: {
 }
 
 export function saveDraft(input: { worktree: string; task: Task; summary: string }): string | null {
-  assertScopeRespected(input.worktree, input.task)
+
   const { specs, staged } = stage(input.worktree, input.task)
   if (!staged) return null
 
@@ -111,4 +107,5 @@ export function saveDraft(input: { worktree: string; task: Task; summary: string
 
   return runGit(input.worktree, ['rev-parse', 'HEAD'])
 }
+
 
