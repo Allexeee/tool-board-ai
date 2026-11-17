@@ -95,7 +95,14 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
 
   const plans = db
     .prepare(
-      "select id, request_id as requestId, title from plans where approved_at is null and applied_at is null order by id",
+      `select p.id as id, p.request_id as requestId, p.title as title
+       from plans p join requests r on r.id = p.request_id
+       where p.approved_at is null and p.applied_at is null
+         and r.status != 'closed'
+         and not exists (
+           select 1 from plans q where q.request_id = p.request_id and q.version > p.version
+         )
+       order by p.id`,
     )
     .all() as Array<{ id: string; requestId: string; title: string }>
 

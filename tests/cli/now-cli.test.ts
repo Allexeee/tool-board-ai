@@ -1,7 +1,7 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -18,6 +18,58 @@ function project() {
   run(dir, ['init'])
   return dir
 }
+
+test('now показывает только последнюю версию плана', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Оплата'])
+  const file = join(dir, 'plan.json')
+  const body = JSON.stringify({
+    title: 'Оплата',
+    assumptions: [],
+    stages: [
+      {
+        name: 'Каркас',
+        goal: 'g',
+        appetite: '1 день',
+        steps: [{ title: 'Шаг', skill: 'backend', size: 'S', dod: ['a'], scope: ['src/**'] }],
+      },
+    ],
+  })
+  writeFileSync(file, body, 'utf8')
+  run(dir, ['plan', 'new', 'R1', file])
+  run(dir, ['plan', 'new', 'R1', file])
+
+  const view = run(dir, ['now'])
+  assert.match(view.out, /P2/)
+  assert.doesNotMatch(view.out, /P1\s/)
+})
+
+test('now не показывает план закрытого запроса', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Оплата'])
+  const file = join(dir, 'plan.json')
+  writeFileSync(
+    file,
+    JSON.stringify({
+      title: 'Оплата',
+      assumptions: [],
+      stages: [
+        {
+          name: 'Каркас',
+          goal: 'g',
+          appetite: '1 день',
+          steps: [{ title: 'Шаг', skill: 'backend', size: 'S', dod: ['a'], scope: ['src/**'] }],
+        },
+      ],
+    }),
+    'utf8',
+  )
+  run(dir, ['plan', 'new', 'R1', file])
+  run(dir, ['request', 'close', 'R1', '--reason', 'передумали'])
+
+  const view = run(dir, ['now'])
+  assert.doesNotMatch(view.out, /ПЛАНЫ НА УТВЕРЖДЕНИЕ/)
+})
 
 test('now показывает запрос в inbox и план на утверждение', () => {
   const dir = project()
@@ -112,3 +164,4 @@ test('now показывает очередь руки исполнителя', 
   const view = run(dir, ['now'])
   assert.match(view.out, /w1\s+свободен · рука: T1/)
 })
+
