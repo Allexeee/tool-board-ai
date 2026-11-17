@@ -19,6 +19,13 @@ export function openDb(path: string, options: { allowOutdated?: boolean } = {}):
     return db
   }
 
+  if (version > SCHEMA_VERSION) {
+    throw new UserError(
+      3,
+      `схема ${version} новее, чем понимает инструмент (${SCHEMA_VERSION}): обновите сам инструмент — toolbox-al upgrade --yes`,
+    )
+  }
+
   if (version < SCHEMA_VERSION && !options.allowOutdated) {
     throw new UserError(
       3,

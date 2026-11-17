@@ -1,17 +1,18 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { runInit } from '../../src/cli/commands/init.ts'
+import { SCHEMA_VERSION } from '../../src/core/schema.ts'
 
 const bin = resolve('bin/toolbox-al.ts')
 const tmp = () => mkdtempSync(join(tmpdir(), 'tbal-cli-'))
 
-function run(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+function run(dir: string, args: string[], tool = bin) {
+  const result = spawnSync(process.execPath, [tool, ...args], { cwd: dir, encoding: 'utf8' })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 
@@ -127,4 +128,39 @@ test('init подсказывает создать dev, если её нет', (
 
   const text = runInit(dir)
   assert.match(text, /git branch dev/)
+})
+
+test('старый бинарь на схеме новее просит обновить инструмент', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  db.prepare("update meta set value = ? where key = 'schemaVersion'").run(String(SCHEMA_VERSION + 1))
+  db.close()
+
+  const listed = run(dir, ['task', 'list'])
+  assert.equal(listed.code, 3)
+  assert.match(listed.err, /новее/)
+  assert.match(listed.err, /upgrade/)
+})
+
+test('не найденный модуль самой команды не выдаётся за неизвестную команду', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-broken-cmd-'))
+  cpSync(resolve('src'), join(dir, 'src'), { recursive: true })
+  mkdirSync(join(dir, 'bin'))
+  const tool = join(dir, 'bin', 'toolbox-al.ts')
+  copyFileSync(bin, tool)
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module' }))
+  writeFileSync(
+    join(dir, 'src', 'cli', 'commands', 'broken.ts'),
+    "import '../missing-module.ts'\nexport default async function command() { return 0 }\n",
+  )
+
+  const broken = run(dir, ['broken'], tool)
+  assert.equal(broken.code, 3)
+  assert.doesNotMatch(broken.err, /неизвестная команда/)
+  assert.match(broken.err, /не найден/)
+
+  const unknown = run(dir, ['nonsense'], tool)
+  assert.equal(unknown.code, 3)
+  assert.match(unknown.err, /неизвестная команда/)
 })
