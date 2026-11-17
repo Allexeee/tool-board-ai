@@ -12,6 +12,8 @@ export interface MergeResult {
   merged: boolean
   commit?: string
   reason?: string
+  /** Задачи этапа, которых слияние не ждёт: отложены решением владельца, а не потеряны. */
+  deferred?: string[]
 }
 
 function runCheck(cwd: string, command: string): { ok: boolean; output: string } {
@@ -39,7 +41,9 @@ export function mergeStage(
   if (!feature.branch) throw new UserError(3, `у фичи ${feature.id} нет ветки: выполните feature start`)
 
   const tasks = listTasks(db, { stageId: stage.id })
-  const open = tasks.filter((task) => task.status !== 'done')
+  // отложенные не держат этап, но и не исчезают: о них сообщается в результате слияния
+  const deferred = tasks.filter((task) => task.status === 'deferred').map((task) => task.id)
+  const open = tasks.filter((task) => task.status !== 'done' && task.status !== 'deferred')
   if (open.length > 0) {
     return { merged: false, reason: `не все задачи закрыты: ${open.map((task) => task.id).join(', ')}` }
   }
@@ -154,7 +158,7 @@ export function mergeStage(
     }
   }
 
-  return { merged: true, commit }
+  return { merged: true, commit, deferred }
 }
 
 

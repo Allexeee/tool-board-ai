@@ -3,8 +3,20 @@ import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
-import { addStage } from '../../src/core/stages.ts'
-import { createTask, editTask, getTask, setTaskSession, updateTask } from '../../src/core/tasks.ts'
+import { activateNextStage, addStage } from '../../src/core/stages.ts'
+import {
+  createTask,
+  deferTask,
+  editTask,
+  getTask,
+  openTasks,
+  setTaskSession,
+  undeferTask,
+  updateTask,
+} from '../../src/core/tasks.ts'
+import { refreshReady } from '../../src/core/deps.ts'
+import { addExecutor } from '../../src/core/executors.ts'
+import { takeTask } from '../../src/core/lease.ts'
 import { migrate, SCHEMA_VERSION } from '../../src/core/schema.ts'
 import { validateTaskInput, type NewTask } from '../../src/core/validate.ts'
 
@@ -251,4 +263,95 @@ test('слияние этапа стирает сессии его задач', 
 
   assert.equal(getTask(db, task.id)!.session, null, 'слитый этап забывает сессию')
   assert.equal(getTask(db, neighbour.id)!.session, 'ses_2', 'соседний этап не тронут')
+})
+
+test('defer откладывает задачу с причиной и пишет событие', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  const deferred = deferTask(db, { id, actor: 'owner', reason: 'ждём доступ к API' })
+
+  assert.equal(deferred.status, 'deferred')
+  assert.equal(deferred.reason, 'ждём доступ к API', 'причина видна в задаче')
+  assert.equal(getTask(db, id)!.status, 'deferred', 'статус переживает чтение')
+
+  const event = db
+    .prepare("select actor, note, after from events where type = 'task.deferred' order by id desc limit 1")
+    .get() as { actor: string; note: string; after: string }
+  assert.equal(event.actor, 'owner')
+  assert.match(event.note, /доступ к API/)
+  assert.match(event.after, /deferred/)
+})
+
+test('defer без причины отказывает и не меняет задачу', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  assert.throws(() => deferTask(db, { id, actor: 'owner', reason: '   ' }), /--reason/)
+  assert.equal(getTask(db, id)!.status, 'open')
+})
+
+test('defer снимает аренду и не оставляет задачу в руке', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  db.prepare('insert into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)').run(
+    'w1',
+    1,
+    id,
+    new Date().toISOString(),
+  )
+
+  const deferred = deferTask(db, { id, actor: 'owner', reason: 'ждём решения владельца' })
+
+  assert.equal(deferred.holder, null)
+  assert.equal(deferred.leaseUntil, null)
+  const left = db.prepare('select count(*) as c from hand where task_id = ?').get(id) as { c: number }
+  assert.equal(left.c, 0, 'из руки задача ушла')
+  assert.throws(() => takeTask(db, { executor: 'w1', taskId: id, leaseMinutes: 30 }), /не готова: deferred/)
+})
+
+test('отложенная задача не считается открытой', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const first = createTask(db, { ...base, stageId })
+  const second = createTask(db, { ...base, stageId })
+
+  deferTask(db, { id: first.id, actor: 'owner', reason: 'ждём' })
+
+  assert.deepEqual(
+    openTasks(db).map((task) => task.id),
+    [second.id],
+    'отложенная не в открытых',
+  )
+})
+
+test('undefer возвращает задачу в работу через refreshReady', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  activateNextStage(db, 'F1')
+  const task = createTask(db, { ...base, stageId })
+  refreshReady(db)
+  assert.equal(getTask(db, task.id)!.status, 'ready', 'условие теста: задача была готова')
+
+  deferTask(db, { id: task.id, actor: 'owner', reason: 'ждём' })
+  refreshReady(db)
+  assert.equal(getTask(db, task.id)!.status, 'deferred', 'refreshReady не воскрешает отложенную')
+
+  const back = undeferTask(db, { id: task.id, actor: 'owner' })
+
+  assert.equal(back.status, 'ready', 'задача снова готова к выдаче')
+  assert.equal(back.reason, null, 'причина отложения снята')
+
+  const event = db
+    .prepare("select after from events where type = 'task.undeferred' order by id desc limit 1")
+    .get() as { after: string }
+  assert.match(event.after, /ready/)
+})
+
+test('undefer не отложенной задачи отказывает', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  assert.throws(() => undeferTask(db, { id, actor: 'owner' }), /не отложена: open/)
 })

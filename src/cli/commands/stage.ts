@@ -81,10 +81,12 @@ export default async function command(args: ParsedArgs) {
     const stageId = args.positionals[0]
     if (!stageId) throw new UserError(3, 'использование: stage merge F1.S1')
     const result = mergeStage(db, { root: project.root, stageId, config: project.config })
+    const deferred = result.deferred ?? []
+    const tail = deferred.length > 0 ? ` · не вошло: ${deferred.join(', ')}` : ''
     ok(
       result,
       result.merged
-        ? `${stageId} слит в ${project.config.branches.dev}`
+        ? `${stageId} слит в ${project.config.branches.dev}${tail}`
         : `${stageId} не слит: ${result.reason}`,
     )
     return result.merged ? 0 : 1

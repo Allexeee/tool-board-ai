@@ -9,7 +9,7 @@ import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
 import { agentRelativePath } from '../../core/agents.ts'
 import { unblockTask } from '../../core/block.ts'
-import { createTask, editTask, getTask, listTasks, openTasks, setTaskSession, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
+import { createTask, deferTask, editTask, getTask, listTasks, openTasks, setTaskSession, undeferTask, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -122,6 +122,28 @@ export default async function command(args: ParsedArgs) {
       note: stringFlag(args, 'note'),
     })
     ok(task, `${task.id}  снова ready`)
+    return 0
+  }
+
+  if (args.sub === 'defer') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: task defer F1.S1-1 --reason "почему ждёт"')
+
+    const task = deferTask(db, {
+      id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      reason: stringFlag(args, 'reason') ?? '',
+    })
+    ok(task, `${task.id}  отложена: ${task.reason}`)
+    return 0
+  }
+
+  if (args.sub === 'undefer') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: task undefer F1.S1-1')
+
+    const task = undeferTask(db, { id, actor: stringFlag(args, 'as') ?? 'owner' })
+    ok(task, `${task.id}  снова в работе: ${task.status}`)
     return 0
   }
 
