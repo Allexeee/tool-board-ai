@@ -122,6 +122,40 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'brief') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: task brief F1.S1-1 [--as worker-1]')
+
+    const task = getTask(db, id)
+    if (!task) throw new UserError(3, `задача ${id} не найдена`)
+
+    const stage = task.stageId ? getStage(db, task.stageId) : null
+    const feature = stage ? getFeature(db, stage.featureId) : null
+    const root = feature?.worktree ?? project.root
+
+    const executor = stringFlag(args, 'as') ?? task.holder
+    const role = `исполнитель${executor ? ' ' + executor : ''}`
+    const specialty = task.skill ? ` · навык ${task.skill}` : ''
+    const scope = task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')
+
+    const lines = [
+      `id: ${task.id}`,
+      `роль: ${role}${specialty}`,
+      `каталог: ${root}`,
+      'ограничения:',
+      '  · работать только в своём каталоге',
+      `  · только файлы области: ${scope || 'вся задача'}`,
+      '  · не запускать git и не коммитить: коммит делает done',
+      '  · не выходить за область, не звать других агентов',
+      '  · застрял — block с причиной',
+      `дальше: node bin/toolbox-al.ts task show ${task.id}`,
+      `        node bin/toolbox-al.ts task context ${task.id}`,
+    ]
+
+    ok({ id: task.id, role, root }, lines.join('\n'))
+    return 0
+  }
+
   if (args.sub === 'context') {
     const id = args.positionals[0]
     if (!id) throw new UserError(3, 'использование: task context F1.S1-1')
