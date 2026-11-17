@@ -126,7 +126,9 @@ export function getHand(db: DatabaseSync, executorId: string): Task[] {
     .prepare('select task_id from hand where executor_id = ? order by position, task_id')
     .all(executorId) as Array<{ task_id: string }>
 
-  return rows.map((row) => getTask(db, row.task_id)).filter((task): task is Task => task !== null)
+  return rows
+    .map((row) => getTask(db, row.task_id))
+    .filter((task): task is Task => task !== null && task.status === 'ready')
 }
 
 export function setHand(db: DatabaseSync, executorId: string, taskIds: string[], actor: string): Task[] {

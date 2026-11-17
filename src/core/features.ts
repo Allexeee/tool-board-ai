@@ -151,6 +151,7 @@ export function abandonFeature(
       db.prepare(
         "update tasks set status = 'cancelled', holder = null, lease_until = null where stage_id = ? and status != 'done'",
       ).run(stage.id)
+      db.prepare('delete from hand where task_id in (select id from tasks where stage_id = ?)').run(stage.id)
       db.prepare("update stages set status = 'abandoned' where id = ?").run(stage.id)
     }
     db.prepare("update features set status = 'cancelled' where id = ?").run(feature.id)

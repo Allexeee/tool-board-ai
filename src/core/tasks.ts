@@ -306,6 +306,9 @@ export function updateTask(db: DatabaseSync, id: string, patch: Partial<{
     'update tasks set status = ?, holder = ?, lease_until = ?, attempts = ?, reason = ? where id = ?',
   ).run(next.status, next.holder, next.leaseUntil, next.attempts, next.reason, id)
 
+  // рука хранит только готовые: любая другая задача из неё уходит
+  if (next.status !== 'ready') db.prepare('delete from hand where task_id = ?').run(id)
+
   return next
 }
 
