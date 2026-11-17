@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -65,4 +65,46 @@ test('preempt пишет в журнал, что вытеснено', () => {
   const event = listEvents(db, { subject: running.id }).at(-1)!
   assert.equal(event.type, 'task.preempted')
   assert.match(event.note ?? '', /вытеснено/)
+})
+
+test('preempt без навыка отвергается', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const urgent = createTask(db, { ...base(stageId), title: 'Чужая', class: 'expedite', skill: 'frontend' })
+  refreshReady(db)
+
+  assert.throws(
+    () => preempt(db, { taskId: urgent.id, executor: 'w1', actor: 'orchestrator' }),
+    /навык/,
+  )
+})
+
+test('preempt на неактивном этапе отвергается', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const urgent = createTask(db, { ...base(stageId), title: 'Срочная', class: 'expedite' })
+  refreshReady(db)
+  db.prepare("update stages set status = 'planned' where id = ?").run(stageId)
+
+  assert.throws(
+    () => preempt(db, { taskId: urgent.id, executor: 'w1', actor: 'orchestrator' }),
+    /этап/,
+  )
+})
+
+test('preempt не отбирает чужую область', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
+  const stageId = seed(db)
+  const other = createTask(db, { ...base(stageId), title: 'Чужая работа', class: 'standard' })
+  refreshReady(db)
+  takeTask(db, { executor: 'w2', taskId: other.id })
+
+  const urgent = createTask(db, { ...base(stageId), title: 'Срочная', class: 'expedite', scope: ['src/**'] })
+  refreshReady(db)
+
+  assert.throws(
+    () => preempt(db, { taskId: urgent.id, executor: 'w1', actor: 'orchestrator' }),
+    /пересекается/,
+  )
 })
