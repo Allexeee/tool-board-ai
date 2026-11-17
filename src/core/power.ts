@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
 import { appendEvent } from './events.ts'
@@ -73,8 +73,34 @@ export function reportFile(root: string, runId: string): string | null {
 }
 
 /**
- * План питания: прогон закрыт, питание заказано, отчёт записан. Иначе отказ
- * с подсказкой — что именно ещё не сделано.
+ * Допуск на свежесть: отчёт, записанный с точностью до секунды, не должен
+ * считаться старым из-за округления mtime файловой системы.
+ */
+export const REPORT_FRESHNESS_TOLERANCE_MS = 1000
+
+/** Когда отчёт записан: mtime файла, а не дата в имени и не содержимое. */
+function reportWrittenAt(path: string): number | null {
+  try {
+    return statSync(path).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+/** Старше ли отчёт конца прогона: по такой бумаге питание не выполняется. */
+function reportIsStale(writtenAt: number, endedAt: string): boolean {
+  const ended = Date.parse(endedAt)
+  if (Number.isNaN(ended)) return false
+
+  // конец из будущего (сбитые часы) — сверяемся с текущим моментом: иначе
+  // отчёт, написанный прямо сейчас, был бы «старым» всегда и питание не сработало бы
+  const reference = Math.min(ended, Date.now())
+  return writtenAt + REPORT_FRESHNESS_TOLERANCE_MS < reference
+}
+
+/**
+ * План питания: прогон закрыт, питание заказано, отчёт записан после конца.
+ * Иначе отказ с подсказкой — что именно ещё не сделано.
  */
 export function planRunPower(
   db: DatabaseSync,
@@ -108,6 +134,22 @@ export function planRunPower(
     throw new UserError(
       1,
       `отчёта прогона ${run.id} нет: питание срабатывает только после отчёта, сначала run report ${run.id}`,
+    )
+  }
+
+  // отчёт до конца прогона — это бумага без всего, что слилось после: её переписывают
+  const writtenAt = reportWrittenAt(reportPath)
+  if (writtenAt === null) {
+    throw new UserError(
+      1,
+      `отчёта прогона ${run.id} нет: питание срабатывает только после отчёта, сначала run report ${run.id}`,
+    )
+  }
+  if (reportIsStale(writtenAt, run.endedAt)) {
+    throw new UserError(
+      1,
+      `отчёт прогона ${run.id} старше конца прогона: в нём нет того, что случилось позже, ` +
+        `перепишите его — run report ${run.id}`,
     )
   }
 
