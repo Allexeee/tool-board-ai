@@ -85,3 +85,16 @@ test('шаг без DoD не создаёт задачу с заглушкой',
   assert.match(result.steps[0].result, /DoD/)
   assert.equal(listTasks(db).length, 0)
 })
+
+test('шаг без области не создаёт задачу и не захватывает дерево', () => {
+  const db = openDb(':memory:')
+  const root = makeRepo()
+  runWith(db, [{ title: 'Без области', kind: 'agent', skill: 'content', dod: ['результат есть'] }])
+
+  const [run] = materialize(db, { now: new Date('2026-11-16T00:00:00') })
+  const result = executeRun(db, { runId: run.id, root })
+
+  assert.equal(result.status, 'partial')
+  assert.match(result.steps[0].result, /област/i)
+  assert.equal(listTasks(db).length, 0)
+})

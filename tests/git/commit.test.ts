@@ -143,6 +143,25 @@ test('scope-каталог покрывает файлы внутри', () => {
   assert.ok(sha)
 })
 
+test('exclusive коммитит только разрешённые пути', () => {
+  const { worktree, task } = fixture()
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  mkdirSync(join(worktree, 'docs'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+  writeFileSync(join(worktree, 'docs/b.md'), 'b')
+
+  const sha = commitTask({
+    worktree,
+    task: { ...task, scope: 'exclusive' },
+    report: { summary: 's', checks: [] },
+    limitTo: ['src/a.ts'],
+  })
+
+  const files = runGit(worktree, ['show', '--name-only', '--pretty=', sha!]).split('\n')
+  assert.deepEqual(files, ['src/a.ts'])
+  assert.equal(existsSync(join(worktree, 'docs/b.md')), true)
+})
+
 test('файлы вне области видны отдельным списком', () => {
   const { worktree, task } = fixture()
   mkdirSync(join(worktree, 'docs'), { recursive: true })

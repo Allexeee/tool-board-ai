@@ -8,6 +8,7 @@ import { commitTask } from '../../core/git/commit.ts'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { advanceTime } from '../../core/clock.ts'
+import { lastSnapshot } from '../../core/lease.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -65,6 +66,7 @@ export default async function command(args: ParsedArgs) {
       task,
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
       expectedBranch: feature.branch,
+      limitTo: task.scope === 'exclusive' ? (lastSnapshot(db, task.id) ?? undefined) : undefined,
     })
   } else {
     commitTask({
@@ -72,6 +74,7 @@ export default async function command(args: ParsedArgs) {
       task,
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
       forbiddenBranches: [project.config.branches.main],
+      limitTo: task.scope === 'exclusive' ? (lastSnapshot(db, task.id) ?? undefined) : undefined,
     })
   }
 
@@ -88,3 +91,4 @@ export default async function command(args: ParsedArgs) {
   ok(closed, `${closed.id}  ${closed.status === 'in_review' ? 'на ревью' : 'закрыта'}`)
   return 0
 }
+
