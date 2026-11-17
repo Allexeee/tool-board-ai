@@ -3,8 +3,8 @@ import { scopesOverlap } from './scope.ts'
 import { UserError } from '../../cli/errors.ts'
 import type { Task } from '../tasks.ts'
 
-function pathspecs(task: Task): string[] {
-  if (task.scope === 'exclusive') return ['.']
+function pathspecs(task: Task, limitTo?: string[]): string[] {
+  if (task.scope === 'exclusive') return limitTo && limitTo.length > 0 ? limitTo : ['.']
   // каталог без глобов git понимает как префикс; шаблону нужен glob-магик
   return task.scope.map((pattern) => (/[*?[]/.test(pattern) ? `:(glob)${pattern}` : pattern))
 }
@@ -55,8 +55,8 @@ export function filesOutsideScope(worktree: string, task: Task): string[] {
   return changedFiles(worktree).filter((path) => !scopesOverlap(task.scope, [path]))
 }
 
-function stage(worktree: string, task: Task): { specs: string[]; staged: string } {
-  const specs = pathspecs(task).filter(
+function stage(worktree: string, task: Task, limitTo?: string[]): { specs: string[]; staged: string } {
+  const specs = pathspecs(task, limitTo).filter(
     (spec) => runGit(worktree, ['status', '--porcelain', '--', spec]).length > 0,
   )
   if (specs.length === 0) return { specs, staged: '' }
@@ -71,13 +71,14 @@ export function commitTask(input: {
   report: { summary: string; checks: string[]; left?: string }
   expectedBranch?: string | null
   forbiddenBranches?: string[]
+  limitTo?: string[]
 }): string | null {
   assertSafeBranch(input.worktree, {
     expected: input.expectedBranch,
     forbidden: input.forbiddenBranches,
   })
 
-  const { specs, staged } = stage(input.worktree, input.task)
+  const { specs, staged } = stage(input.worktree, input.task, input.limitTo)
   if (!staged) return null
 
   const body = [input.report.summary, ...input.report.checks.map((check) => `проверено: ${check}`)]

@@ -7,7 +7,44 @@ import { getTask, type Task } from './tasks.ts'
 import { nextTask } from './hands.ts'
 import { isReady } from './deps.ts'
 import { scopesOverlap } from './git/scope.ts'
+import { runGit } from './git/git.ts'
 import { existsSync } from 'node:fs'
+
+/** Снимок грязных файлов в момент взятия: exclusive коммитит только то, что появилось после него. */
+function snapshotOf(db: DatabaseSync, task: Task): string[] | null {
+  if (!task.stageId) return null
+
+  const row = db
+    .prepare(
+      'select f.worktree as worktree from stages st join features f on f.id = st.feature_id where st.id = ?',
+    )
+    .get(task.stageId) as { worktree: string | null } | undefined
+
+  if (!row?.worktree || !existsSync(row.worktree)) return null
+
+  return runGit(row.worktree, ['status', '--porcelain', '-z'])
+    .split('\0')
+    .filter(Boolean)
+    .map((entry) => entry.slice(3).trim())
+    .filter(Boolean)
+}
+
+/** Последний снимок, снятый при взятии задачи: нужен done, чтобы не захватить чужое. */
+export function lastSnapshot(db: DatabaseSync, taskId: string): string[] | null {
+  const row = db
+    .prepare(
+      "select after from events where type = 'task.taken' and subject = ? order by id desc limit 1",
+    )
+    .get(taskId) as { after: string | null } | undefined
+
+  if (!row?.after) return null
+  try {
+    const snapshot = (JSON.parse(row.after) as { snapshot?: unknown }).snapshot
+    return Array.isArray(snapshot) ? snapshot.map(String) : null
+  } catch {
+    return null
+  }
+}
 
 export interface TakeOptions {
   executor: string
@@ -75,14 +112,20 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       throw new UserError(1, `у задачи ${task.id} не закрыты зависимости`)
     }
 
-    const conflict = db
-      .prepare(
-        `select t.id as id, t.scope as scope from tasks t
-         where t.status = 'active'
-           and t.id != ?
-           and t.stage_id in (select id from stages where feature_id = (select feature_id from stages where id = ?))`,
-      )
-      .all(task.id, task.stageId ?? '') as Array<{ id: string; scope: string }>
+    const conflict = task.stageId
+      ? (db
+          .prepare(
+            `select t.id as id, t.scope as scope from tasks t
+             where t.status = 'active'
+               and t.id != ?
+               and t.stage_id in (select id from stages where feature_id = (select feature_id from stages where id = ?))`,
+          )
+          .all(task.id, task.stageId) as Array<{ id: string; scope: string }>)
+      : (db
+          .prepare(
+            "select id, scope from tasks where status = 'active' and stage_id is null and id != ?",
+          )
+          .all(task.id) as Array<{ id: string; scope: string }>)
 
     for (const other of conflict) {
       const otherScope = other.scope === 'exclusive' ? 'exclusive' : JSON.parse(other.scope)
@@ -108,6 +151,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
     }
 
     const leaseUntil = new Date(Date.now() + (options.leaseMinutes ?? 30) * 60_000).toISOString()
+    const snapshot = task.scope === 'exclusive' ? snapshotOf(db, task) : null
 
     const result = db
       .prepare(
@@ -125,7 +169,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       type: 'task.taken',
       actor: executor.id,
       subject: task.id,
-      after: { leaseUntil },
+      after: snapshot ? { leaseUntil, snapshot } : { leaseUntil },
     })
 
     return getTask(db, task.id)!
