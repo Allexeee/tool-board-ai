@@ -5,6 +5,21 @@ import { appendEvent } from './events.ts'
 
 export type ExecutorKind = 'human' | 'agent'
 
+export type PermissionEffect = 'allow' | 'deny'
+
+/**
+ * Правило прав агента. Хранится как JSON-массив и годится для frontmatter
+ * агента OpenCode: действие (edit, shell, webfetch), ресурс (шаблон) и эффект.
+ */
+export interface PermissionRule {
+  action: string
+  resource: string
+  effect: PermissionEffect
+}
+
+export const DEFAULT_STEPS = 20
+export const MAX_STEPS = 500
+
 export interface Executor {
   id: string
   kind: ExecutorKind
@@ -13,6 +28,9 @@ export interface Executor {
   handSize: number
   session: string | null
   lastSeen: string | null
+  model: string | null
+  permissions: PermissionRule[]
+  steps: number
 }
 
 interface Row {
@@ -23,6 +41,9 @@ interface Row {
   hand_size: number
   session: string | null
   last_seen: string | null
+  model: string | null
+  permissions: string
+  steps: number
 }
 
 const toExecutor = (row: Row): Executor => ({
@@ -33,11 +54,87 @@ const toExecutor = (row: Row): Executor => ({
   handSize: row.hand_size,
   session: row.session,
   lastSeen: row.last_seen,
+  model: row.model,
+  permissions: JSON.parse(row.permissions) as PermissionRule[],
+  steps: row.steps,
 })
+
+/** Модель хранится как provider/model; null — агент наследует модель родителя. */
+export function normalizeModel(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null
+  const model = value.trim()
+  if (!model || model === 'inherit' || model === 'parent') return null
+  if (!/^[^\s/]+\/[^\s/]+$/.test(model)) {
+    throw new UserError(
+      3,
+      `модель «${model}»: нужен формат provider/model, например opencode/gpt-5 (или inherit — наследовать модель родителя)`,
+    )
+  }
+  return model
+}
+
+export function normalizeSteps(value: number | string | undefined): number {
+  if (value === undefined) return DEFAULT_STEPS
+  const steps = typeof value === 'number' ? value : Number(String(value).trim())
+  if (!Number.isInteger(steps) || steps < 1 || steps > MAX_STEPS) {
+    throw new UserError(3, `шагов должно быть целое число от 1 до ${MAX_STEPS}`)
+  }
+  return steps
+}
+
+/** Правило задаётся строкой action:resource, эффект берётся из флага. */
+export function parsePermission(value: string, effect: PermissionEffect): PermissionRule {
+  const raw = value.trim()
+  const colon = raw.indexOf(':')
+  if (colon === -1) {
+    throw new UserError(
+      3,
+      `право «${raw}»: нужен формат action:resource, например shell:git * или edit:*`,
+    )
+  }
+
+  const action = raw.slice(0, colon).trim()
+  const resource = raw.slice(colon + 1).trim()
+  if (!action) throw new UserError(3, `право «${raw}»: пустое действие`)
+  if (!resource) throw new UserError(3, `право «${raw}»: пустой ресурс`)
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(action)) {
+    throw new UserError(3, `право «${raw}»: действие «${action}» должно быть одним словом, например shell`)
+  }
+
+  return { action, resource, effect }
+}
+
+/**
+ * --allow/--deny превращаются в упорядоченный список правил.
+ * Одинаковые action:resource схлопываются: позже указанное правило побеждает.
+ */
+export function parsePermissions(input: { allow?: string[]; deny?: string[] }): PermissionRule[] {
+  const rules = [
+    ...(input.allow ?? []).map((value) => parsePermission(value, 'allow')),
+    ...(input.deny ?? []).map((value) => parsePermission(value, 'deny')),
+  ]
+
+  const byKey = new Map<string, PermissionRule>()
+  for (const rule of rules) byKey.set(`${rule.action}:${rule.resource}`, rule)
+  return [...byKey.values()]
+}
+
+export function formatPermission(rule: PermissionRule): string {
+  return `${rule.effect} ${rule.action}:${rule.resource}`
+}
 
 export function addExecutor(
   db: DatabaseSync,
-  input: { id: string; kind: ExecutorKind; skills: string[]; wipLimit?: number; handSize?: number },
+  input: {
+    id: string
+    kind: ExecutorKind
+    skills: string[]
+    wipLimit?: number
+    handSize?: number
+    model?: string | null
+    permissions?: PermissionRule[]
+    steps?: number
+  },
 ): Executor {
   if (getExecutor(db, input.id)) throw new UserError(3, `исполнитель ${input.id} уже есть`)
 
@@ -49,10 +146,13 @@ export function addExecutor(
     handSize: input.handSize ?? 5,
     session: null,
     lastSeen: new Date().toISOString(),
+    model: normalizeModel(input.model),
+    permissions: input.permissions ?? [],
+    steps: normalizeSteps(input.steps),
   }
 
   db.prepare(
-    'insert into executors (id, kind, skills, wip_limit, hand_size, session, last_seen) values (?, ?, ?, ?, ?, ?, ?)',
+    'insert into executors (id, kind, skills, wip_limit, hand_size, session, last_seen, model, permissions, steps) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     executor.id,
     executor.kind,
@@ -61,13 +161,22 @@ export function addExecutor(
     executor.handSize,
     null,
     executor.lastSeen,
+    executor.model,
+    JSON.stringify(executor.permissions),
+    executor.steps,
   )
 
   appendEvent(db, {
     type: 'executor.added',
     actor: 'system',
     subject: executor.id,
-    after: { skills: executor.skills, kind: executor.kind },
+    after: {
+      skills: executor.skills,
+      kind: executor.kind,
+      model: executor.model,
+      permissions: executor.permissions,
+      steps: executor.steps,
+    },
   })
 
   return executor
@@ -159,6 +268,74 @@ export function setSkills(
       subject: executor.id,
       before: { skills: executor.skills },
       after: { skills },
+    })
+
+    return getExecutor(db, executor.id)!
+  })
+}
+
+export function setModel(
+  db: DatabaseSync,
+  input: { executorId: string; model: string | null; actor: string },
+): Executor {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    const model = normalizeModel(input.model)
+    db.prepare('update executors set model = ? where id = ?').run(model, executor.id)
+    appendEvent(db, {
+      type: 'executor.model_changed',
+      actor: input.actor,
+      subject: executor.id,
+      before: { model: executor.model },
+      after: { model },
+    })
+
+    return getExecutor(db, executor.id)!
+  })
+}
+
+export function setPermissions(
+  db: DatabaseSync,
+  input: { executorId: string; permissions: PermissionRule[]; actor: string },
+): Executor {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    db.prepare('update executors set permissions = ? where id = ?').run(
+      JSON.stringify(input.permissions),
+      executor.id,
+    )
+    appendEvent(db, {
+      type: 'executor.permissions_changed',
+      actor: input.actor,
+      subject: executor.id,
+      before: { permissions: executor.permissions },
+      after: { permissions: input.permissions },
+    })
+
+    return getExecutor(db, executor.id)!
+  })
+}
+
+export function setSteps(
+  db: DatabaseSync,
+  input: { executorId: string; steps: number | string; actor: string },
+): Executor {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    const steps = normalizeSteps(input.steps)
+    db.prepare('update executors set steps = ? where id = ?').run(steps, executor.id)
+    appendEvent(db, {
+      type: 'executor.steps_changed',
+      actor: input.actor,
+      subject: executor.id,
+      before: { steps: executor.steps },
+      after: { steps },
     })
 
     return getExecutor(db, executor.id)!

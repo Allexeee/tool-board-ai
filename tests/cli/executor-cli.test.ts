@@ -19,6 +19,12 @@ function project() {
   return dir
 }
 
+function json(dir: string, args: string[]) {
+  const result = run(dir, [...args, '--json'])
+  assert.equal(result.code, 0, result.err)
+  return JSON.parse(result.out)
+}
+
 test('bind сохраняет сессию, session показывает, reset отвязывает', () => {
   const dir = project()
 
@@ -70,4 +76,76 @@ test('bind несуществующего исполнителя отверга�
 
   assert.notEqual(bound.code, 0)
   assert.match(bound.err, /не найден/)
+})
+
+test('add принимает модель, права и лимит шагов', () => {
+  const dir = project()
+
+  const added = json(dir, [
+    'executor', 'add', 'w2',
+    '--skills', 'backend',
+    '--model', 'opencode/gpt-5',
+    '--steps', '12',
+    '--allow', 'shell:git *',
+    '--deny', 'edit:*',
+  ])
+
+  assert.equal(added.id, 'w2')
+  assert.equal(added.model, 'opencode/gpt-5')
+  assert.equal(added.steps, 12)
+  assert.deepEqual(added.permissions, [
+    { action: 'shell', resource: 'git *', effect: 'allow' },
+    { action: 'edit', resource: '*', effect: 'deny' },
+  ])
+})
+
+test('model, permissions и steps меняют значения', () => {
+  const dir = project()
+
+  const modeled = json(dir, ['executor', 'model', 'w1', '--model', 'anthropic/claude-sonnet-4-5'])
+  assert.equal(modeled.model, 'anthropic/claude-sonnet-4-5')
+
+  const permitted = json(dir, [
+    'executor', 'permissions', 'w1',
+    '--allow', 'shell:git *',
+    '--deny', 'edit:src/core/**',
+  ])
+  assert.deepEqual(permitted.permissions, [
+    { action: 'shell', resource: 'git *', effect: 'allow' },
+    { action: 'edit', resource: 'src/core/**', effect: 'deny' },
+  ])
+
+  const stepped = json(dir, ['executor', 'steps', 'w1', '--steps', '7'])
+  assert.equal(stepped.steps, 7)
+
+  const inherited = json(dir, ['executor', 'model', 'w1', '--model', 'inherit'])
+  assert.equal(inherited.model, null)
+})
+
+test('permissions --clear снимает все правила', () => {
+  const dir = project()
+  json(dir, ['executor', 'permissions', 'w1', '--allow', 'shell:git *'])
+
+  const cleared = json(dir, ['executor', 'permissions', 'w1', '--clear'])
+  assert.deepEqual(cleared.permissions, [])
+})
+
+test('модель не в формате provider/model объясняет формат', () => {
+  const dir = project()
+  const result = run(dir, ['executor', 'model', 'w1', '--model', 'gpt-5'])
+
+  assert.notEqual(result.code, 0)
+  assert.match(result.err, /provider\/model/)
+})
+
+test('шаги и права без значений объясняют использование', () => {
+  const dir = project()
+
+  const steps = run(dir, ['executor', 'steps', 'w1'])
+  assert.notEqual(steps.code, 0)
+  assert.match(steps.err, /--steps/)
+
+  const permissions = run(dir, ['executor', 'permissions', 'w1'])
+  assert.notEqual(permissions.code, 0)
+  assert.match(permissions.err, /--allow/)
 })

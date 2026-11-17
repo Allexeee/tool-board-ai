@@ -1,7 +1,21 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addExecutor, bindSession, getExecutor, listExecutors, removeExecutor, renameExecutor, resetSession, setSkills } from '../../core/executors.ts'
-import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
+import {
+  addExecutor,
+  bindSession,
+  formatPermission,
+  getExecutor,
+  listExecutors,
+  parsePermissions,
+  removeExecutor,
+  renameExecutor,
+  resetSession,
+  setModel,
+  setPermissions,
+  setSkills,
+  setSteps,
+} from '../../core/executors.ts'
+import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -19,10 +33,14 @@ export default async function command(args: ParsedArgs) {
       .map((value) => value.trim())
       .filter(Boolean)
 
+    const steps = stringFlag(args, 'steps')
     const executor = addExecutor(db, {
       id,
       kind: (stringFlag(args, 'kind') as 'human' | 'agent') ?? 'agent',
       skills,
+      model: stringFlag(args, 'model') ?? null,
+      permissions: parsePermissions({ allow: listFlag(args, 'allow'), deny: listFlag(args, 'deny') }),
+      steps: steps === undefined ? undefined : Number(steps),
     })
     ok(executor, `${executor.id} добавлен: ${executor.skills.join(', ') || 'без навыков'}`)
     return 0
@@ -57,6 +75,58 @@ export default async function command(args: ParsedArgs) {
       actor: 'owner',
     })
     ok(executor, `${executor.id}: ${executor.skills.join(', ')}`)
+    return 0
+  }
+
+  if (args.sub === 'model') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor model w1 --model provider/model (или --model inherit)')
+
+    const raw = stringFlag(args, 'model')
+    if (raw === undefined) {
+      throw new UserError(3, 'использование: executor model w1 --model provider/model, --model inherit — наследовать модель родителя')
+    }
+
+    const executor = setModel(db, { executorId: id, model: raw, actor: 'owner' })
+    ok(
+      executor,
+      executor.model ? `${executor.id}: модель ${executor.model}` : `${executor.id}: модель наследуется от родителя`,
+    )
+    return 0
+  }
+
+  if (args.sub === 'permissions') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor permissions w1 --allow "shell:git *" --deny "edit:*"')
+
+    if (boolFlag(args, 'clear')) {
+      const executor = setPermissions(db, { executorId: id, permissions: [], actor: 'owner' })
+      ok(executor, `${executor.id}: особых прав нет`)
+      return 0
+    }
+
+    const permissions = parsePermissions({ allow: listFlag(args, 'allow'), deny: listFlag(args, 'deny') })
+    if (permissions.length === 0) {
+      throw new UserError(
+        3,
+        'нужно хотя бы одно правило: --allow action:resource, --deny action:resource или --clear',
+      )
+    }
+
+    const executor = setPermissions(db, { executorId: id, permissions, actor: 'owner' })
+    ok(executor, `${executor.id}: ${permissions.map(formatPermission).join(', ')}`)
+    return 0
+  }
+
+  if (args.sub === 'steps') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor steps w1 --steps 12')
+
+    const raw = stringFlag(args, 'steps')
+    if (raw === undefined) throw new UserError(3, 'использование: executor steps w1 --steps 12')
+
+    const executor = setSteps(db, { executorId: id, steps: raw, actor: 'owner' })
+    ok(executor, `${executor.id}: лимит шагов ${executor.steps}`)
     return 0
   }
 
@@ -95,7 +165,16 @@ export default async function command(args: ParsedArgs) {
     rows,
     rows.length === 0
       ? 'исполнителей нет'
-      : rows.map((e) => `${e.id.padEnd(12)} ${e.kind.padEnd(6)} ${e.skills.join(', ')}`).join('\n'),
+      : rows
+          .map((e) => {
+            const model = e.model ?? 'наследует'
+            const permissions = e.permissions.map(formatPermission).join(', ') || 'без особых прав'
+            return (
+              `${e.id.padEnd(12)} ${e.kind.padEnd(6)} ${e.skills.join(', ')}` +
+              `\n${' '.repeat(19)}модель: ${model} · шагов: ${e.steps} · права: ${permissions}`
+            )
+          })
+          .join('\n'),
   )
   return 0
 }
