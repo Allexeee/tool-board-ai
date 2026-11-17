@@ -249,3 +249,12 @@ test('refreshOpenCode обновляет блок и сохраняет прав
 })
 
 
+
+test('блок AGENTS.md знает про ревью и dev', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+
+  assert.match(agents, /Ревью задач не проводим/)
+  assert.match(agents, /ветке фичи или dev/)
+})
