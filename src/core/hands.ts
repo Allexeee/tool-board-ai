@@ -2,7 +2,8 @@ import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { getExecutor, type Executor } from './executors.ts'
+import { depsOf, isSatisfied } from './deps.ts'
+import { getExecutor, listExecutors, type Executor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 
 const CLASS_ORDER: Record<string, number> = {
@@ -127,6 +128,107 @@ function candidateOrder(db: DatabaseSync, executor: Executor): Task[] {
   return ordered
 }
 
+/** Задачи, которые ждут задачу: цепочка шагов закрывается после неё, поэтому едет в одной руке. */
+function followersOf(db: DatabaseSync, taskId: string): string[] {
+  return (
+    db.prepare('select from_id as id from deps where to_id = ? order by from_id').all(taskId) as Array<{ id: string }>
+  ).map((row) => row.id)
+}
+
+/** Задача годится в руку исполнителя: навык подходит, чужих резервов нет, ждёт только эту руку. */
+function canHold(db: DatabaseSync, executor: Executor, taskId: string, taken: Set<string>): boolean {
+  if (taken.has(taskId)) return false
+
+  const task = getTask(db, taskId)
+  if (!task) return false
+  if (task.status !== 'ready' && task.status !== 'open') return false
+  if (task.holder !== null) return false
+  if (!executor.skills.includes(task.skill)) return false
+  if (db.prepare('select 1 as found from hand where task_id = ?').get(taskId)) return false
+
+  // задача этапа живёт в активном этапе работающей фичи — как и в candidateOrder
+  if (task.stageId !== null) {
+    const row = db
+      .prepare(
+        'select st.status as stageStatus, f.worktree as worktree from stages st ' +
+          'join features f on f.id = st.feature_id where st.id = ?',
+      )
+      .get(task.stageId) as { stageStatus: string; worktree: string | null } | undefined
+    if (!row || row.stageStatus !== 'active' || row.worktree === null) return false
+  }
+
+  return unmetDep(db, taskId, taken) === null
+}
+
+/** Задача и её зависимые шаги до размера руки: цепочку не рвут между исполнителями. */
+function chainOf(db: DatabaseSync, executor: Executor, baseId: string, taken: Set<string>): string[] {
+  const chain: string[] = []
+  const queue = [baseId]
+
+  while (queue.length > 0 && taken.size < executor.handSize) {
+    const current = queue.shift()!
+    for (const follower of followersOf(db, current)) {
+      if (taken.size >= executor.handSize) break
+      if (!canHold(db, executor, follower, taken)) continue
+      taken.add(follower)
+      chain.push(follower)
+      queue.push(follower)
+    }
+  }
+
+  return chain
+}
+
+function reserve(db: DatabaseSync, executorId: string, ids: string[], base: number): number {
+  const at = new Date().toISOString()
+  let inserted = 0
+  ids.forEach((id, index) => {
+    const result = db
+      .prepare('insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)')
+      .run(executorId, base + index + 1, id, at)
+    inserted += Number(result.changes)
+  })
+  return inserted
+}
+
+/**
+ * Раздача руки по кругам: независимые задачи — по одной каждому исполнителю с подходящим
+ * навыком и свободным местом в руке, остаток уходит следующим кругом. Один исполнитель
+ * не забирает всё, пока другой свободен, и одна задача достаётся одной руке.
+ * За задачей в руку достраивается её цепочка — то, что setHand принимает одним списком.
+ */
+export function dispatchHands(db: DatabaseSync): void {
+  tx(db, () => {
+    const executors = listExecutors(db)
+    const stuck = new Set<string>()
+
+    for (;;) {
+      let placed = false
+
+      for (const executor of executors) {
+        const hand = getHand(db, executor.id).map((task) => task.id)
+        if (hand.length >= executor.handSize) continue
+
+        const base = candidateOrder(db, executor).find((task) => !stuck.has(task.id))
+        if (!base) continue
+
+        const taken = new Set(hand)
+        taken.add(base.id)
+        const ids = [base.id, ...chainOf(db, executor, base.id, taken)]
+
+        if (reserve(db, executor.id, ids, hand.length) === 0) {
+          stuck.add(base.id)
+          continue
+        }
+        placed = true
+      }
+
+      if (!placed) break
+    }
+  })
+}
+
+/** Задачи руки в её порядке: готовые к работе и следующие шаги, ждущие своей очереди. */
 export function getHand(db: DatabaseSync, executorId: string): Task[] {
   const rows = db
     .prepare('select task_id from hand where executor_id = ? order by position, task_id')
@@ -134,20 +236,41 @@ export function getHand(db: DatabaseSync, executorId: string): Task[] {
 
   return rows
     .map((row) => getTask(db, row.task_id))
-    .filter((task): task is Task => task !== null && task.status === 'ready')
+    .filter((task): task is Task => task !== null && (task.status === 'ready' || task.status === 'open'))
+}
+
+/** Первая незакрытая зависимость задачи, которой нет в руке; null — задача никого не ждёт. */
+function unmetDep(db: DatabaseSync, taskId: string, hand: Set<string>): string | null {
+  for (const dep of depsOf(db, taskId)) {
+    if (isSatisfied(db, dep)) continue
+    if (hand.has(dep)) continue
+    return dep
+  }
+  return null
 }
 
 export function setHand(db: DatabaseSync, executorId: string, taskIds: string[], actor: string): Task[] {
   return tx(db, () => {
-    if (!getExecutor(db, executorId)) throw new UserError(3, `исполнитель ${executorId} не найден`)
+    const executor = getExecutor(db, executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${executorId} не найден`)
 
     // повтор в списке — не ошибка: одна задача занимает в руке одно место
-    const ids = [...new Set(taskIds)]
+    // лишнее за размером руки просто не влезает: цепочка обрывается на границе, это не ошибка
+    const wanted = [...new Set(taskIds)]
+    const ids = wanted.slice(0, executor.handSize)
+    const hand = new Set(ids)
 
     for (const id of ids) {
       const task = getTask(db, id)
       if (!task) throw new UserError(3, `задача ${id} не найдена`)
-      if (task.status !== 'ready') throw new UserError(3, `задача ${id} не готова: ${task.status}`)
+      if (task.status !== 'ready' && task.status !== 'open') {
+        throw new UserError(3, `задача ${id} не в очереди: ${task.status}`)
+      }
+
+      const waiting = unmetDep(db, id, hand)
+      if (waiting) {
+        throw new UserError(3, `задача ${id} ждёт зависимость ${waiting}: она не закрыта и не лежит в руке`)
+      }
 
       const reserved = db
         .prepare('select executor_id from hand where task_id = ? and executor_id != ?')

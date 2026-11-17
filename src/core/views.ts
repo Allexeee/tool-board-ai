@@ -4,7 +4,7 @@ import { listFeatures } from './features.ts'
 import { listStages, type StageStatus } from './stages.ts'
 import { busyOf, listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
-import { getHand, fillHand, nextTask } from './hands.ts'
+import { getHand, dispatchHands, nextTask } from './hands.ts'
 import { ownerHand } from './questions.ts'
 import { listDecisions } from './decisions.ts'
 import { listRequests } from './requests.ts'
@@ -255,10 +255,11 @@ export interface DispatchPlan {
 
 export function dispatchPlan(db: DatabaseSync): DispatchPlan {
   advanceTime(db)
+  dispatchHands(db)
 
   const executors = listExecutors(db)
   const assignments: DispatchEntry[] = executors.map((executor) => {
-    const hand = fillHand(db, executor.id)
+    const hand = getHand(db, executor.id)
     return {
       executor: executor.id,
       session: executor.session,

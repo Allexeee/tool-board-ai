@@ -5,11 +5,12 @@ import { addRequest } from '../../src/core/requests.ts'
 import { abandonFeature, addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask, updateTask } from '../../src/core/tasks.ts'
-import { refreshReady } from '../../src/core/deps.ts'
+import { refreshReady, addDep } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { addExecutor } from '../../src/core/executors.ts'
 import { compareTasks, fillHand, getHand, setHand } from '../../src/core/hands.ts'
+import { dispatchPlan } from '../../src/core/views.ts'
 
 const plusMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -140,6 +141,53 @@ test('setHand не падает, если задача в списке повт�
   assert.deepEqual(hand.map((task) => task.id), [`${stageId}-1`])
 })
 
+test('setHand принимает шаг, чья зависимость уже лежит в руке', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  refreshReady(db)
+
+  const hand = setHand(db, 'w1', [`${stageId}-1`, `${stageId}-2`], 'owner')
+
+  assert.deepEqual(hand.map((task) => task.id), [`${stageId}-1`, `${stageId}-2`])
+  assert.equal(hand[1].status, 'open', 'следующий шаг виден в руке до своей готовности')
+})
+
+test('setHand принимает шаг с уже закрытой зависимостью', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  db.prepare("update tasks set status = 'done' where id = ?").run(`${stageId}-1`)
+  refreshReady(db)
+
+  const hand = setHand(db, 'w1', [`${stageId}-2`], 'owner')
+
+  assert.deepEqual(hand.map((task) => task.id), [`${stageId}-2`])
+})
+
+test('setHand отказывает, если зависимость не закрыта и её нет в руке', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  refreshReady(db)
+
+  assert.throws(
+    () => setHand(db, 'w1', [`${stageId}-2`], 'owner'),
+    (error: Error) => error.message.includes('ждёт зависимость') && error.message.includes(`${stageId}-1`),
+    'в тексте отказа названа мешающая зависимость',
+  )
+})
+
+test('setHand обрезает цепочку по размеру руки', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addExecutor(db, { id: 'w3', kind: 'agent', skills: ['backend'], handSize: 2 })
+
+  const hand = setHand(db, 'w3', [`${stageId}-1`, `${stageId}-2`, `${stageId}-3`], 'owner')
+
+  assert.deepEqual(hand.map((task) => task.id), [`${stageId}-1`, `${stageId}-2`])
+})
+
 test('пул набирается после блока фичи', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)
@@ -181,6 +229,56 @@ test('abandon фичи чистит руку', () => {
   abandonFeature(db, { featureId: feature.id, actor: 'owner', reason: 'передумали' })
 
   assert.deepEqual(getHand(db, 'w1'), [])
+})
+
+test('dispatch делит независимые задачи: у каждого свободного хотя бы одна', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  const plan = dispatchPlan(db)
+  const w1 = plan.assignments.find((entry) => entry.executor === 'w1')!.tasks
+  const w2 = plan.assignments.find((entry) => entry.executor === 'w2')!.tasks
+
+  assert.ok(w1.length >= 1, 'первый свободный не забрал все задачи')
+  assert.ok(w2.length >= 1, 'второй свободный тоже получил задачу')
+
+  const spread = [...w1, ...w2]
+  assert.equal(new Set(spread).size, spread.length, 'одна задача — одной руке')
+  assert.deepEqual(
+    [...spread].sort(),
+    [`${stageId}-1`, `${stageId}-2`, `${stageId}-3`],
+  )
+})
+
+test('dispatch кладёт в руку задачу и её зависимые шаги', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  addDep(db, `${stageId}-3`, `${stageId}-2`)
+  refreshReady(db)
+
+  const plan = dispatchPlan(db)
+  const w1 = plan.assignments.find((entry) => entry.executor === 'w1')!.tasks
+  const w2 = plan.assignments.find((entry) => entry.executor === 'w2')!.tasks
+
+  assert.deepEqual(w1, [`${stageId}-1`, `${stageId}-2`, `${stageId}-3`], 'шаги едут следом за задачей')
+  assert.deepEqual(w2, [], 'цепочку не рвут между исполнителями')
+})
+
+test('цепочка в руке обрывается на её размере', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addDep(db, `${stageId}-2`, `${stageId}-1`)
+  addDep(db, `${stageId}-3`, `${stageId}-2`)
+  refreshReady(db)
+  db.prepare("update executors set hand_size = 2 where id = 'w1'").run()
+
+  const plan = dispatchPlan(db)
+  const w1 = plan.assignments.find((entry) => entry.executor === 'w1')!.tasks
+  const w2 = plan.assignments.find((entry) => entry.executor === 'w2')!.tasks
+
+  assert.deepEqual(w1, [`${stageId}-1`, `${stageId}-2`])
+  assert.deepEqual(w2, [], 'шаг не отдают чужой руке в отрыве от цепочки')
 })
 
 
