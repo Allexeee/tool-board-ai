@@ -19,9 +19,16 @@ test('help перечисляет все команды верхнего уро�
   const { code, out } = run(['help'])
 
   assert.equal(code, 0)
-  for (const command of ['pool', 'upgrade', 'version', 'reopen', 'dispatch', 'request', 'feature', 'task']) {
+  for (const command of ['pool', 'upgrade', 'version', 'reopen', 'dispatch', 'request', 'feature', 'task', 'map']) {
     assert.match(out, new RegExp(command), command)
   }
+})
+
+test('help упоминает map и task context', () => {
+  const { out } = run(['help'])
+
+  assert.match(out, /^\s+map\b/m)
+  assert.match(out, /task context/)
 })
 
 test('help показывает пример вызова dispatch', () => {
