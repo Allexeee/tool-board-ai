@@ -4,6 +4,7 @@ import { advanceTime } from '../../core/clock.ts'
 import { listEvents } from '../../core/events.ts'
 import { getStage } from '../../core/stages.ts'
 import { decisionsFor } from '../../core/decisions.ts'
+import { getExecutor } from '../../core/executors.ts'
 import { createTask, editTask, getTask, listTasks, openTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -119,6 +120,11 @@ export default async function command(args: ParsedArgs) {
       `область: ${task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')}`,
     ]
 
+    if (task.holder) {
+      const executor = getExecutor(db, task.holder)
+      if (executor?.session) lines.push(`сессия: ${executor.session}`)
+    }
+
     const subjects = [task.id]
     if (task.stageId) {
       subjects.push(task.stageId)
@@ -174,5 +180,6 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
 
 

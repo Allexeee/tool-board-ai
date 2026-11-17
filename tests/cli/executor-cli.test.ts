@@ -36,6 +36,26 @@ test('bind сохраняет сессию, session показывает, reset 
   assert.match(after.out, /сессия не привязана/)
 })
 
+test('dispatch печатает сессию исполнителя', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-dispatch-ses-'))
+  run(dir, ['init'])
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['executor', 'bind', 'w1', '--session', 'ses_77'])
+
+  const plan = run(dir, ['dispatch'])
+  assert.equal(plan.code, 0, plan.err)
+  assert.match(plan.out, /сессия: ses_77/)
+})
+
+test('без сессии dispatch печатается как раньше', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-dispatch-noses-'))
+  run(dir, ['init'])
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const plan = run(dir, ['dispatch'])
+  assert.doesNotMatch(plan.out, /сессия:/)
+})
+
 test('bind без сессии объясняет, что нужно', () => {
   const dir = project()
   const bound = run(dir, ['executor', 'bind', 'w1'])

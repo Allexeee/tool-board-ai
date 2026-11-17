@@ -18,7 +18,7 @@ export interface NowView {
     stage: { id: string; seq: number; total: number; done: number; counts: Record<string, number> }
   }>
   pool: Array<{ id: string; title: string }>
-  holders: Array<{ executor: string; task: string | null; active: string[]; hand: string[] }>
+  holders: Array<{ executor: string; task: string | null; active: string[]; hand: string[]; session: string | null }>
   waitingOwner: number
 }
 
@@ -77,6 +77,7 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
     return {
       executor: executor.id,
+      session: executor.session,
       task: active[0]?.id ?? null,
       active: active.map((task) => task.id),
       hand: getHand(db, executor.id).map((task) => task.id),
@@ -88,6 +89,7 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
 
 export interface DispatchEntry {
   executor: string
+  session: string | null
   tasks: string[]
   newTask: string | null
 }
@@ -105,6 +107,7 @@ export function dispatchPlan(db: DatabaseSync): DispatchPlan {
     const hand = fillHand(db, executor.id)
     return {
       executor: executor.id,
+      session: executor.session,
       tasks: hand.map((task) => task.id),
       newTask: nextTask(db, executor.id)?.id ?? null,
     }
@@ -127,5 +130,6 @@ export function dispatchPlan(db: DatabaseSync): DispatchPlan {
 
   return { assignments, warnings }
 }
+
 
 
