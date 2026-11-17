@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -148,4 +148,123 @@ test('шаги и права без значений объясняют испо
   const permissions = run(dir, ['executor', 'permissions', 'w1'])
   assert.notEqual(permissions.code, 0)
   assert.match(permissions.err, /--allow/)
+})
+
+const agentFile = (dir: string, id: string) => join(dir, '.opencode', 'agents', `${id}.md`)
+
+test('sync w1 создаёт файл агента OpenCode', () => {
+  const dir = project()
+
+  const synced = run(dir, ['executor', 'sync', 'w1'])
+
+  assert.equal(synced.code, 0, synced.err)
+  assert.match(synced.out, /w1: создан/)
+  assert.match(synced.out, /\.opencode\/agents\/w1\.md/)
+
+  const text = readFileSync(agentFile(dir, 'w1'), 'utf8')
+  assert.match(text, /^---\n/)
+  assert.match(text, /^mode: subagent$/m)
+  assert.match(text, /^steps: 20$/m)
+  assert.match(text, /^description: "исполнитель w1 · навыки: backend"$/m)
+  assert.match(text, /take --as w1/)
+})
+
+test('sync переносит в файл модель, права и непустой лимит шагов', () => {
+  const dir = project()
+  json(dir, ['executor', 'model', 'w1', '--model', 'opencode/gpt-5'])
+  json(dir, ['executor', 'steps', 'w1', '--steps', '9'])
+  json(dir, ['executor', 'permissions', 'w1', '--allow', 'shell:git *'])
+
+  assert.equal(run(dir, ['executor', 'sync', 'w1']).code, 0)
+
+  const text = readFileSync(agentFile(dir, 'w1'), 'utf8')
+  assert.match(text, /^model: opencode\/gpt-5$/m)
+  assert.match(text, /^steps: 9$/m)
+  assert.match(text, /resource: "git \*"/)
+  assert.match(text, /effect: allow/)
+})
+
+test('наследованная модель не попадает в файл', () => {
+  const dir = project()
+  json(dir, ['executor', 'model', 'w1', '--model', 'inherit'])
+
+  assert.equal(run(dir, ['executor', 'sync', 'w1']).code, 0)
+
+  assert.doesNotMatch(readFileSync(agentFile(dir, 'w1'), 'utf8'), /^model:/m)
+})
+
+test('повторный sync без изменений в базе не трогает файл', () => {
+  const dir = project()
+  run(dir, ['executor', 'sync', 'w1'])
+  const before = statSync(agentFile(dir, 'w1')).mtimeMs
+  const content = readFileSync(agentFile(dir, 'w1'), 'utf8')
+
+  const again = run(dir, ['executor', 'sync'])
+
+  assert.equal(again.code, 0, again.err)
+  assert.match(again.out, /без изменений/)
+  assert.match(again.out, /создано: 0, обновлено: 0/)
+  assert.equal(statSync(agentFile(dir, 'w1')).mtimeMs, before)
+  assert.equal(readFileSync(agentFile(dir, 'w1'), 'utf8'), content)
+})
+
+test('sync без id пишет файл на каждого агента', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w2', '--skills', 'frontend'])
+
+  const all = run(dir, ['executor', 'sync'])
+
+  assert.equal(all.code, 0, all.err)
+  assert.match(all.out, /создано: 2/)
+  assert.equal(existsSync(agentFile(dir, 'w1')), true)
+  assert.equal(existsSync(agentFile(dir, 'w2')), true)
+})
+
+test('sync несуществующего исполнителя отвергается', () => {
+  const dir = project()
+  const result = run(dir, ['executor', 'sync', 'nobody'])
+
+  assert.notEqual(result.code, 0)
+  assert.match(result.err, /не найден/)
+})
+
+test('sync объясняет, что человеку файл агента не нужен', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'owner', '--kind', 'human', '--skills', 'backend'])
+
+  const result = run(dir, ['executor', 'sync', 'owner'])
+
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /человек/)
+  assert.equal(existsSync(agentFile(dir, 'owner')), false)
+})
+
+test('doctor видит расхождение файла агента с базой, а sync его чинит', () => {
+  const dir = project()
+  run(dir, ['executor', 'sync'])
+
+  appendFileSync(agentFile(dir, 'w1'), '\nправка руками\n', 'utf8')
+  const dirty = run(dir, ['doctor'])
+
+  assert.equal(dirty.code, 1, dirty.out)
+  assert.match(dirty.out, /агенты OpenCode/)
+  assert.match(dirty.out, /w1 \(правлен руками\)/)
+  assert.match(dirty.out, /executor sync/)
+
+  const fixed = run(dir, ['executor', 'sync'])
+  assert.match(fixed.out, /обновлён/)
+
+  const clean = run(dir, ['doctor'])
+  assert.equal(clean.code, 0, clean.out + clean.err)
+  assert.match(clean.out, /файлы сходятся с базой: 1/)
+})
+
+test('doctor без каталога агентов говорит расхождение, но не падает', () => {
+  const dir = project()
+
+  const report = run(dir, ['doctor'])
+
+  assert.equal(report.code, 1)
+  assert.equal(report.err, '')
+  assert.match(report.out, /агенты OpenCode\s+расходятся с базой: w1 \(нет файла\)/)
 })

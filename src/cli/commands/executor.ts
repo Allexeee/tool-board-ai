@@ -1,5 +1,6 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
+import { syncAgent, syncAgents, type AgentSyncStatus } from '../../core/agents.ts'
 import {
   addExecutor,
   bindSession,
@@ -130,6 +131,41 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'sync') {
+    const id = args.positionals[0]
+
+    if (id) {
+      const executor = getExecutor(db, id)
+      if (!executor) throw new UserError(3, `исполнитель ${id} не найден`)
+      if (executor.kind === 'human') {
+        ok({ id: executor.id, path: null, status: 'skipped' }, `${executor.id}: человек — файл агента не нужен`)
+        return 0
+      }
+
+      const result = syncAgent(project.root, executor)
+      ok(result, `${result.id}: ${syncStatusText(result.status)} ${result.path}`)
+      return 0
+    }
+
+    const agents = listExecutors(db).filter((executor) => executor.kind === 'agent')
+    if (agents.length === 0) {
+      ok([], 'исполнителей-агентов нет: добавьте executor add w1 --skills backend')
+      return 0
+    }
+
+    const results = syncAgents(project.root, agents)
+    const created = results.filter((result) => result.status === 'created').length
+    const updated = results.filter((result) => result.status === 'updated').length
+    const unchanged = results.filter((result) => result.status === 'unchanged').length
+
+    ok(
+      results,
+      results.map((result) => `${result.id.padEnd(12)} ${syncStatusText(result.status).padEnd(13)} ${result.path}`).join('\n') +
+        `\n\nсоздано: ${created}, обновлено: ${updated}, без изменений: ${unchanged}`,
+    )
+    return 0
+  }
+
   if (args.sub === 'bind') {
     const id = args.positionals[0]
     const session = stringFlag(args, 'session')
@@ -177,6 +213,12 @@ export default async function command(args: ParsedArgs) {
           .join('\n'),
   )
   return 0
+}
+
+function syncStatusText(status: AgentSyncStatus): string {
+  if (status === 'created') return 'создан'
+  if (status === 'updated') return 'обновлён'
+  return 'без изменений'
 }
 
 
