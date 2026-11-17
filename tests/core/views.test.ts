@@ -174,6 +174,22 @@ test('owner различает не начатый, идущий и готовы
   assert.equal(ownerView(db).stages[0].status, 'done')
 })
 
+test('фича со всеми слитыми этапами идёт одной строкой', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  addStage(db, { featureId: 'F1', name: 'S2', goal: 'g', appetite: '1 день' })
+  db.prepare("update tasks set status = 'done'").run()
+  db.prepare("update stages set status = 'merged'").run()
+
+  const rows = ownerView(db).stages
+
+  assert.equal(rows.length, 1, 'этапы слитой фичи схлопываются в строку фичи')
+  assert.equal(rows[0].featureId, 'F1')
+  assert.equal(rows[0].name, 'A')
+  assert.equal(rows[0].status, 'done')
+  assert.deepEqual(rows[0].progress, { current: 3, total: 3 })
+})
+
 test('owner сортирует этапы: готовые, затем в работе, затем очередь', () => {
   const db = openDb(':memory:')
   seed(db)

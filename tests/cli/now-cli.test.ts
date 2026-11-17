@@ -82,11 +82,11 @@ test('now считает запросы в inbox и показывает фич�
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /^Открытых запросов: 1$/m)
-  assert.match(view.out, /^F1\s+\[0\/0\]\s+0\/0\s+pending\s+Оплата$/m)
+  assert.match(view.out, /^\tОткрытых запросов: 1$/m)
+  assert.match(view.out, /^\tF1\s+\[0\/0\]\s+0\/0\s+pending\s+Оплата$/m)
 })
 
-test('now показывает, сколько этапов не выпущено', () => {
+test('now показывает этапы, ожидающие релиза', () => {
   const dir = project()
   run(dir, ['request', 'add', 'Оплата'])
   run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
@@ -99,8 +99,9 @@ test('now показывает, сколько этапов не выпущен�
   db.close()
 
   const view = run(dir, ['now'])
-  assert.match(view.out, /НЕ ВЫПУЩЕНО/)
-  assert.match(view.out, /release pending/)
+  assert.match(view.out, /^\tОЖИДАЕТ РЕЛИЗА: 1 этапов$/m)
+  assert.match(view.out, /^\t\s+F1\.S1\s+S1/m)
+  assert.doesNotMatch(view.out, /НЕ ВЫПУЩЕНО|release pending/)
 })
 
 test('now на пустом проекте говорит, что работы нет', () => {
@@ -108,18 +109,27 @@ test('now на пустом проекте говорит, что работы �
   const view = run(dir, ['now'])
 
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /^Открытых запросов: 0$/m)
+  assert.match(view.out, /^\tОткрытых запросов: 0$/m)
   assert.match(view.out, /фич в работе нет/)
 })
 
-test('now первой строкой печатает число открытых запросов', () => {
+test('now идёт после пустой строки и с табуляцией в каждой строке', () => {
   const dir = project()
   run(dir, ['request', 'add', 'Первый'])
   run(dir, ['request', 'add', 'Второй'])
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.equal(view.out.split('\n')[0], 'Открытых запросов: 2')
+
+  const lines = view.out.split('\n')
+  assert.equal(lines[0], '', 'первая строка пустая')
+  assert.equal(lines[1], '\tОткрытых запросов: 2')
+  assert.match(lines[2], /^\tждёт вас: \d+$/)
+
+  const content = lines.filter((line) => line.trim() !== '')
+  for (const line of content) {
+    assert.match(line, /^\t/, `строка без табуляции: ${line}`)
+  }
 })
 
 test('now печатает этапы таблицей: готовые, в работе, очередь', () => {
@@ -142,9 +152,9 @@ test('now печатает этапы таблицей: готовые, в ра�
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /^F1\s+\[1\/3\]\s+0\/0\s+done\s+Каркас$/m)
-  assert.match(view.out, /^F1\s+\[2\/3\]\s+1\/2\s+wip\s+Проводка$/m)
-  assert.match(view.out, /^F1\s+\[3\/3\]\s+0\/0\s+pending\s+Отчёты$/m)
+  assert.match(view.out, /^\tF1\s+\[1\/3\]\s+0\/0\s+done\s+Каркас$/m)
+  assert.match(view.out, /^\tF1\s+\[2\/3\]\s+1\/2\s+wip\s+Проводка$/m)
+  assert.match(view.out, /^\tF1\s+\[3\/3\]\s+0\/0\s+pending\s+Отчёты$/m)
   assert.doesNotMatch(view.out, /В РАБОТЕ|ГОТОВО К ЗАЛИВКЕ|^ФИЧИ$/m)
 })
 
@@ -174,8 +184,8 @@ test('now --all показывает готовый этап завершённ�
   db.prepare("update features set status = 'done' where id = 'F1'").run()
   db.close()
 
-  assert.doesNotMatch(run(dir, ['now']).out, /Слитый/)
-  assert.match(run(dir, ['now', '--all']).out, /^F1\s+\[1\/1\]\s+0\/0\s+done\s+Слитый$/m)
+  assert.doesNotMatch(run(dir, ['now']).out, /\[1\/1\]\s+0\/0\s+done\s+Слитый/)
+  assert.match(run(dir, ['now', '--all']).out, /^\tF1\s+\[1\/1\]\s+0\/0\s+done\s+Слитый$/m)
 })
 
 test('now показывает фичу в работе', () => {
@@ -264,7 +274,7 @@ test('now в пайпе печатает чистый текст без escape-�
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /\u001b\[/)
-  assert.match(view.out, /^F1\s+\[1\/1\]\s+1\/1\s+wip\s+Каркас$/m)
+  assert.match(view.out, /^\tF1\s+\[1\/1\]\s+1\/1\s+wip\s+Каркас$/m)
   assert.match(view.out, /w1\s+держит F1\.S1-1 · рука пуста/)
 })
 

@@ -184,6 +184,8 @@ export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): Ow
     if (options.all !== true && (feature.status === 'done' || feature.status === 'cancelled')) continue
 
     const stages = listStages(db, feature.id)
+    const stageRows: OwnerStageRow[] = []
+
     for (const stage of stages) {
       const tasks = listTasks(db, { stageId: stage.id })
       const started = stageStarted(db, stage.id, stage.status)
@@ -191,20 +193,41 @@ export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): Ow
       const status = ownerStageStatus(stage.status, started, allDone)
       if (!status) continue
 
+      stageRows.push({
+        featureId: feature.id,
+        featureName: feature.name,
+        stageId: stage.id,
+        seq: stage.seq,
+        total: stages.length,
+        progress: stageProgress(db, stage.id, started),
+        status,
+        name: stage.name,
+      })
+    }
+
+    // вся фича сделана: один этап не показываем отдельной строкой — владельцу нужен факт, а не разбивка.
+    if (stageRows.length > 1 && stageRows.every((row) => row.status === 'done')) {
+      const tasks = stages.flatMap((stage) => listTasks(db, { stageId: stage.id }))
+      const total = tasks.length
+      const completed = tasks.filter((task) => task.status === 'done' || task.status === 'cancelled').length
+
       rows.push({
         rank: feature.rank,
         row: {
           featureId: feature.id,
           featureName: feature.name,
-          stageId: stage.id,
-          seq: stage.seq,
+          stageId: stages[stages.length - 1].id,
+          seq: stages.length,
           total: stages.length,
-          progress: stageProgress(db, stage.id, started),
-          status,
-          name: stage.name,
+          progress: { current: total === 0 ? 0 : completed, total },
+          status: 'done',
+          name: feature.name,
         },
       })
+      continue
     }
+
+    for (const row of stageRows) rows.push({ rank: feature.rank, row })
   }
 
   rows.sort(

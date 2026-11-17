@@ -13,6 +13,7 @@ export function isJsonMode(): boolean {
 const ANSI = {
   green: '\u001b[32m',
   yellow: '\u001b[33m',
+  magenta: '\u001b[35m',
   cyan: '\u001b[36m',
   gray: '\u001b[90m',
 } as const
