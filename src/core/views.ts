@@ -21,8 +21,10 @@ export interface NowView {
   waitingOwner: number
 }
 
-export function nowView(db: DatabaseSync): NowView {
-  const features = listFeatures(db).map((feature) => {
+export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowView {
+  const features = listFeatures(db)
+    .filter((feature) => options.all === true || (feature.status !== 'done' && feature.status !== 'cancelled'))
+    .map((feature) => {
     const stages = listStages(db, feature.id)
     const done = stages.filter((item) => item.status === 'merged').length
     const finished = stages.length > 0 && done === stages.length

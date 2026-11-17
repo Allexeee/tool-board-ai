@@ -79,7 +79,7 @@ test('у завершённой фичи прогресс полный, а не 
   db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
   db.prepare("update features set status = 'done' where id = 'F1'").run()
 
-  const feature = nowView(db).features[0]
+  const feature = nowView(db, { all: true }).features[0]
   assert.equal(feature.finished, true)
   assert.equal(feature.stage.done, 1)
   assert.equal(feature.stage.seq, feature.stage.total)
@@ -96,6 +96,15 @@ test('номер этапа считается по завершённым', () 
   assert.equal(feature.stage.total, 2)
   assert.equal(feature.stage.seq, 2)
   assert.equal(feature.stage.done, 1)
+})
+
+test('now по умолчанию не показывает завершённые фичи, а с all показывает', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  db.prepare("update features set status = 'done' where id = 'F1'").run()
+
+  assert.deepEqual(nowView(db).features, [])
+  assert.equal(nowView(db, { all: true }).features.length, 1)
 })
 
 test('ready-задача пула видна в now отдельной строкой', () => {

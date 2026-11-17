@@ -1,17 +1,19 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { nowView } from '../../core/views.ts'
+import { boolFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
-export default async function command() {
+export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
   const db = openDb(project.dbPath)
   advanceTime(db)
 
-  const view = nowView(db)
+  const all = boolFlag(args, 'all')
+  const view = nowView(db, { all })
 
   const features = view.features.map((feature) => {
     const counts = Object.entries(feature.stage.counts)
@@ -32,7 +34,11 @@ export default async function command() {
 
   const text =
     'ФИЧИ\n' +
-    (features.length ? features.join('\n') : '  нет') +
+    (features.length
+      ? features.join('\n')
+      : all
+        ? '  фич нет'
+        : '  фич в работе нет') +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
     (holders.length ? holders.join('\n') : '  нет') +
@@ -41,3 +47,4 @@ export default async function command() {
   ok(view, text)
   return 0
 }
+
