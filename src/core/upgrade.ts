@@ -1,10 +1,11 @@
-import { execFileSync } from 'node:child_process'
+﻿import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION, migrate } from './schema.ts'
 import { refreshOpenCode } from './opencode.ts'
+import { saveConfig } from './config.ts'
 import { toolRoot, toolVersion } from './version.ts'
 import { UserError } from '../cli/errors.ts'
 
@@ -260,12 +261,9 @@ export function applyUpgrade(
   if (existsSync(input.configPath)) {
     const raw = readFileSync(input.configPath, 'utf8').replace(/^\uFEFF/, '')
     const config = JSON.parse(raw) as Record<string, unknown>
-    writeFileSync(
-      input.configPath,
-      JSON.stringify({ ...config, toolVersion: target, schemaVersion: plan.schemaTo }, null, 2) + '\n',
-      'utf8',
-    )
+    saveConfig(input.configPath, { ...config, toolVersion: target, schemaVersion: plan.schemaTo })
   }
 
   return { applied: true, backup, plan }
 }
+

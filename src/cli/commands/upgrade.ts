@@ -1,4 +1,5 @@
-﻿import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+﻿import { existsSync, readFileSync } from 'node:fs'
+import { saveConfig } from '../../core/config.ts'
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { applyUpgrade, planUpgrade, toolRoot, toolVersion } from '../../core/upgrade.ts'
@@ -20,11 +21,7 @@ export default async function command(args: ParsedArgs) {
     if (existsSync(project.configPath)) {
       const raw = readFileSync(project.configPath, 'utf8').replace(/^\uFEFF/, '')
       const config = JSON.parse(raw) as Record<string, unknown>
-      writeFileSync(
-        project.configPath,
-        JSON.stringify({ ...config, toolVersion: version }, null, 2) + '\n',
-        'utf8',
-      )
+      saveConfig(project.configPath, { ...config, toolVersion: version })
     }
     ok({ version }, `проект закреплён на ${version}`)
     return 0
@@ -83,5 +80,7 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
+
 
 
