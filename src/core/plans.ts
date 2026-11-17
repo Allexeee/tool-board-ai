@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
@@ -116,6 +116,11 @@ export function addPlan(
 
     return plan
   })
+}
+
+export function getPlanById(db: DatabaseSync, planId: string): Plan | null {
+  const row = db.prepare('select * from plans where id = ?').get(planId) as Row | undefined
+  return row ? toPlan(row) : null
 }
 
 export function getPlan(
