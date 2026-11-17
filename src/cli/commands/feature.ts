@@ -3,6 +3,7 @@ import { openDb } from '../../core/db.ts'
 import { abandonFeature, addFeature, getFeature, listFeatures, rankFeature } from '../../core/features.ts'
 import { startFeature } from '../../core/git/worktree.ts'
 import { cleanFeature } from '../../core/git/clean.ts'
+import { featureCost } from '../../core/cost.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -79,6 +80,25 @@ export default async function command(args: ParsedArgs) {
     if (!id || !Number.isInteger(rank)) throw new UserError(3, 'использование: feature rank F1 2')
     rankFeature(db, id, rank)
     ok({ id, rank }, `${id} → ранг ${rank}`)
+    return 0
+  }
+
+  if (args.sub === 'cost') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: feature cost F1')
+    const cost = featureCost(db, id)
+    const span =
+      cost.firstAt && cost.lastAt
+        ? `${cost.firstAt.slice(0, 16).replace('T', ' ')} → ${cost.lastAt.slice(0, 16).replace('T', ' ')}`
+        : 'работы ещё не было'
+
+    ok(
+      cost,
+      `${cost.featureId}  ${cost.featureName}\n` +
+        `задач: ${cost.tasks}, закрыто: ${cost.done}${cost.deferred > 0 ? `, отложено: ${cost.deferred}` : ''}\n` +
+        `правок: ${cost.edits}, переоткрытий: ${cost.reopens}, блокировок: ${cost.blocks}\n` +
+        `срок: ${cost.hours} ч · ${span}`,
+    )
     return 0
   }
 
