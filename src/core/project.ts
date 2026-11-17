@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { openDb } from './db.ts'
 import { DEFAULT_CONFIG, readConfig, writeConfig, type Config } from './config.ts'
 import { installHooks } from './git/hooks.ts'
+import { branchExists, isRepo, resolveBranches, runGit } from './git/git.ts'
 import { writeOpenCodeFiles } from './opencode.ts'
 
 export interface Project {
@@ -52,8 +53,13 @@ export function initProject(dir: string): { created: string[]; root: string } {
     created.push('.toolbox-al/tracker.db')
   }
 
-  if (existsSync(join(root, '.git'))) {
-    installHooks(join(root, '.git'), { protectedBranches: ['main', 'dev'] })
+  if (isRepo(root)) {
+    const gitDir = runGit(root, ['rev-parse', '--absolute-git-dir'])
+    const { main, dev } = resolveBranches(root, DEFAULT_CONFIG)
+    const branches = new Set([main, dev])
+    if (branchExists(root, 'develop')) branches.add('develop')
+
+    installHooks(gitDir, { protectedBranches: [...branches] })
   }
 
   const opencode = writeOpenCodeFiles(root, DEFAULT_CONFIG.toolVersion)
@@ -71,3 +77,4 @@ export function initProject(dir: string): { created: string[]; root: string } {
 
   return { created, root }
 }
+

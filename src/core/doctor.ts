@@ -5,7 +5,7 @@ import { listFeatures } from './features.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { hookInstalled } from './git/hooks.ts'
-import { branchExists, isRepo } from './git/git.ts'
+import { branchExists, isRepo, runGit } from './git/git.ts'
 import { openCodeFilesPresent } from './opencode.ts'
 import { stalePoolTasks } from './pool.ts'
 import { staleBranches } from './git/clean.ts'
@@ -200,12 +200,14 @@ function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
     return [{ name: 'git', ok: true, detail: 'не репозиторий: ветки и коммиты выключены' }]
   }
 
-  const gitDir = join(root, '.git')
+  const gitDir = runGit(root, ['rev-parse', '--absolute-git-dir'])
 
   checks.push({
     name: 'git-хук',
     ok: hookInstalled(gitDir),
-    detail: hookInstalled(gitDir) ? 'main и dev защищены' : 'хук не установлен: коммит в main пройдёт',
+    detail: hookInstalled(gitDir)
+      ? `защищены коммит и merge в ${devBranch} и main`
+      : 'хук не установлен: коммит и merge в main пройдут',
   })
 
   checks.push({
@@ -257,4 +259,5 @@ function fairness(db: DatabaseSync): Check {
 
   return { name: 'приоритеты', ok: true, detail: 'очередь соответствует рангам' }
 }
+
 
