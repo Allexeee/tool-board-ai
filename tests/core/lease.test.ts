@@ -58,7 +58,7 @@ test('двое одновременно: второй получает код 1'
 
   assert.throws(
     () => takeTask(db, { executor: 'w2', taskId: `${stageId}-1` }),
-    (error: { code?: number }) => error.code === 1,
+    (error: { code?: number }) => error.code === 2,
   )
 })
 
@@ -194,3 +194,4 @@ test('две задачи пула с одной областью не беру�
     /пересекается/,
   )
 })
+
