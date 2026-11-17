@@ -1,15 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/toolbox-al.ts')
 
-function run(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+function run(dir: string, args: string[], input?: string) {
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', input })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 
@@ -232,5 +232,66 @@ test('у закрытого слиянием запроса строки с пр
   const shown = run(dir, ['request', 'show', 'R1'])
   assert.equal(shown.code, 0)
   assert.doesNotMatch(shown.out, /закрыт:/)
+})
+
+test('request add и edit читают тело из файла в UTF-8', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-file-'))
+  run(dir, ['init'])
+  writeFileSync(join(dir, 'body.txt'), 'Первая строка\nВторая строка', 'utf8')
+
+  const added = run(dir, ['request', 'add', 'Длинный запрос', '--text-file', 'body.txt'])
+  assert.equal(added.code, 0, added.err)
+
+  const shown = run(dir, ['request', 'show', 'R1'])
+  assert.match(shown.out, /Первая строка\nВторая строка/)
+
+  writeFileSync(join(dir, 'edit.txt'), 'Правка тела', 'utf8')
+  const edited = run(dir, ['request', 'edit', 'R1', '--text-file', 'edit.txt'])
+  assert.equal(edited.code, 0, edited.err)
+  assert.match(run(dir, ['request', 'show', 'R1']).out, /Правка тела/)
+})
+
+test('request add --text-file - читает stdin', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-stdin-'))
+  run(dir, ['init'])
+
+  const added = run(dir, ['request', 'add', 'Из stdin', '--text-file', '-'], 'Тело из stdin')
+  assert.equal(added.code, 0, added.err)
+  assert.match(run(dir, ['request', 'show', 'R1']).out, /Тело из stdin/)
+})
+
+test('пустой файл у request — ошибка, тело не меняется', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-empty-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Запрос', '--body', 'старое тело'])
+  writeFileSync(join(dir, 'empty.txt'), '\n', 'utf8')
+
+  const added = run(dir, ['request', 'add', 'Пустой', '--text-file', 'empty.txt'])
+  assert.notEqual(added.code, 0)
+  assert.match(added.err, /пуст/)
+
+  const edited = run(dir, ['request', 'edit', 'R1', '--text-file', 'empty.txt'])
+  assert.notEqual(edited.code, 0)
+  assert.match(edited.err, /пуст/)
+
+  const shown = run(dir, ['request', 'show', 'R1'])
+  assert.match(shown.out, /старое тело/)
+  assert.doesNotMatch(run(dir, ['request', 'list']).out, /Пустой/)
+})
+
+test('request --text-file важнее --body и говорит об этом', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-both-'))
+  run(dir, ['init'])
+  writeFileSync(join(dir, 'body.txt'), 'Тело из файла', 'utf8')
+
+  const added = run(dir, [
+    'request', 'add', 'Запрос', '--body', 'Тело из строки', '--text-file', 'body.txt',
+  ])
+  assert.equal(added.code, 0, added.err)
+  assert.match(added.err, /--body/)
+
+  const shown = run(dir, ['request', 'show', 'R1'])
+  assert.match(shown.out, /Тело из файла/)
+  assert.doesNotMatch(shown.out, /Тело из строки/)
 })
 

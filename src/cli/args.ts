@@ -1,4 +1,5 @@
-﻿import { UserError } from './errors.ts'
+﻿import { readFileSync } from 'node:fs'
+import { UserError } from './errors.ts'
 
 const COMMANDS_WITH_SUB = new Set([
   'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
@@ -7,7 +8,7 @@ const COMMANDS_WITH_SUB = new Set([
 
 const KNOWN_FLAGS = new Set([
   'json', 'help', 'version', 'project', 'as', 'yes', 'dry-run', 'all',
-  'title', 'body', 'author', 'text', 'name', 'goal', 'rank', 'to',
+  'title', 'body', 'author', 'text', 'text-file', 'name', 'goal', 'rank', 'to',
   'size', 'size-reason', 'dod', 'scope', 'skill', 'skills', 'class', 'kind',
   'check', 'deps', 'dep', 'review', 'verdict', 'choice', 'subject', 'reason', 'note', 'report', 'severity', 'version',
   'deadline', 'options', 'addressee', 'policy', 'timeout', 'appetite',
@@ -100,6 +101,40 @@ export function stringFlag(args: ParsedArgs, name: string): string | undefined {
   if (Array.isArray(v)) return v[v.length - 1]
   if (typeof v === 'string') return v
   return undefined
+}
+
+/**
+ * Текст из `--text-file`: путь к файлу в UTF-8 или `-` для stdin.
+ * Пустой ввод — ошибка: пустая идея или тело запроса никому не нужны.
+ * Если рядом задан текстовый флаг (`--text`/`--body`), он игнорируется, о чём и сообщаем.
+ */
+export function textFileFlag(args: ParsedArgs, name = 'text'): string | undefined {
+  const raw = args.flags['text-file']
+  if (raw === undefined) return undefined
+  if (raw === true) throw new UserError(3, 'использование: --text-file <файл|->')
+
+  const path = stringFlag(args, 'text-file')!
+  const source = path === '-' ? 'stdin' : `файла ${path}`
+
+  let content: string
+  try {
+    content = readFileSync(path === '-' ? 0 : path, 'utf8')
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    const message =
+      code === 'ENOENT' ? `файл ${path} не найден` : `не удалось прочитать файл ${path}: ${(error as Error).message}`
+    throw new UserError(3, message)
+  }
+
+  const text = content.replace(/^\uFEFF/, '').replace(/[\r\n]+$/, '')
+  if (text.trim() === '') {
+    throw new UserError(3, path === '-' ? 'stdin пуст: текст не задан' : `файл ${path} пуст: текст не задан`)
+  }
+
+  if (stringFlag(args, name) !== undefined) {
+    process.stderr.write(`текст взят из ${source}: --${name} проигнорирован\n`)
+  }
+  return text
 }
 
 export function listFlag(args: ParsedArgs, name: string): string[] {
