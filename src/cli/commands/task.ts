@@ -3,6 +3,8 @@ import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { listEvents } from '../../core/events.ts'
 import { getStage } from '../../core/stages.ts'
+import { getFeature } from '../../core/features.ts'
+import { taskContext } from '../../core/context.ts'
 import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
 import { unblockTask } from '../../core/block.ts'
@@ -120,6 +122,56 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'context') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: task context F1.S1-1')
+
+    const task = getTask(db, id)
+    if (!task) throw new UserError(3, `задача ${id} не найдена`)
+
+    const stage = task.stageId ? getStage(db, task.stageId) : null
+    const feature = stage ? getFeature(db, stage.featureId) : null
+    const root = feature?.worktree ?? project.root
+
+    const context = taskContext(db, task, root)
+    const lines = [
+      `${task.id}  ${task.title}`,
+      `статус: ${task.status}${task.holder ? ' · держит ' + task.holder : ''}`,
+      `DoD: ${task.dod.join('; ')}`,
+      `область: ${task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')}`,
+      '',
+      '## Файлы области',
+      context.files.length === 0
+        ? 'нет'
+        : context.files
+            .map((file) => `${file.path}${file.lines >= 0 ? `  ${file.lines} стр.` : ''}`)
+            .join('\n'),
+    ]
+
+    if (context.dependsOn.length > 0) {
+      lines.push('', `зависит от: ${context.dependsOn.join(', ')}`)
+    }
+
+    if (context.decisions.length > 0) {
+      lines.push('', '## Решения')
+      for (const decision of context.decisions) {
+        lines.push(`${decision.id}  ${decision.question} → ${decision.choice}`)
+      }
+    }
+
+    if (context.commits.length > 0) {
+      lines.push('', '## Последние коммиты')
+      for (const commit of context.commits) lines.push(`${commit.sha}  ${commit.subject}`)
+    }
+
+    if (context.warnings.length > 0) {
+      lines.push('', '! ' + context.warnings.join('\n! '))
+    }
+
+    ok(context, lines.join('\n'))
+    return 0
+  }
+
   if (args.sub === 'show') {
     // статус должен совпадать с list: время пересчитывается и здесь
     advanceTime(db)
@@ -229,6 +281,7 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
 
 
 
