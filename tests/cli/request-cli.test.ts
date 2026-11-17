@@ -62,6 +62,19 @@ test('request close закрывает запрос, show печатает пр�
   assert.match(shown.out, /закрыт: реализовано в F4/)
 })
 
+test('request show и list печатают дату пересмотра', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-later-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['request', 'later', 'R1', '--until', '2026-12-01'])
+
+  const shown = run(dir, ['request', 'show', 'R1'])
+  assert.match(shown.out, /пересмотр: 2026-12-01/)
+
+  const listed = run(dir, ['request', 'list'])
+  assert.match(listed.out, /до 2026-12-01/)
+})
+
 test('request open печатает только незакрытые', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-req-open-'))
   run(dir, ['init'])

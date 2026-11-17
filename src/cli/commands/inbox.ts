@@ -1,7 +1,8 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { inbox, type OwnerItem } from '../../core/questions.ts'
+import { nowView } from '../../core/views.ts'
 import type { Stage } from '../../core/stages.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -32,7 +33,22 @@ export default async function command() {
     .map(([title, list]) => title + '\n' + list.map(render).join('\n'))
     .join('\n\n')
 
-  ok(items, text || 'ничего не ждёт вас')
+  const view = nowView(db)
+  const extra: string[] = []
+  if (view.requests.length > 0) {
+    extra.push('ЗАПРОСЫ В INBOX\n' + view.requests.map((r) => `  ${r.id.padEnd(5)} ${r.title}`).join('\n'))
+  }
+  if (view.plans.length > 0) {
+    extra.push(
+      'ПЛАНЫ НА УТВЕРЖДЕНИЕ\n' +
+        view.plans.map((p) => `  ${p.id.padEnd(5)} ${p.requestId.padEnd(5)} ${p.title}`).join('\n'),
+    )
+  }
+  if (view.unreleased > 0) {
+    extra.push(`НЕ ВЫПУЩЕНО\n  этапов в dev: ${view.unreleased} → release pending`)
+  }
+
+  ok(items, [text, ...extra].filter(Boolean).join('\n\n') || 'ничего не ждёт вас')
   return 0
 }
 
@@ -57,3 +73,4 @@ function render(item: OwnerItem): string {
   const kind = item.kind === 'task' ? 'задача' : 'вопрос'
   return `  ${item.id.padEnd(12)} ${kind.padEnd(7)} ${title}`
 }
+

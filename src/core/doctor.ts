@@ -221,7 +221,7 @@ function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
     .map((feature) => feature.id)
 
   checks.push({
-    name: 'каталоги фич на месте',
+    name: 'каталоги фич существуют',
     ok: missing.length === 0,
     detail: missing.length === 0 ? 'на месте' : `нет каталога у: ${missing.join(', ')}`,
   })

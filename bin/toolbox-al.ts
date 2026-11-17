@@ -8,7 +8,8 @@ const HELP = `toolbox-al — ящик инструментов для работ
   init                    создать скелет проекта
   request add|list|open   запросы: добавить, все, незакрытые
   feature list|show|clean фичи: список, карточка, уборка каталога и ветки
-  stage list|accept|merge этапы: список, приёмка, слияние в dev
+  stage list|show|add|accept|merge этапы: список, карточка, добавление, приёмка, слияние в dev
+  plan new|show|approve|apply планы: создать, показать, утвердить, применить
   task add|show|list|open задачи: добавить, карточка, список, открытые
   pool list|stale|merge   пул задач без фич
   executor add|list       исполнители
@@ -17,9 +18,11 @@ const HELP = `toolbox-al — ящик инструментов для работ
   touch                   продлить аренду
   done / block            закрыть, прервать
   reopen                  вернуть задачу в работу
+  review <id> --verdict   вердикт по задаче на ревью
   ask / answer            вопросы
   now / inbox / cal       состояние, ожидание, календарь
   upgrade [--yes]         обновить инструмент в проекте
+  release [уровень]       релиз: pending, major, minor или patch
   version                 версия инструмента
   dispatch                кому что достаётся
                           пример: toolbox-al dispatch --json
