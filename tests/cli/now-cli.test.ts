@@ -135,6 +135,9 @@ test('now печатает этапы таблицей: готовые, в ра�
   const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
   db.prepare("update stages set status = 'merged' where id = 'F1.S1'").run()
   db.prepare("update stages set status = 'active' where id = 'F1.S2'").run()
+  db.prepare(
+    "update tasks set status = 'active', holder = 'w1' where id = (select min(id) from tasks where stage_id = 'F1.S2')",
+  ).run()
   db.close()
 
   const view = run(dir, ['now'])

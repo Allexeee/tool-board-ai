@@ -138,8 +138,8 @@ test('owner строит строку на каждый этап фичи', () =
   assert.equal(first.seq, 1)
   assert.equal(first.total, 2)
   assert.equal(first.name, 'S1')
-  assert.equal(first.status, 'wip')
-  assert.deepEqual(first.progress, { current: 1, total: 3 })
+  assert.equal(first.status, 'pending')
+  assert.deepEqual(first.progress, { current: 0, total: 3 })
 
   assert.equal(second.seq, 2)
   assert.equal(second.name, 'S2')
@@ -157,6 +157,23 @@ test('owner показывает прогресс как текущую зада
   assert.deepEqual(row.progress, { current: 3, total: 3 })
 })
 
+test('owner различает не начатый, идущий и готовый к слиянию этап', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  assert.equal(ownerView(db).stages[0].status, 'pending', 'нет движения — не работа')
+
+  const first = `${stageId}-1`
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(first)
+  assert.equal(ownerView(db).stages[0].status, 'wip')
+
+  db.prepare("update tasks set status = 'done' where stage_id = ?").run(stageId)
+  assert.equal(ownerView(db).stages[0].status, 'merge', 'все задачи закрыты, но в dev не слито')
+
+  db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
+  assert.equal(ownerView(db).stages[0].status, 'done')
+})
+
 test('owner сортирует этапы: готовые, затем в работе, затем очередь', () => {
   const db = openDb(':memory:')
   seed(db)
@@ -169,12 +186,22 @@ test('owner сортирует этапы: готовые, затем в раб�
   addStage(db, { featureId: queued.id, name: 'C1', goal: 'g', appetite: '1 день' })
 
   const working = addFeature(db, { name: 'D', rank: 4 })
-  addStage(db, { featureId: working.id, name: 'D1', goal: 'g', appetite: '1 день' })
+  const workingStage = addStage(db, { featureId: working.id, name: 'D1', goal: 'g', appetite: '1 день' })
   db.prepare("update stages set status = 'active' where feature_id = ?").run(working.id)
+  createTask(db, {
+    stageId: workingStage.id,
+    title: 'В работе',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  db.prepare("update tasks set status = 'active', holder = 'w1' where stage_id = ?").run(workingStage.id)
 
   assert.deepEqual(
     ownerView(db).stages.map((row) => row.stageId),
-    [`${done.id}.S1`, 'F1.S1', `${working.id}.S1`, `${queued.id}.S1`],
+    [`${done.id}.S1`, `${working.id}.S1`, 'F1.S1', `${queued.id}.S1`],
   )
 })
 

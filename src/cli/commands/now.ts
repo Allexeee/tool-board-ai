@@ -9,6 +9,7 @@ import { UserError } from '../errors.ts'
 // цвет несёт только смысл: готово — можно не читать, в работе — смотри сюда, очередь — фон.
 const stageColor: Record<OwnerStageStatus, ColorName> = {
   done: 'green',
+  merge: 'cyan',
   wip: 'yellow',
   pending: 'gray',
 }
