@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
 import { addRequest, getRequest } from '../../src/core/requests.ts'
@@ -104,4 +104,12 @@ test('шаг без упоминания теста не проверяется'
   const { plan } = fixture([{ ...step, dod: ['клиент создаётся'], scope: ['src/**'] }])
 
   assert.doesNotMatch(validatePlan(plan).join('\n'), /tests/)
+})
+
+test('задачи плана создаются без ревью', () => {
+  const { db, request } = fixture()
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+
+  const result = applyPlan(db, { requestId: request.id })
+  assert.equal(result.tasks[0].review, 'none')
 })

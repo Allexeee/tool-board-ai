@@ -86,7 +86,7 @@ export function applyPlan(
           skill: step.skill,
           class: 'standard',
           scope: step.scope,
-          review: 'agent',
+          review: 'none',
         }),
       )
       tasks.push(...created)
@@ -120,3 +120,4 @@ export function applyPlan(
     return { feature, stages, tasks }
   })
 }
+
