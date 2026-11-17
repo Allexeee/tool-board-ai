@@ -16,18 +16,31 @@ export interface PendingStage {
   mergedAt: string
 }
 
-// что уже в dev, но ещё не уехало в main: этапы, слитые после прошлого релиза
+// что уже в dev, но ещё не уехало в main: этапы, которых нет ни в одном релизе
 export function pendingRelease(db: DatabaseSync): PendingStage[] {
-  const lastRelease = db.prepare('select max(at) as at from releases').get() as { at: string | null }
+  const released = new Set<string>()
+  const rows = db.prepare("select after from events where type = 'release.created'").all() as Array<{
+    after: string | null
+  }>
+  for (const row of rows) {
+    if (!row.after) continue
+    try {
+      for (const id of (JSON.parse(row.after) as { stages?: string[] }).stages ?? []) released.add(id)
+    } catch {
+      // битое событие не должно прятать этапы
+    }
+  }
 
-  return db
+  const stages = db
     .prepare(
       `select f.id as featureId, f.name as featureName, s.id as stageId, s.name as stageName, s.merged_at as mergedAt
        from stages s join features f on f.id = s.feature_id
-       where s.status = 'merged' and s.merged_at > ?
+       where s.status = 'merged'
        order by f.rank, s.seq`,
     )
-    .all(lastRelease.at ?? '0000-00-00') as unknown as PendingStage[]
+    .all() as unknown as PendingStage[]
+
+  return stages.filter((stage) => !released.has(stage.stageId))
 }
 
 export interface LevelSuggestion {
@@ -106,6 +119,17 @@ function bump(version: string, level: ReleaseLevel): string {
   return `${major}.${minor}.${patch + 1}`
 }
 
+export function assertReleasePreflight(root: string, tag: string): void {
+  if (runGit(root, ['tag', '--list', tag]).trim()) {
+    throw new UserError(3, `тег ${tag} уже есть: релиз не начат, поднимите версию вручную`)
+  }
+
+  const changelogPath = join(root, 'CHANGELOG.md')
+  if (existsSync(changelogPath) && readFileSync(changelogPath, 'utf8').includes(`## ${tag}`)) {
+    throw new UserError(3, `в CHANGELOG уже есть раздел ${tag}: релиз не начат, проверьте историю`)
+  }
+}
+
 export function release(
   db: DatabaseSync,
   input: {
@@ -116,17 +140,11 @@ export function release(
     actor: string
   },
 ): ReleaseResult {
-  const lastRelease = db.prepare('select max(at) as at from releases').get() as { at: string | null }
-  const since = lastRelease.at ?? '0000-00-00'
-
-  const stages = db
-    .prepare(
-      `select s.id as id, s.name as stage, f.name as feature
-       from stages s join features f on f.id = s.feature_id
-       where s.status = 'merged' and s.merged_at > ?
-       order by s.merged_at`,
-    )
-    .all(since) as Array<{ id: string; stage: string; feature: string }>
+  const stages = pendingRelease(db).map((stage) => ({
+    id: stage.stageId,
+    stage: stage.stageName,
+    feature: stage.featureName,
+  }))
 
   if (stages.length === 0) {
     return { released: false, reason: 'нет слитых этапов с прошлого релиза' }
@@ -138,6 +156,8 @@ export function release(
 
   const version = bump(currentVersion(db, input.root), input.level)
   const tag = `v${version}`
+  assertReleasePreflight(input.root, tag)
+
   const date = new Date().toISOString().slice(0, 10)
   const changelog =
     `## ${tag} — ${date}\n\n` +
@@ -149,6 +169,7 @@ export function release(
     throw new UserError(3, 'дерево грязное: релиз не начинается, закоммитьте или уберите изменения')
   }
 
+  const mainTip = runGit(input.root, ['rev-parse', main])
   const original = currentBranch(input.root)
   runGit(input.root, ['checkout', main])
   try {
@@ -169,6 +190,14 @@ export function release(
     runGit(input.root, ['add', 'CHANGELOG.md'])
     runGit(input.root, ['commit', '-m', `chore: release ${tag}`], { AL_ALLOW: '1' })
     runGit(input.root, ['tag', tag])
+  } catch (error) {
+    // релиз не состоялся — main возвращается туда, где был до попытки
+    try {
+      runGit(input.root, ['reset', '--hard', mainTip], { AL_ALLOW: '1' })
+    } catch {
+      appendEvent(db, { type: 'release.rollback_failed', actor: input.actor, subject: tag })
+    }
+    throw error
   } finally {
     if (original && original !== main) {
       try {

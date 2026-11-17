@@ -16,7 +16,7 @@ import { doneTask } from '../../src/core/done.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
 import { commitTask } from '../../src/core/git/commit.ts'
 import { mergeStage } from '../../src/core/git/merge.ts'
-import { pendingRelease, release, suggestLevel } from '../../src/core/git/release.ts'
+import { assertReleasePreflight, pendingRelease, release, suggestLevel } from '../../src/core/git/release.ts'
 import { runGit } from '../../src/core/git/git.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
@@ -168,6 +168,25 @@ test('без тегов база остаётся 0.1.0', () => {
 
   assert.equal(suggestLevel(db, root)!.version, '0.1.0')
 })
+
+test('preflight отвергает существующий тег и раздел changelog', () => {
+  const { root } = repoWithMergedStage()
+  runGit(root, ['tag', 'v1.0.2'])
+  writeFileSync(join(root, 'CHANGELOG.md'), '# Changelog\n\n## v1.1.0 — 2026-01-01\n')
+
+  assert.throws(() => assertReleasePreflight(root, 'v1.0.2'), /уже есть/)
+  assert.throws(() => assertReleasePreflight(root, 'v1.1.0'), /CHANGELOG/)
+})
+
+test('этап, записанный в релиз, больше не попадает в pending', () => {
+  const { db, root } = repoWithMergedStage()
+  const [pending] = pendingRelease(db)
+  release(db, { root, level: 'minor', reason: 'первый', config: readConfig(join(root, '.toolbox-al/config.json')), actor: 'owner' })
+
+  assert.deepEqual(pendingRelease(db), [])
+  void pending
+})
+
 
 
 
