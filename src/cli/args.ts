@@ -6,6 +6,8 @@ const COMMANDS_WITH_SUB = new Set([
   'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan', 'pool', 'release',
 ])
 
+const TEXT_FILE_COMMANDS = new Set(['idea', 'request'])
+
 const KNOWN_FLAGS = new Set([
   'json', 'help', 'version', 'project', 'as', 'yes', 'dry-run', 'all',
   'title', 'body', 'author', 'text', 'text-file', 'name', 'goal', 'rank', 'to',
@@ -93,6 +95,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError(3, 'не указана команда')
   }
 
+  if (flags['text-file'] !== undefined && !TEXT_FILE_COMMANDS.has(command)) {
+    throw new UserError(3, `флаг --text-file не принимается командой ${command}`)
+  }
+
   return { command, sub, flags, positionals }
 }
 
@@ -108,7 +114,11 @@ export function stringFlag(args: ParsedArgs, name: string): string | undefined {
  * Пустой ввод — ошибка: пустая идея или тело запроса никому не нужны.
  * Если рядом задан текстовый флаг (`--text`/`--body`), он игнорируется, о чём и сообщаем.
  */
-export function textFileFlag(args: ParsedArgs, name = 'text'): string | undefined {
+export function textFileFlag(
+  args: ParsedArgs,
+  name = 'text',
+  options: { positional?: string | undefined } = {},
+): string | undefined {
   const raw = args.flags['text-file']
   if (raw === undefined) return undefined
   if (raw === true) throw new UserError(3, 'использование: --text-file <файл|->')
@@ -133,6 +143,9 @@ export function textFileFlag(args: ParsedArgs, name = 'text'): string | undefine
 
   if (stringFlag(args, name) !== undefined) {
     process.stderr.write(`текст взят из ${source}: --${name} проигнорирован\n`)
+  }
+  if (options.positional?.trim()) {
+    process.stderr.write(`текст взят из ${source}: позиционный текст проигнорирован\n`)
   }
   return text
 }

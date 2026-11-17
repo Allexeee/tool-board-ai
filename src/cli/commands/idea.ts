@@ -11,7 +11,8 @@ export default async function command(args: ParsedArgs) {
   const db = openDb(project.dbPath)
 
   if (args.sub === 'add') {
-    const text = textFileFlag(args) ?? args.positionals[0] ?? stringFlag(args, 'text')
+    const positional = args.positionals[0]
+    const text = textFileFlag(args, 'text', { positional }) ?? positional ?? stringFlag(args, 'text')
     if (!text) throw new UserError(3, 'использование: idea add "текст" | idea add --text-file <файл|->')
     const idea = addIdea(db, { text, reviewAt: stringFlag(args, 'deadline') })
     ok(idea, `${idea.id}  ${idea.text}`)
