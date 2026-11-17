@@ -1,7 +1,7 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addIdea, listIdeas, promoteIdea } from '../../core/ideas.ts'
-import { stringFlag, type ParsedArgs } from '../args.ts'
+import { addIdea, editIdea, listIdeas, promoteIdea, realizeIdea, removeIdea } from '../../core/ideas.ts'
+import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -26,7 +26,41 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
-  const ideas = listIdeas(db)
+  if (args.sub === 'edit') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: idea edit I1 --text "…" --deadline 2026-12-01')
+
+    const idea = editIdea(db, {
+      ideaId: id,
+      text: stringFlag(args, 'text'),
+      reviewAt: args.flags.deadline === undefined ? undefined : String(args.flags.deadline),
+      actor: 'owner',
+    })
+    ok(idea, `${idea.id}  ${idea.text}`)
+    return 0
+  }
+
+  if (args.sub === 'remove') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: idea remove I1')
+    removeIdea(db, { ideaId: id, actor: 'owner' })
+    ok({ id }, `${id} удалена`)
+    return 0
+  }
+
+  if (args.sub === 'realize') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: idea realize I1 --note "как реализована"')
+    const idea = realizeIdea(db, {
+      ideaId: id,
+      actor: 'owner',
+      note: stringFlag(args, 'note'),
+    })
+    ok(idea, `${idea.id} отмечена реализованной`)
+    return 0
+  }
+
+  const ideas = listIdeas(db, { all: boolFlag(args, 'all') })
   ok(
     ideas,
     ideas.length === 0
@@ -40,3 +74,4 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
