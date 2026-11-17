@@ -129,7 +129,7 @@ export function closeRequest(
     if (request.status === 'closed') throw new UserError(1, `запрос ${request.id} уже закрыт`)
 
     const open = db
-      .prepare("select count(*) as c from features where request_id = ? and status != 'done'")
+      .prepare("select count(*) as c from features where request_id = ? and status not in ('done', 'cancelled')")
       .get(request.id) as { c: number }
     if (open.c > 0) {
       throw new UserError(1, `у запроса ${request.id} есть незакрытые фичи: слейте их или отмените`)

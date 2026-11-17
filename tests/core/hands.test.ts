@@ -1,10 +1,10 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
-import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
+import { abandonFeature, addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
-import { createTask } from '../../src/core/tasks.ts'
+import { createTask, updateTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask } from '../../src/core/lease.ts'
@@ -119,4 +119,28 @@ test('пул набирается после блока фичи', () => {
   assert.ok(hand.some((task) => task.id === 'T1'), 'задача пула попала в руку')
   assert.equal(hand[hand.length - 1].id, 'T1')
 })
+
+test('задача, ушедшая из ready, исчезает из руки', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  fillHand(db, 'w1')
+  assert.ok(getHand(db, 'w1').length > 0)
+
+  updateTask(db, `${stageId}-1`, { status: 'blocked', reason: 'needs_data' })
+
+  assert.equal(getHand(db, 'w1').some((task) => task.id === `${stageId}-1`), false)
+})
+
+test('abandon фичи чистит руку', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  fillHand(db, 'w1')
+  assert.ok(getHand(db, 'w1').length > 0)
+
+  const feature = db.prepare('select id from features').get() as { id: string }
+  abandonFeature(db, { featureId: feature.id, actor: 'owner', reason: 'передумали' })
+
+  assert.deepEqual(getHand(db, 'w1'), [])
+})
+
 
