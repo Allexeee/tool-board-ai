@@ -30,6 +30,18 @@ export interface QueueRow {
 /** Причина у задачи, которой ничто не мешает: не хватает только раздачи. */
 export const queueFreeReason = 'ждёт раздачи'
 
+interface QueueSort {
+  rank: number
+  seq: number
+  depth: number
+  id: string
+}
+
+/** Прежний порядок: ранг фичи, номер этапа, глубина по зависимостям, номер задачи. */
+function compareQueue(a: QueueSort, b: QueueSort): number {
+  return a.rank - b.rank || a.seq - b.seq || a.depth - b.depth || a.id.localeCompare(b.id)
+}
+
 /** Откуда задача попала в руку: раздачей, прямой рукой или взятием по id. */
 export interface AssignCounts {
   dispatch: number
@@ -97,7 +109,55 @@ export function assignmentStats(db: DatabaseSync): AssignStats {
 }
 
 /**
- * Порядок, в котором задачи будут взяты: ранг фичи, номер этапа, затем зависимости.
+ * Порядок с уважением к зависимостям: блокер всегда выше зависимой задачи,
+ * даже если у той лучше ранг фичи или меньше номер этапа. Среди свободных
+ * решает прежний порядок, поэтому внутри одного этапа всё как раньше.
+ *
+ * Цикл сюда не доходит — addDep его отвергает; но если он уже лежит в базе,
+ * остаток добираем прежним порядком, а не теряем задачи молча.
+ */
+function orderByDeps(
+  ids: string[],
+  blockersOf: (id: string) => string[],
+  keyOf: (id: string) => QueueSort,
+): string[] {
+  const inside = new Set(ids)
+  const waiting = new Map<string, Set<string>>()
+
+  for (const id of ids) {
+    // задачи вне очереди (закрытые, отложенные) блокером не считаются: их порядок не наш
+    waiting.set(
+      id,
+      new Set(blockersOf(id).filter((blocker) => blocker !== id && inside.has(blocker))),
+    )
+  }
+
+  const compare = (a: string, b: string) => compareQueue(keyOf(a), keyOf(b))
+  const ready = ids.filter((id) => waiting.get(id)!.size === 0)
+  const ordered: string[] = []
+
+  while (ready.length > 0) {
+    ready.sort(compare)
+    const next = ready.shift()!
+    ordered.push(next)
+    waiting.delete(next)
+
+    for (const [id, blockers] of waiting) {
+      if (blockers.delete(next) && blockers.size === 0) ready.push(id)
+    }
+  }
+
+  if (ordered.length < ids.length) {
+    const placed = new Set(ordered)
+    ordered.push(...ids.filter((id) => !placed.has(id)).sort(compare))
+  }
+
+  return ordered
+}
+
+/**
+ * Порядок, в котором задачи будут взяты: зависимости держат блокер выше
+ * зависимой, среди свободных — ранг фичи, номер этапа, глубина, номер задачи.
  * Владельцу нужен порядок, а не разбивка по рукам.
  */
 export function taskQueue(db: DatabaseSync): QueueRow[] {
@@ -124,11 +184,10 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
     if (seen.has(id)) return 0
     seen.add(id)
 
-    const deps = (db.prepare('select from_id from deps where to_id = ?').all(id) as Array<{ from_id: string }>)
-      .map((row) => row.from_id)
-      .filter((dep) => byId.has(dep))
+    // глубина — по зависимостям: блокер считается первым, зависимая идёт ниже
+    const blockers = depsOf(db, id).filter((blocker) => byId.has(blocker))
 
-    const value = deps.length === 0 ? 0 : Math.max(...deps.map((dep) => depthOf(dep, seen) + 1))
+    const value = blockers.length === 0 ? 0 : Math.max(...blockers.map((blocker) => depthOf(blocker, seen) + 1))
     depth.set(id, value)
     return value
   }
@@ -156,40 +215,46 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
   const isBusy = (executorId: string, handSize: number): boolean =>
     hasWork.has(executorId) || (handLoad.get(executorId) ?? 0) >= handSize
 
-  return tasks
-    .map((task) => {
-      const place = task.stageId ? seqOf.get(task.stageId) : undefined
-      const featureId = place?.featureId ?? null
-      const waitsFor = depsOf(db, task.id).filter((dep) => !isSatisfied(db, dep))
+  const rows = new Map<string, QueueRow>()
+  const sort = new Map<string, QueueSort>()
 
-      // назначенная задача никого не ждёт: причина есть только у свободной.
-      const reason =
-        task.holder !== null || handOf.has(task.id)
-          ? null
-          : reasonOf({ task, place, waitsFor, feature: featureId ? featureOf.get(featureId) : undefined, executors, isBusy })
+  for (const task of tasks) {
+    const place = task.stageId ? seqOf.get(task.stageId) : undefined
+    const featureId = place?.featureId ?? null
+    const waitsFor = depsOf(db, task.id).filter((dep) => !isSatisfied(db, dep))
 
-      return {
-        row: {
-          taskId: task.id,
-          title: task.title,
-          status: task.status,
-          featureId,
-          stageId: task.stageId,
-          waitsFor,
-          holder: task.holder,
-          hand: handOf.get(task.id) ?? null,
-          reason,
-        } satisfies QueueRow,
-        sort: {
-          rank: featureId ? (rankOf.get(featureId) ?? 99) : 999,
-          seq: place?.seq ?? 999,
-          depth: depthOf(task.id),
-          id: task.id,
-        },
-      }
+    // назначенная задача никого не ждёт: причина есть только у свободной.
+    const reason =
+      task.holder !== null || handOf.has(task.id)
+        ? null
+        : reasonOf({ task, place, waitsFor, feature: featureId ? featureOf.get(featureId) : undefined, executors, isBusy })
+
+    rows.set(task.id, {
+      taskId: task.id,
+      title: task.title,
+      status: task.status,
+      featureId,
+      stageId: task.stageId,
+      waitsFor,
+      holder: task.holder,
+      hand: handOf.get(task.id) ?? null,
+      reason,
     })
-    .sort((a, b) => a.sort.rank - b.sort.rank || a.sort.seq - b.sort.seq || a.sort.depth - b.sort.depth || a.sort.id.localeCompare(b.sort.id))
-    .map((item) => item.row)
+    sort.set(task.id, {
+      rank: featureId ? (rankOf.get(featureId) ?? 99) : 999,
+      seq: place?.seq ?? 999,
+      depth: depthOf(task.id),
+      id: task.id,
+    })
+  }
+
+  const order = orderByDeps(
+    tasks.map((task) => task.id),
+    (id) => depsOf(db, id),
+    (id) => sort.get(id)!,
+  )
+
+  return order.map((id) => rows.get(id)!)
 }
 
 /**
