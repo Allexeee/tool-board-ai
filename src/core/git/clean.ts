@@ -273,7 +273,11 @@ function isRegisteredWorktree(root: string, dir: string): boolean {
 }
 
 function isMergedInto(root: string, branch: string, dev: string): boolean {
-  const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], { cwd: root, stdio: 'ignore' })
+  const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], {
+    cwd: root,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
   return result.status === 0
 }
 
