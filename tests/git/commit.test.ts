@@ -46,6 +46,56 @@ test('done коммитит файлы своей области', () => {
   assert.deepEqual(files, ['src/a.ts'])
 })
 
+test('коммит в чужую ветку отвергается', () => {
+  const { worktree, task, root, config } = fixture()
+  const expected = runGit(worktree, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+
+  runGit(worktree, ['checkout', config.branches.dev])
+  assert.throws(
+    () =>
+      commitTask({
+        worktree,
+        task,
+        report: { summary: 'сделано', checks: [] },
+        expectedBranch: expected,
+      }),
+    /стоит на dev/,
+  )
+  void root
+})
+
+test('detached HEAD отвергается', () => {
+  const { worktree, task } = fixture()
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+  runGit(worktree, ['checkout', '--detach'])
+
+  assert.throws(
+    () => commitTask({ worktree, task, report: { summary: 'сделано', checks: [] } }),
+    /detached/,
+  )
+})
+
+test('запрещённая ветка отвергается', () => {
+  const { worktree, task, config } = fixture()
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+
+  assert.throws(
+    () =>
+      commitTask({
+        worktree,
+        task,
+        report: { summary: 'сделано', checks: [] },
+        forbiddenBranches: [runGit(worktree, ['rev-parse', '--abbrev-ref', 'HEAD'])],
+      }),
+    /защищённую ветку/,
+  )
+  void config
+})
+
 test('пустой diff не создаёт коммит и не падает', () => {
   const { worktree, task } = fixture()
   assert.equal(commitTask({ worktree, task, report: { summary: 's', checks: [] } }), null)
