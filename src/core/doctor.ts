@@ -187,6 +187,37 @@ export function doctorReport(
         : 'устарели после правки запроса: ' + stalePlans.map((plan) => plan.id).join(', '),
   })
 
+  const scopeMisses = db
+    .prepare(
+      "select e.after as after, s.feature_id as feature_id " +
+        'from events e ' +
+        'left join tasks t on t.id = e.subject ' +
+        'left join stages s on s.id = t.stage_id ' +
+        "where e.type = 'task.outside_scope' order by e.id",
+    )
+    .all() as Array<{ after: string | null; feature_id: string | null }>
+
+  const missesByFeature = new Map<string, Set<string>>()
+  for (const miss of scopeMisses) {
+    const featureId = miss.feature_id ?? 'без фичи'
+    const files = missesByFeature.get(featureId) ?? new Set<string>()
+    for (const file of filesFromEvent(miss.after)) files.add(file)
+    missesByFeature.set(featureId, files)
+  }
+
+  const misses = [...missesByFeature.entries()]
+  checks.push({
+    name: 'промахи области',
+    ok: misses.length === 0,
+    detail:
+      misses.length === 0
+        ? 'правок вне области не было'
+        : 'закрыты с правками вне области: ' +
+          misses
+            .map(([featureId, files]) => (files.size > 0 ? `${featureId} (${[...files].join(', ')})` : featureId))
+            .join(', '),
+  })
+
   const stale = stalePoolTasks(db, 7)
   checks.push({
     name: 'пул',
@@ -247,6 +278,16 @@ function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
   })
 
   return checks
+}
+
+function filesFromEvent(after: string | null): string[] {
+  if (!after) return []
+  try {
+    const parsed = JSON.parse(after) as { files?: unknown }
+    return Array.isArray(parsed.files) ? parsed.files.map(String) : []
+  } catch {
+    return []
+  }
 }
 
 function fairness(db: DatabaseSync): Check {

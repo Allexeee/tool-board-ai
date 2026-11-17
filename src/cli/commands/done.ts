@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { advanceTime } from '../../core/clock.ts'
 import { lastSnapshot } from '../../core/lease.ts'
+import { appendEvent } from '../../core/events.ts'
 import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -113,6 +114,16 @@ export default async function command(args: ParsedArgs) {
       commit: commit ?? undefined,
     },
   })
+
+  // промах не отменяет закрытие, но остаётся в журнале: doctor потом покажет его
+  if (outside.length > 0) {
+    appendEvent(db, {
+      type: 'task.outside_scope',
+      actor: executor,
+      subject: taskId,
+      after: { files: outside },
+    })
+  }
 
   ok(closed, `${closed.id}  ${closed.status === 'in_review' ? 'на ревью' : 'закрыта'}`)
   return 0
