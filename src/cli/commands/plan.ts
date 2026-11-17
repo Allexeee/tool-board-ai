@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs'
+﻿import { readFileSync } from 'node:fs'
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addPlan, approvePlan, getPlan } from '../../core/plans.ts'
-import { applyPlan } from '../../core/apply.ts'
+import { addPlan, approvePlan, getPlan, getPlanById } from '../../core/plans.ts'
+import { applyPlan, validatePlan } from '../../core/apply.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -12,9 +12,17 @@ export default async function command(args: ParsedArgs) {
   if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
   const db = openDb(project.dbPath)
 
-  const requestId = args.positionals[0] ?? stringFlag(args, 'request')
+  let requestId = args.positionals[0] ?? stringFlag(args, 'request')
   if (!requestId) throw new UserError(3, 'использование: plan show|approve|apply|new R1')
-  const version = stringFlag(args, 'version') ? Number(stringFlag(args, 'version')) : undefined
+  let version = stringFlag(args, 'version') ? Number(stringFlag(args, 'version')) : undefined
+
+  // план можно адресовать по P-id из вывода, а не только по запросу
+  if (/^P\d+$/.test(requestId)) {
+    const byId = getPlanById(db, requestId)
+    if (!byId) throw new UserError(3, `план ${requestId} не найден`)
+    requestId = byId.requestId
+    version = byId.version
+  }
 
   if (args.sub === 'new') {
     const file = args.positionals[1] ?? stringFlag(args, 'from')
@@ -39,7 +47,15 @@ export default async function command(args: ParsedArgs) {
   }
 
   if (args.sub === 'approve') {
-    const plan = approvePlan(db, { requestId, version: version ?? 0, actor: 'owner' })
+    const pending = getPlan(db, { requestId, version })
+    if (!pending) throw new UserError(3, `план для ${requestId} не найден`)
+
+    const errors = validatePlan({ ...pending, approvedAt: new Date().toISOString() })
+    if (errors.length > 0) {
+      throw new UserError(3, 'план не утверждён:\n  ' + errors.join('\n  '))
+    }
+
+    const plan = approvePlan(db, { requestId, version: version ?? pending.version, actor: 'owner' })
     ok(plan, `план v${plan.version} утверждён`)
     return 0
   }
@@ -55,8 +71,16 @@ export default async function command(args: ParsedArgs) {
 
   const steps = plan.stages
     .flatMap((stage) => [
-      `${stage.name} — ${stage.goal} (appetite ${stage.appetite})`,
-      ...stage.steps.map((step) => `  [${step.skill}, ${step.size}] ${step.title}`),
+      `${stage.name} — ${stage.goal} (appetite ${stage.appetite}, приёмка ${stage.acceptance})`,
+      ...stage.steps.map((step) => {
+        const lines = [
+          `  [${step.skill}, ${step.size}] ${step.title}`,
+          `    DoD: ${step.dod.join('; ')}`,
+          `    область: ${step.scope.join(', ')}`,
+        ]
+        if (step.deps?.length) lines.push(`    зависит от: ${step.deps.map((index) => index + 1).join(', ')}`)
+        return lines.join('\n')
+      }),
     ])
     .join('\n')
 
@@ -68,3 +92,4 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+

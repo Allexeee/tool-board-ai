@@ -76,3 +76,27 @@ test('у задачи без решений секции нет', () => {
   assert.doesNotMatch(shown.out, /## Решения/)
 })
 
+test('карточка печатает отчёт, коммит и ревью', () => {
+  const dir = stageTask()
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare(
+    "insert into events (at, type, actor, subject, before, after, note) values (?, 'task.done', 'w1', 'F1.S1-1', null, ?, null)",
+  ).run(
+    new Date().toISOString(),
+    JSON.stringify({ summary: 'сделано', checks: ['npm test'], commit: 'abcdef1234567890' }),
+  )
+  db.prepare(
+    "insert into reviews (task_id, reviewer, verdict, comments, at) values ('F1.S1-1', 'reviewer', 'approved', 'ок', ?)",
+  ).run(new Date().toISOString())
+  db.close()
+
+  const shown = run(dir, ['task', 'show', 'F1.S1-1'])
+
+  assert.match(shown.out, /## Отчёт/)
+  assert.match(shown.out, /сделано/)
+  assert.match(shown.out, /проверено: npm test/)
+  assert.match(shown.out, /коммит: abcdef12/)
+  assert.match(shown.out, /## Ревью/)
+  assert.match(shown.out, /approved — reviewer: ок/)
+})
+

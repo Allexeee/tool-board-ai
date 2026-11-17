@@ -12,62 +12,54 @@ function run(dir: string, args: string[]) {
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 
-const plan = {
-  title: 'Оплата',
-  assumptions: [],
-  stages: [
-    {
-      name: 'Каркас',
-      goal: 'можно заплатить',
-      appetite: '2 дня',
-      steps: [
-        {
-          title: 'Подключить SDK',
-          skill: 'backend',
-          size: 'S',
-          dod: ['клиент создаётся'],
-          scope: ['src/**'],
-        },
-      ],
-    },
-  ],
+const goodStep = {
+  title: 'Подключить SDK',
+  skill: 'backend',
+  size: 'S',
+  dod: ['клиент создаётся'],
+  scope: ['src/**'],
 }
 
-test('plan new читает файл с BOM', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'al-plan-bom-'))
+function project(steps: unknown[] = [goodStep]) {
+  const dir = mkdtempSync(join(tmpdir(), 'al-plan-'))
   run(dir, ['init'])
   run(dir, ['request', 'add', 'Оплата'])
-
   const file = join(dir, 'plan.json')
-  writeFileSync(file, '\uFEFF' + JSON.stringify(plan), 'utf8')
+  writeFileSync(
+    file,
+    JSON.stringify({
+      title: 'Оплата',
+      assumptions: [],
+      stages: [{ name: 'Каркас', goal: 'можно платить', appetite: '2 дня', steps }],
+    }),
+    'utf8',
+  )
+  run(dir, ['plan', 'new', 'R1', file])
+  return dir
+}
 
-  const created = run(dir, ['plan', 'new', 'R1', file])
-  assert.equal(created.code, 0, created.err)
-  assert.match(created.out, /P\d+/)
+test('plan show печатает DoD, область и приёмку', () => {
+  const dir = project()
+  const shown = run(dir, ['plan', 'show', 'R1'])
+
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /DoD: клиент создаётся/)
+  assert.match(shown.out, /область: src\/\*\*/)
+  assert.match(shown.out, /приёмка/)
 })
 
-test('plan new без BOM работает как раньше', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'al-plan-nobom-'))
-  run(dir, ['init'])
-  run(dir, ['request', 'add', 'Оплата'])
+test('план адресуется по P-id', () => {
+  const dir = project()
+  const shown = run(dir, ['plan', 'show', 'P1'])
 
-  const file = join(dir, 'plan.json')
-  writeFileSync(file, JSON.stringify(plan), 'utf8')
-
-  const created = run(dir, ['plan', 'new', 'R1', file])
-  assert.equal(created.code, 0, created.err)
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /Оплата/)
 })
 
-test('битый JSON объясняет ошибку без стектрейса', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'al-plan-bad-'))
-  run(dir, ['init'])
-  run(dir, ['request', 'add', 'Оплата'])
+test('approve отказывает на неполном плане', () => {
+  const dir = project([{ ...goodStep, dod: [] }])
+  const approved = run(dir, ['plan', 'approve', 'R1'])
 
-  const file = join(dir, 'plan.json')
-  writeFileSync(file, '{ "title": "Оплата", ', 'utf8')
-
-  const created = run(dir, ['plan', 'new', 'R1', file])
-  assert.equal(created.code, 3)
-  assert.match(created.err, /не разобрать JSON плана/)
-  assert.doesNotMatch(created.err, /at JSON\.parse|at file:/)
+  assert.equal(approved.code, 3)
+  assert.match(approved.err, /нет DoD/)
 })

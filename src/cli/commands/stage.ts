@@ -1,6 +1,8 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { activateNextStage, addStage, listStages } from '../../core/stages.ts'
+import { activateNextStage, addStage, getStage, listStages } from '../../core/stages.ts'
+import { getFeature } from '../../core/features.ts'
+import { listTasks } from '../../core/tasks.ts'
 import { mergeStage } from '../../core/git/merge.ts'
 import { acceptStage, rejectStage } from '../../core/accept.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
@@ -25,11 +27,41 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'show') {
+    const stageId = args.positionals[0]
+    if (!stageId) throw new UserError(3, 'использование: stage show F1.S1')
+
+    const stage = getStage(db, stageId)
+    if (!stage) throw new UserError(3, `этап ${stageId} не найден`)
+
+    const feature = getFeature(db, stage.featureId)
+    const tasks = listTasks(db, { stageId: stage.id })
+    const lines = [
+      `${stage.id}  ${stage.name}`,
+      `фича: ${feature?.id ?? '?'}  ${feature?.name ?? ''}`,
+      `цель: ${stage.goal}`,
+      `appetite: ${stage.appetite ?? '—'}`,
+      `приёмка: ${stage.acceptance}`,
+      `статус: ${stage.status}`,
+      '',
+      '## Задачи',
+      tasks.length === 0
+        ? 'нет'
+        : tasks.map((task) => `${task.id.padEnd(10)} ${task.status.padEnd(10)} ${task.title}`).join('\n'),
+    ]
+
+    ok(stage, lines.join('\n'))
+    return 0
+  }
+
   if (args.sub === 'accept') {
     const stageId = args.positionals[0]
     if (!stageId) throw new UserError(3, 'использование: stage accept F1.S1')
     const stage = acceptStage(db, { stageId, actor: 'owner' })
-    ok(stage, `${stage.id} принят`)
+
+    const next = listStages(db, stage.featureId).find((item) => item.status === 'active')
+    const tail = next ? `следующий этап: ${next.id} ${next.name}` : 'следующий этап ещё не активен'
+    ok(stage, `${stage.id} принят · ${tail} · дальше stage merge ${stage.id}`)
     return 0
   }
 
@@ -67,7 +99,9 @@ export default async function command(args: ParsedArgs) {
   }
 
   const featureId = args.positionals[0] ?? stringFlag(args, 'feature')
-  if (!featureId) throw new UserError(3, 'не указана фича')
+  if (!featureId) {
+    throw new UserError(3, 'использование: stage list F1 — укажите фичу; все фичи: feature list')
+  }
   const stages = listStages(db, featureId)
   ok(
     stages,

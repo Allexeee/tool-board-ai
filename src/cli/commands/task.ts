@@ -128,11 +128,46 @@ export default async function command(args: ParsedArgs) {
 
     const lines = [
       `${task.id}  ${task.title}`,
-      `размер: ${task.size} · навык: ${task.skill} · класс: ${task.class}`,
+      `размер: ${task.size} · навык: ${task.skill} · класс: ${task.class}` +
+        (task.severity ? ` · severity ${task.severity}` : ''),
       `статус: ${task.status}${task.holder ? ' · держит ' + task.holder : ''}`,
       `DoD: ${task.dod.join('; ')}`,
       `область: ${task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')}`,
     ]
+
+    if (task.attempts > 0) lines.push(`попыток: ${task.attempts}`)
+    if (task.reason) lines.push(`причина: ${task.reason}`)
+
+    const done = db
+      .prepare("select after, actor from events where type = 'task.done' and subject = ? order by id desc limit 1")
+      .get(task.id) as { after: string; actor: string } | undefined
+
+    if (done?.after) {
+      const report = JSON.parse(done.after) as {
+        summary?: string
+        checks?: string[]
+        left?: string
+        commit?: string
+      }
+      lines.push('', '## Отчёт')
+      if (report.summary) lines.push(report.summary)
+      for (const check of report.checks ?? []) lines.push(`проверено: ${check}`)
+      if (report.left) lines.push(`осталось: ${report.left}`)
+      if (report.commit) lines.push(`коммит: ${report.commit.slice(0, 8)}`)
+      lines.push(`закрыл: ${done.actor}`)
+    }
+
+    const reviews = db
+      .prepare('select reviewer, verdict, comments from reviews where task_id = ? order by id')
+      .all(task.id) as Array<{ reviewer: string; verdict: string; comments: string | null }>
+
+    if (reviews.length > 0) {
+      lines.push('', '## Ревью')
+      for (const review of reviews) {
+        const comment = review.comments ? `: ${review.comments}` : ''
+        lines.push(`${review.verdict} — ${review.reviewer}${comment}`)
+      }
+    }
 
     if (task.holder) {
       const executor = getExecutor(db, task.holder)

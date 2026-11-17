@@ -53,6 +53,8 @@ export default async function command(args: ParsedArgs) {
     }
   }
 
+  let commit: string | null = null
+
   if (task.stageId) {
     if (!feature?.worktree) {
       throw new UserError(3, `у фичи ${feature?.id ?? '?'} нет рабочего каталога: выполните feature start`)
@@ -60,14 +62,14 @@ export default async function command(args: ParsedArgs) {
     if (!existsSync(feature.worktree)) {
       throw new UserError(3, `рабочий каталог фичи ${feature.id} пропал: выполните feature start`)
     }
-    commitTask({
+    commit = commitTask({
       worktree: feature.worktree,
       task,
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
       expectedBranch: feature.branch,
     })
   } else {
-    commitTask({
+    commit = commitTask({
       worktree: project.root,
       task,
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
@@ -82,6 +84,7 @@ export default async function command(args: ParsedArgs) {
       summary,
       checks: listFlag(args, 'checks'),
       left: stringFlag(args, 'left'),
+      commit: commit ?? undefined,
     },
   })
 
