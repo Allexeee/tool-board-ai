@@ -1,7 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { addIdea, editIdea, listIdeas, promoteIdea, realizeIdea, removeIdea } from '../../core/ideas.ts'
-import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, stringFlag, textFileFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -11,8 +11,8 @@ export default async function command(args: ParsedArgs) {
   const db = openDb(project.dbPath)
 
   if (args.sub === 'add') {
-    const text = args.positionals[0] ?? stringFlag(args, 'text')
-    if (!text) throw new UserError(3, 'использование: idea add "текст"')
+    const text = textFileFlag(args) ?? args.positionals[0] ?? stringFlag(args, 'text')
+    if (!text) throw new UserError(3, 'использование: idea add "текст" | idea add --text-file <файл|->')
     const idea = addIdea(db, { text, reviewAt: stringFlag(args, 'deadline') })
     ok(idea, `${idea.id}  ${idea.text}`)
     return 0
@@ -28,11 +28,11 @@ export default async function command(args: ParsedArgs) {
 
   if (args.sub === 'edit') {
     const id = args.positionals[0]
-    if (!id) throw new UserError(3, 'использование: idea edit I1 --text "…" --deadline 2026-12-01')
+    if (!id) throw new UserError(3, 'использование: idea edit I1 --text "…" | --text-file <файл|->  [--deadline 2026-12-01]')
 
     const idea = editIdea(db, {
       ideaId: id,
-      text: stringFlag(args, 'text'),
+      text: textFileFlag(args) ?? stringFlag(args, 'text'),
       reviewAt: args.flags.deadline === undefined ? undefined : String(args.flags.deadline),
       actor: 'owner',
     })

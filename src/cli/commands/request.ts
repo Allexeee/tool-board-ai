@@ -6,7 +6,7 @@ import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
 import { listDecisions } from '../../core/decisions.ts'
 import { markPlansStale } from '../../core/plans.ts'
-import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, listFlag, stringFlag, textFileFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -20,7 +20,7 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'add') {
     const title = args.positionals[0] ?? stringFlag(args, 'title')
     if (!title) throw new UserError(3, 'не указан заголовок запроса')
-    const body = stringFlag(args, 'body') ?? args.positionals.slice(1).join(' ')
+    const body = textFileFlag(args, 'body') ?? stringFlag(args, 'body') ?? args.positionals.slice(1).join(' ')
     const request = addRequest(db, { title, body, author: actor })
     ok(request, `${request.id}  ${request.title}`)
     return 0
@@ -46,10 +46,10 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'edit') {
     const id = args.positionals[0]
     const title = stringFlag(args, 'title')
-    const body = stringFlag(args, 'body')
+    const body = textFileFlag(args, 'body') ?? stringFlag(args, 'body')
 
     if (!id || (title === undefined && body === undefined)) {
-      throw new UserError(3, 'использование: request edit R3 --title "..." --body "..."')
+      throw new UserError(3, 'использование: request edit R3 --title "..." --body "..." | --text-file <файл|->')
     }
 
     const request = editRequest(db, { id, title, body, actor })
