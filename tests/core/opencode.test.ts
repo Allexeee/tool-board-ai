@@ -156,6 +156,16 @@ test('плагин не перезаписывается, рядом появл�
   assert.match(readFileSync(`${path}.new`, 'utf8'), /9\.9\.9/)
 })
 
+test('скилл: ревью задач не проводим, перед релизом три варианта', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+
+  assert.match(skill, /Ревью задач не проводим/)
+  assert.match(skill, /--review same\|fresh\|none/)
+  assert.match(skill, /только изменения релиза/)
+})
+
 test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
   const current = `---\nname: x\n---\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nмоя заметка\n`
   const next = `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`

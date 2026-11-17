@@ -1,9 +1,10 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/toolbox-al.ts')
 
@@ -44,3 +45,39 @@ test('явный мусор вместо уровня отвергается', (
   assert.equal(bad.code, 3)
   assert.match(bad.err, /major\|minor\|patch/)
 })
+
+test('release показывает три варианта ревью', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'S1', '--goal', 'g', '--appetite', '1 день'])
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'merged', merged_at = ? where id = 'F1.S1'").run(
+    new Date().toISOString(),
+  )
+  db.close()
+
+  const shown = run(dir, ['release'])
+
+  assert.match(shown.out, /РЕВЬЮ/)
+  assert.match(shown.out, /--review same/)
+  assert.match(shown.out, /--review fresh/)
+  assert.match(shown.out, /--review none/)
+})
+
+test('release без выбора ревью отвергается', () => {
+  const dir = project()
+  const result = run(dir, ['release', 'minor', '--reason', 'x'])
+
+  assert.equal(result.code, 3)
+  assert.match(result.err, /--review same/)
+})
+
+test('неизвестный вариант ревью отвергается', () => {
+  const dir = project()
+  const result = run(dir, ['release', 'minor', '--reason', 'x', '--review', 'fast'])
+
+  assert.equal(result.code, 3)
+  assert.match(result.err, /same, fresh или none/)
+})
+
