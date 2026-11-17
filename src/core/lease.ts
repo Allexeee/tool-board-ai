@@ -4,8 +4,8 @@ import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor, assertSkill, touchExecutor, clearBusy } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
-import { nextTask } from './hands.ts'
-import { isReady } from './deps.ts'
+import { getHand, nextTask } from './hands.ts'
+import { depsOf, isReady, isSatisfied } from './deps.ts'
 import { scopesOverlap } from './git/scope.ts'
 import { runGit } from './git/git.ts'
 import { existsSync } from 'node:fs'
@@ -70,6 +70,26 @@ export function assertFeatureWorktree(db: DatabaseSync, task: Task): void {
   }
 }
 
+/** Первая задача руки, которую можно взять сейчас: будущие шаги цепочки лежат в руке заранее. */
+export function firstTakeable(db: DatabaseSync, executorId: string): Task | null {
+  for (const task of getHand(db, executorId)) {
+    if (task.status === 'ready' && isReady(db, task.id)) return task
+  }
+  return null
+}
+
+/** Чего ждёт рука: первый шаг цепочки и его первая незакрытая зависимость. */
+export function waitingReason(db: DatabaseSync, hand: Task[]): string {
+  for (const task of hand) {
+    for (const dep of depsOf(db, task.id)) {
+      if (!isSatisfied(db, dep)) return `${task.id} ждёт ${dep}`
+    }
+    if (task.status !== 'ready') return `${task.id} не готова: ${task.status}`
+    return `${task.id} не готова: зависимость этапа или фичи`
+  }
+  return 'в руке нет задач'
+}
+
 export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
   return tx(db, () => {
     const executor = getExecutor(db, options.executor)
@@ -87,7 +107,19 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       )
     }
 
-    const taskId = options.taskId ?? nextTask(db, executor.id)?.id
+    const hand = getHand(db, executor.id)
+    let taskId = options.taskId
+    if (!taskId) {
+      // рука хранит и будущие шаги: берём первый, который уже разрешён,
+      // а если таких нет — объясняем, какого шага ждём.
+      const takeable = firstTakeable(db, executor.id)
+      if (takeable) taskId = takeable.id
+      else if (hand.length > 0) {
+        throw new UserError(1, `нет готовых задач в руке: ${waitingReason(db, hand)}`)
+      } else {
+        taskId = nextTask(db, executor.id)?.id
+      }
+    }
     if (!taskId) throw new UserError(1, `у ${executor.id} нет задач`)
 
     const task = getTask(db, taskId)
