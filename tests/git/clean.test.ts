@@ -181,7 +181,8 @@ test('грязный каталог отменённой фичи спасает
 
 test('каталог, снятый с учёта git, удаляется напрямую', () => {
   const { root, db, config, feature } = cancelledFixture()
-  const plain = mkdtempSync(join(tmpdir(), 'al-plain-'))
+  const plain = join(root, '.worktrees', 'f1-oplata')
+  mkdirSync(plain, { recursive: true })
   writeFileSync(join(plain, 'note.txt'), 'остаток')
   db.prepare('update features set worktree = ? where id = ?').run(plain, feature.id)
 
@@ -191,9 +192,23 @@ test('каталог, снятый с учёта git, удаляется нап�
   assert.equal(existsSync(plain), false)
 })
 
+test('каталог вне .worktrees не удаляется', () => {
+  const { root, db, config, feature } = cancelledFixture()
+  const outside = mkdtempSync(join(tmpdir(), 'al-keep-'))
+  writeFileSync(join(outside, 'важное.txt'), 'не трогать')
+  db.prepare('update features set worktree = ? where id = ?').run(outside, feature.id)
+
+  const result = cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
+
+  assert.equal(result.removed, false)
+  assert.match(result.reason ?? '', /вне \.worktrees/)
+  assert.equal(existsSync(outside), true)
+})
+
 test('занятый каталог остаётся и объясняет, что делать', () => {
   const { root, db, feature } = cancelledFixture()
-  const plain = mkdtempSync(join(tmpdir(), 'al-busy-'))
+  const plain = join(root, '.worktrees', 'busy-test')
+  mkdirSync(plain, { recursive: true })
   writeFileSync(join(plain, 'hold.txt'), 'x')
   db.prepare('update features set worktree = ? where id = ?').run(plain, feature.id)
 
@@ -239,6 +254,21 @@ test('ветка с новым коммитом после слияния не �
   assert.deepEqual(result.deleted, [])
   assert.ok(result.kept.includes(branch))
   assert.equal(branchExists(root, branch), true)
+})
+
+test('игнорируемые файлы спасаются в архивный тег', () => {
+  const { root, db, config, feature, worktree } = cancelledFixture()
+  writeFileSync(join(worktree, '.gitignore'), 'local/\n')
+  mkdirSync(join(worktree, 'local'), { recursive: true })
+  writeFileSync(join(worktree, 'local', 'секрет.env'), 'ключ')
+  runGit(worktree, ['add', '.gitignore'])
+  runGit(worktree, ['commit', '-m', 'ignore'])
+
+  cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
+
+  const tag = runGit(root, ['tag', '--list', 'archive/*']).split('\n')[0]
+  const tree = runGit(root, ['-c', 'core.quotepath=false', 'ls-tree', '-r', '--name-only', tag])
+  assert.match(tree, /local\/секрет\.env/)
 })
 
 
