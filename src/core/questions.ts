@@ -160,6 +160,40 @@ export function answer(
   })
 }
 
+/**
+ * Вопрос живёт ровно столько, сколько живёт его причина: блок снят или задача сделана —
+ * и спрашивать больше не о чем. Иначе «ждёт вас» копит решённое.
+ */
+export function closeQuestionsFor(
+  db: DatabaseSync,
+  input: { subjectType: SubjectType; subjectId: string; actor: string; note: string },
+): number {
+  return tx(db, () => {
+    const rows = db
+      .prepare(
+        "select id from questions where subject_type = ? and subject_id = ? and status = 'pending'",
+      )
+      .all(input.subjectType, input.subjectId) as Array<{ id: string }>
+
+    const at = new Date().toISOString()
+    for (const row of rows) {
+      db.prepare("update questions set status = 'cancelled', answered_by = ?, answered_at = ? where id = ?").run(
+        input.actor,
+        at,
+        row.id,
+      )
+      appendEvent(db, {
+        type: 'question.cancelled',
+        actor: input.actor,
+        subject: row.id,
+        note: input.note,
+      })
+    }
+
+    return rows.length
+  })
+}
+
 export function getQuestion(db: DatabaseSync, id: string): Question | null {
   const row = db.prepare('select * from questions where id = ?').get(id) as Row | undefined
   return row ? toQuestion(row) : null

@@ -2,7 +2,7 @@
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, updateTask, type Task } from './tasks.ts'
-import { ask } from './questions.ts'
+import { ask, closeQuestionsFor } from './questions.ts'
 import { UserError } from '../cli/errors.ts'
 
 export type BlockReason =
@@ -88,6 +88,15 @@ export function unblockTask(
       subject: task.id,
       note: input.note,
     })
+
+    // причина снята — вопросы, заданные ради неё, больше не ждут владельца
+    closeQuestionsFor(db, {
+      subjectType: 'task',
+      subjectId: task.id,
+      actor: input.actor,
+      note: 'задача разблокирована',
+    })
+
     return updated
   })
 }
