@@ -95,6 +95,76 @@ export function assertSkill(executor: Executor, skill: string): void {
   }
 }
 
+export function renameExecutor(
+  db: DatabaseSync,
+  input: { from: string; to: string; actor: string },
+): Executor {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.from)
+    if (!executor) throw new UserError(3, `исполнитель ${input.from} не найден`)
+    if (!input.to.trim()) throw new UserError(3, 'нужно новое имя')
+    if (input.to === input.from) return executor
+    if (getExecutor(db, input.to)) throw new UserError(1, `исполнитель ${input.to} уже есть`)
+
+    db.prepare('update executors set id = ? where id = ?').run(input.to, input.from)
+    db.prepare('update tasks set holder = ? where holder = ?').run(input.to, input.from)
+    db.prepare('update hand set executor_id = ? where executor_id = ?').run(input.to, input.from)
+    appendEvent(db, {
+      type: 'executor.renamed',
+      actor: input.actor,
+      subject: input.to,
+      before: { id: input.from },
+    })
+
+    return getExecutor(db, input.to)!
+  })
+}
+
+export function removeExecutor(
+  db: DatabaseSync,
+  input: { executorId: string; actor: string },
+): void {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    const active = db
+      .prepare("select count(*) as c from tasks where holder = ? and status = 'active'")
+      .get(executor.id) as { c: number }
+    if (active.c > 0) {
+      throw new UserError(1, `у исполнителя ${executor.id} есть активная задача: сначала прервите её`)
+    }
+
+    db.prepare('delete from hand where executor_id = ?').run(executor.id)
+    db.prepare('delete from executors where id = ?').run(executor.id)
+    appendEvent(db, { type: 'executor.removed', actor: input.actor, subject: executor.id })
+  })
+}
+
+export function setSkills(
+  db: DatabaseSync,
+  input: { executorId: string; skills: string[]; actor: string },
+): Executor {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    const skills = [...new Set(input.skills.map((skill) => skill.trim()).filter(Boolean))]
+    if (skills.length === 0) throw new UserError(3, 'нужен хотя бы один навык')
+
+    db.prepare('update executors set skills = ? where id = ?').run(JSON.stringify(skills), executor.id)
+    appendEvent(db, {
+      type: 'executor.skills_changed',
+      actor: input.actor,
+      subject: executor.id,
+      before: { skills: executor.skills },
+      after: { skills },
+    })
+
+    return getExecutor(db, executor.id)!
+  })
+}
+
 export function bindSession(
   db: DatabaseSync,
   input: { executorId: string; session: string; actor: string },
