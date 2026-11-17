@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs, boolFlag } from '../src/cli/args.ts'
 import { setJsonMode } from '../src/cli/output.ts'
 import { UserError } from '../src/cli/errors.ts'
@@ -8,7 +11,7 @@ const HELP = `toolbox-al — ящик инструментов для работ
   init                    создать скелет проекта
   request add|list|open   запросы: добавить, все, незакрытые
   feature list|show|clean фичи: список, карточка, уборка каталога и ветки
-  stage list|show|add|accept|merge этапы: список, карточка, добавление, приёмка, слияние в dev
+  stage list|show|add|activate|accept|reject|merge этапы: список, карточка, добавление, активация, приёмка, слияние в dev
   plan new|show|approve|apply планы: создать, показать, утвердить, применить
   task add|show|list|open задачи: добавить, карточка, список, открытые
   task context <id>       контекст задачи: файлы области, решения, коммиты
@@ -49,13 +52,21 @@ async function main(argv: string[]): Promise<number> {
   return (await module.default(args)) ?? 0
 }
 
+const COMMANDS_DIR = fileURLToPath(new URL('../src/cli/commands/', import.meta.url))
+
 async function loadCommand(command: string) {
+  if (!command) return null
+  const file = join(COMMANDS_DIR, `${command}.ts`)
+  if (!existsSync(file)) return null
+
   try {
-    return await import(`../src/cli/commands/${command}.ts`)
+    return await import(pathToFileURL(file).href)
   } catch (error) {
-    const code = (error as { code?: string }).code
-    if (code === 'ERR_MODULE_NOT_FOUND') return null
-    throw error
+    if ((error as { code?: string }).code !== 'ERR_MODULE_NOT_FOUND') throw error
+    throw new UserError(
+      3,
+      `команда ${command} не загрузилась: её модуль не найден — ${(error as Error).message}`,
+    )
   }
 }
 
