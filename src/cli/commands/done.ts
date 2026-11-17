@@ -1,6 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { doneTask } from '../../core/done.ts'
+import { dispatchHands } from '../../core/hands.ts'
 import { getTask } from '../../core/tasks.ts'
 import { getStage } from '../../core/stages.ts'
 import { getFeature } from '../../core/features.ts'
@@ -137,6 +138,9 @@ export default async function command(args: ParsedArgs) {
       after: { files: outside },
     })
   }
+
+  // закрытая задача освободила руку: добираем свободные руки, чтобы исполнитель не простаивал
+  dispatchHands(db)
 
   ok(closed, `${closed.id}  ${closed.status === 'in_review' ? 'на ревью' : 'закрыта'}`)
   return 0

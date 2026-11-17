@@ -1,7 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, taskQueue, queueFreeReason, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
+import { nowView, ownerView, taskQueue, queueFreeReason, type AssignCounts, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
 import { pendingRelease } from '../../core/git/release.ts'
 import { listTasks } from '../../core/tasks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
@@ -130,6 +130,16 @@ export default async function command(args: ParsedArgs) {
     return `  ${holder.executor.padEnd(12)} ${state.join(' · ')}`
   })
 
+  // раздача: сколько задач пришло раздачей, сколько выдано руками, сколько взято без выдачи.
+  // за прогон — главный срез: он про последнюю работу, за всё время — для сравнения.
+  const assignText = (counts: AssignCounts) =>
+    `dispatch ${counts.dispatch} · руками ${counts.hand} · без выдачи ${counts.take}`
+  const assignLines = [
+    ...(view.assignment.run ? [['за прогон', view.assignment.run] as const] : []),
+    ['за всё время', view.assignment.total] as const,
+  ].map(([label, counts]) => `  ${label.padEnd(11)} ${assignText(counts)}`)
+  const distribution = '\n\nРАЗДАЧА\n' + assignLines.join('\n')
+
   const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
 
   // два счётчика ожидания стоят рядом: сколько просит работы и сколько ждёт решения владельца.
@@ -147,6 +157,7 @@ export default async function command(args: ParsedArgs) {
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
     (holders.length ? holders.join('\n') : '  нет') +
+    distribution +
     unassigned
 
   ok(view, '\n' + indent(text))
