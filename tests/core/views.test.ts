@@ -128,38 +128,30 @@ test('ready-задача пула видна в now отдельной стро�
   assert.ok(nowView(db).pool.some((task) => task.title === 'Поправить опечатку'))
 })
 
-test('owner строит строку на каждый этап фичи', () => {
+test('owner строит одну строку на фичу, а не на этап', () => {
   const db = openDb(':memory:')
   seed(db)
   addStage(db, { featureId: 'F1', name: 'S2', goal: 'g', appetite: '1 день' })
 
   const rows = ownerView(db).stages
-  assert.equal(rows.length, 2)
+  assert.equal(rows.length, 1, 'этапы не размножают строки')
 
-  const [first, second] = rows
-  assert.equal(first.featureId, 'F1')
-  assert.equal(first.featureName, 'A')
-  assert.equal(first.stageId, 'F1.S1')
-  assert.equal(first.seq, 1)
-  assert.equal(first.total, 2)
-  assert.equal(first.name, 'S1')
-  assert.equal(first.status, 'pending')
-  assert.deepEqual(first.progress, { current: 0, total: 3 })
-
-  assert.equal(second.seq, 2)
-  assert.equal(second.name, 'S2')
-  assert.equal(second.status, 'pending')
-  assert.deepEqual(second.progress, { current: 0, total: 0 })
+  const [row] = rows
+  assert.equal(row.featureId, 'F1')
+  assert.equal(row.featureName, 'A')
+  assert.equal(row.name, 'A', 'в строке имя фичи')
+  assert.equal(row.status, 'pending')
+  assert.deepEqual(row.progress, { current: 0, total: 3 }, 'прогресс по задачам всей фичи')
 })
 
-test('owner показывает прогресс как текущую задачу из всех задач этапа', () => {
+test('owner считает прогресс по закрытым задачам фичи', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)
   db.prepare("update tasks set status = 'done' where id = ?").run(`${stageId}-1`)
   db.prepare("update tasks set status = 'done' where id = ?").run(`${stageId}-2`)
 
   const row = ownerView(db).stages[0]
-  assert.deepEqual(row.progress, { current: 3, total: 3 })
+  assert.deepEqual(row.progress, { current: 2, total: 3 })
 })
 
 test('owner различает не начатый, идущий и готовый к слиянию этап', () => {

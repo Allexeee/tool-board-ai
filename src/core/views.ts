@@ -471,50 +471,45 @@ export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): Ow
     if (options.all !== true && (feature.status === 'done' || feature.status === 'cancelled')) continue
 
     const stages = listStages(db, feature.id)
-    const stageRows: OwnerStageRow[] = []
+    const tasks = stages.flatMap((stage) => listTasks(db, { stageId: stage.id }))
+    const total = tasks.length
+    const completed = tasks.filter((task) => task.status === 'done' || task.status === 'cancelled').length
 
-    for (const stage of stages) {
-      const tasks = listTasks(db, { stageId: stage.id })
-      const started = stageStarted(db, stage.id, stage.status)
-      const allDone = tasks.length > 0 && tasks.every((task) => task.status === 'done' || task.status === 'cancelled')
-      const status = ownerStageStatus(stage.status, started, allDone)
-      if (!status) continue
+    // статус фичи — худшее из её этапов: сначала проверяем, всё ли слито, потом всё ли закрыто
+    const stageStates = stages
+      .map((stage) => {
+        const stageTasks = listTasks(db, { stageId: stage.id })
+        const started = stageStarted(db, stage.id, stage.status)
+        const allDone =
+          stageTasks.length > 0 &&
+          stageTasks.every((task) => task.status === 'done' || task.status === 'cancelled')
+        return ownerStageStatus(stage.status, started, allDone)
+      })
+      .filter((status): status is OwnerStageStatus => status !== null)
 
-      stageRows.push({
+    const allMerged = stageStates.length > 0 && stageStates.every((status) => status === 'done')
+    const allClosed = total > 0 && completed === total
+
+    let status: OwnerStageStatus
+    if (feature.status === 'done' || allMerged) status = 'done'
+    else if (allClosed) status = 'merge'
+    else if (stageStates.includes('wip')) status = 'wip'
+    else status = 'pending'
+
+    // пустая фича без этапов остаётся видимой: иначе только что созданная фича исчезает с доски
+    rows.push({
+      rank: feature.rank,
+      row: {
         featureId: feature.id,
         featureName: feature.name,
-        stageId: stage.id,
-        seq: stage.seq,
+        stageId: stages.length > 0 ? stages[stages.length - 1].id : '',
+        seq: stages.length,
         total: stages.length,
-        progress: stageProgress(db, stage.id, started),
+        progress: { current: completed, total },
         status,
-        name: stage.name,
-      })
-    }
-
-    // вся фича сделана: один этап не показываем отдельной строкой — владельцу нужен факт, а не разбивка.
-    if (stageRows.length > 1 && stageRows.every((row) => row.status === 'done')) {
-      const tasks = stages.flatMap((stage) => listTasks(db, { stageId: stage.id }))
-      const total = tasks.length
-      const completed = tasks.filter((task) => task.status === 'done' || task.status === 'cancelled').length
-
-      rows.push({
-        rank: feature.rank,
-        row: {
-          featureId: feature.id,
-          featureName: feature.name,
-          stageId: stages[stages.length - 1].id,
-          seq: stages.length,
-          total: stages.length,
-          progress: { current: total === 0 ? 0 : completed, total },
-          status: 'done',
-          name: feature.name,
-        },
-      })
-      continue
-    }
-
-    for (const row of stageRows) rows.push({ rank: feature.rank, row })
+        name: feature.name,
+      },
+    })
   }
 
   rows.sort(

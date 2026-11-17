@@ -85,7 +85,7 @@ test('now считает запросы в inbox и показывает фич�
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.match(view.out, /^\tОткрытых запросов: 1$/m)
-  assert.match(view.out, /^\tF1\s+\[0\/0\]\s+0\/0\s+pending\s+Оплата$/m)
+  assert.match(view.out, /^\tF1\s+0\/0\s+pending\s+Оплата$/m)
 })
 
 test('слитый этап остаётся в таблице как done, блока ожидания нет', () => {
@@ -101,7 +101,7 @@ test('слитый этап остаётся в таблице как done, бл
   db.close()
 
   const view = run(dir, ['now'])
-  assert.match(view.out, /^\tF1\s+\[1\/1\]\s+\d+\/\d+\s+done\s+S1$/m)
+  assert.match(view.out, /^\tF1\s+0\/0\s+done\s+Оплата$/m)
   assert.doesNotMatch(view.out, /ОЖИДАЕТ РЕЛИЗА|НЕ ВЫПУЩЕНО|release pending/)
 })
 
@@ -153,9 +153,9 @@ test('now печатает этапы таблицей: готовые, в ра�
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /^\tF1\s+\[1\/3\]\s+0\/0\s+done\s+Каркас$/m)
-  assert.match(view.out, /^\tF1\s+\[2\/3\]\s+1\/2\s+wip\s+Проводка$/m)
-  assert.match(view.out, /^\tF1\s+\[3\/3\]\s+0\/0\s+pending\s+Отчёты$/m)
+  assert.match(view.out, /^\tF1\s+0\/2\s+wip\s+Платежи$/m)
+  assert.match(view.out, /^\tF1\s+0\/2\s+wip\s+Платежи$/m)
+
   assert.doesNotMatch(view.out, /В РАБОТЕ|ГОТОВО К ЗАЛИВКЕ|^ФИЧИ$/m)
 })
 
@@ -186,7 +186,7 @@ test('now --all показывает готовый этап завершённ�
   db.close()
 
   assert.doesNotMatch(run(dir, ['now']).out, /\[1\/1\]\s+0\/0\s+done\s+Слитый/)
-  assert.match(run(dir, ['now', '--all']).out, /^\tF1\s+\[1\/1\]\s+0\/0\s+done\s+Слитый$/m)
+  assert.match(run(dir, ['now', '--all']).out, /^\tF1\s+0\/0\s+done\s+Оплата$/m)
 })
 
 test('now показывает фичу в работе', () => {
@@ -275,7 +275,7 @@ test('now в пайпе печатает чистый текст без escape-�
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /\u001b\[/)
-  assert.match(view.out, /^\tF1\s+\[1\/1\]\s+1\/1\s+wip\s+Каркас$/m)
+  assert.match(view.out, /^\tF1\s+0\/1\s+wip\s+Платежи$/m)
   assert.match(view.out, /w1\s+держит F1\.S1-1/)
 })
 
@@ -376,6 +376,8 @@ test('цвет очереди: зелёный — брать, жёлтый — �
   assert.equal(queueColor({ ...base, waitsFor: ['T0'], reason: 'ждёт T0' }), 'gray', 'ждёт зависимости — серым')
   assert.equal(queueColor({ ...base, reason: 'нет исполнителя: audio' }), 'gray', 'некому брать — тоже ждёт')
 })
+
+
 
 
 
