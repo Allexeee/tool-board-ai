@@ -38,7 +38,7 @@ node tools/toolbox-al/bin/toolbox-al.ts init
 
 1. **Закоммитьте скелет.** `init` печатает готовую команду `git add … && git commit …`. Без коммита первая задача пула на `main` упрётся в хук.
 2. **Заведите ветку `dev`,** если её нет: `git branch dev`. Слияние этапов идёт туда.
-3. **Добавьте исполнителя:** `executor add worker --skills backend` (или ваши навыки).
+3. **Добавьте исполнителя:** `executor add worker --skills backend` (или ваши навыки), затем `executor sync` — он создаст файл агента.
 4. **Проверьте настройку:** `doctor` — он скажет, чего не хватает.
 
 Дальше обычный путь: `request add` → `plan new/approve/apply` → `feature start` → задачи.
@@ -62,6 +62,7 @@ node tools/toolbox-al/bin/toolbox-al.ts doctor
 ```bash
 node bin/toolbox-al.ts init            # скелет проекта
 node bin/toolbox-al.ts executor add w1 --skills backend,frontend
+node bin/toolbox-al.ts executor sync
 node bin/toolbox-al.ts request add "Оплата подписки"
 node bin/toolbox-al.ts feature add "Оплата" --request R1
 node bin/toolbox-al.ts stage add F1 "Каркас" --goal "можно заплатить" --appetite "3 дня"
@@ -166,6 +167,23 @@ pool merge T1 T2     # DoD переносится в T2, T1 отменяется
 
 `doctor` предупреждает, если в пуле есть задачи старше недели.
 
+## Агенты исполнителей
+
+Личность исполнителя-агента для OpenCode живёт в файле `.opencode/agents/<id>.md`; бриф её не пересказывает.
+
+`executor sync` собирает файлы всех агентов, `executor sync w1` — одного. В файл попадают описание навыков, модель, права, лимит шагов и короткие правила работы. OpenCode видит файл как субагента с именем `<id>`. Исполнители-люди файла не получают.
+
+```bash
+node bin/toolbox-al.ts executor add w1 --skills backend
+node bin/toolbox-al.ts executor sync
+```
+
+Меняете навыки, модель, права или лимит шагов — снова `executor sync`: файл перезаписывается из базы. `doctor` показывает `missing` (файла нет) и `drift` (файл правили руками) и просит выполнить `executor sync`; ручные правки при этом теряются — источник истины база.
+
+`task brief <id>` — только конверт: id, агент, каталог и ссылки `task show`/`task context`. Навыки и правила в бриф не копируются: их агент читает из своего файла.
+
+`executor remove` и `executor rename` пока не трогают файл агента: старый `.opencode/agents/<id>.md` остаётся на диске, его нужно удалить или переименовать руками (F45.S1-4).
+
 ## Команды
 
 | Команда | Что делает |
@@ -186,7 +204,8 @@ pool merge T1 T2     # DoD переносится в T2, T1 отменяется
 | `similar "запрос"` | похожие прошлые фичи |
 | `task add\|show\|list\|open\|unblock` | задачи; без DoD не создаются |
 | `task context id` | контекст задачи: файлы области, решения, коммиты |
-| `executor add\|list\|bind\|session\|reset` | исполнители, навыки и сессия |
+| `task brief id` | конверт задачи: id, агент, каталог, ссылки на `task show` и `task context` |
+| `executor add\|list\|sync` | исполнители; `sync` пишет файлы агентов в `.opencode/agents` |
 | `hand show\|set\|add` | руки исполнителей |
 | `next --as w1` | что делать дальше |
 | `take [id] --as w1` | взять задачу в работу |
@@ -248,6 +267,7 @@ node bin/toolbox-al.ts scheduler enable --yes
 - `.opencode/plugins/toolbox-al/index.ts` — инструменты `al_now`, `al_inbox`, `al_task`, `al_take`, `al_done`, `al_block`, `al_ask`, `al_answer` поверх CLI;
 - `.opencode/skills/toolbox-al/SKILL.md` — как работать с очередью;
 - `.opencode/skills/toolbox-al-setup/SKILL.md` — первичная настройка проекта;
+- `.opencode/agents/<id>.md` — файлы исполнителей-агентов, их создаёт `executor sync` (см. «Агенты исполнителей»);
 - блок в `AGENTS.md` между маркерами.
 
 Плагин не содержит логики: он вызывает `node bin/toolbox-al.ts … --json`. Если плагина нет, всё работает через CLI.

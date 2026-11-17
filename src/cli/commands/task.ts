@@ -7,6 +7,7 @@ import { getFeature } from '../../core/features.ts'
 import { taskContext } from '../../core/context.ts'
 import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
+import { agentRelativePath } from '../../core/agents.ts'
 import { unblockTask } from '../../core/block.ts'
 import { createTask, editTask, getTask, listTasks, openTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
@@ -135,26 +136,22 @@ export default async function command(args: ParsedArgs) {
     const feature = stage ? getFeature(db, stage.featureId) : null
     const root = feature?.worktree ?? project.root
 
-    const executor = stringFlag(args, 'as') ?? task.holder
-    const role = `исполнитель${executor ? ' ' + executor : ''}`
-    const specialty = task.skill ? ` · навык ${task.skill}` : ''
-    const scope = task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')
+    // Бриф — конверт задачи. Личность исполнителя живёт в .opencode/agents/<id>.md,
+    // поэтому навыки и правила здесь не пересказываются.
+    const agent = stringFlag(args, 'as') ?? task.holder
+    const executor = agent ? getExecutor(db, agent) : null
+    const agentFile = agent && executor?.kind === 'agent' ? agentRelativePath(agent) : null
 
     const lines = [
       `id: ${task.id}`,
-      `роль: ${role}${specialty}`,
+      `агент: ${agent ?? 'не назначен'}`,
+      ...(agentFile ? [`файл агента: ${agentFile}`] : []),
       `каталог: ${root}`,
-      'ограничения:',
-      '  · работать только в своём каталоге',
-      `  · только файлы области: ${scope || 'вся задача'}`,
-      '  · не запускать git и не коммитить: коммит делает done',
-      '  · не выходить за область, не звать других агентов',
-      '  · застрял — block с причиной',
       `дальше: node bin/toolbox-al.ts task show ${task.id}`,
       `        node bin/toolbox-al.ts task context ${task.id}`,
     ]
 
-    ok({ id: task.id, role, root }, lines.join('\n'))
+    ok({ id: task.id, agent, root, agentFile }, lines.join('\n'))
     return 0
   }
 
