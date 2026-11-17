@@ -57,6 +57,7 @@ export interface DeferredTask {
  * Отчёт релиза показывает их, пока владелец не примет решение, — иначе пропуск был бы тихим.
  */
 export function deferredInRelease(db: DatabaseSync): DeferredTask[] {
+  const pending = new Set(pendingRelease(db).map((stage) => stage.stageId))
   return db
     .prepare(
       `select t.id as id, t.title as title, t.reason as reason, t.stage_id as stageId, s.feature_id as featureId
@@ -64,7 +65,38 @@ export function deferredInRelease(db: DatabaseSync): DeferredTask[] {
        where t.status = 'deferred' and s.status = 'merged'
        order by s.feature_id, t.created_at, t.id`,
     )
-    .all() as unknown as DeferredTask[]
+    .all()
+    .filter((row) => pending.has((row as { stageId: string }).stageId)) as unknown as DeferredTask[]
+}
+
+/** Отложенное из уже выпущенных этапов: долг остался, но к будущему релизу не относится. */
+export function deferredInReleased(db: DatabaseSync): Array<DeferredTask & { version: string | null }> {
+  const pending = new Set(pendingRelease(db).map((stage) => stage.stageId))
+  const versions = new Map<string, string>()
+  for (const row of db.prepare("select after from events where type = 'release.created'").all() as Array<{
+    after: string | null
+  }>) {
+    if (!row.after) continue
+    try {
+      const parsed = JSON.parse(row.after) as { version?: string; stages?: string[] }
+      for (const id of parsed.stages ?? []) if (parsed.version) versions.set(id, parsed.version)
+    } catch {
+      // битое событие не должно прятать долг
+    }
+  }
+
+  return (
+    db
+      .prepare(
+        `select t.id as id, t.title as title, t.reason as reason, t.stage_id as stageId, s.feature_id as featureId
+         from tasks t join stages s on s.id = t.stage_id
+         where t.status = 'deferred' and s.status = 'merged'
+         order by s.feature_id, t.created_at, t.id`,
+      )
+      .all() as unknown as DeferredTask[]
+  )
+    .filter((task) => !pending.has(task.stageId))
+    .map((task) => ({ ...task, version: versions.get(task.stageId) ?? null }))
 }
 
 export interface LevelSuggestion {

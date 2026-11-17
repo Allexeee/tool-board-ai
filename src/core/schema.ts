@@ -1,6 +1,6 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 10
+export const SCHEMA_VERSION = 11
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -249,6 +249,11 @@ export function migrate(db: DatabaseSync): number {
       )
       db.exec('create index if not exists idx_runs_started on runs(started_at)')
     }
+    if (from < 11) {
+      // старый дефолт 20 шагов душил агента на середине: поднимаем тем, у кого он остался.
+      // явные значения (кроме совпавших с дефолтом) не трогаем — отличить нельзя, поэтому только 20.
+      db.prepare('update executors set steps = 60 where steps = 20').run()
+    }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +
       'on conflict(key) do update set value = excluded.value',
@@ -261,3 +266,4 @@ export function migrate(db: DatabaseSync): number {
 
   return SCHEMA_VERSION
 }
+

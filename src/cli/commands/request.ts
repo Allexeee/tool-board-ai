@@ -20,7 +20,8 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'add') {
     const title = args.positionals[0] ?? stringFlag(args, 'title')
     if (!title) throw new UserError(3, 'не указан заголовок запроса')
-    const body = textFileFlag(args, 'body') ?? stringFlag(args, 'body') ?? args.positionals.slice(1).join(' ')
+    const positionalBody = args.positionals.slice(1).join(' ')
+    const body = textFileFlag(args, 'body', { positional: positionalBody }) ?? stringFlag(args, 'body') ?? positionalBody
     const request = addRequest(db, { title, body, author: actor })
     ok(request, `${request.id}  ${request.title}`)
     return 0

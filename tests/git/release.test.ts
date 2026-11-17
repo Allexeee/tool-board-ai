@@ -20,6 +20,7 @@ import { mergeStage } from '../../src/core/git/merge.ts'
 import {
   assertReleasePreflight,
   deferredInRelease,
+  deferredInReleased,
   pendingRelease,
   release,
   suggestLevel,
@@ -276,11 +277,15 @@ test('отложенная задача не входит в релиз, но о
   assert.doesNotMatch(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), /Доделать отчёт/)
 
   assert.equal(getTask(db, debt.id)!.status, 'deferred', 'задача осталась отложенной')
+  assert.deepEqual(deferredInRelease(db), [], 'выпущенный этап не висит под будущим релизом')
+
+  const debtAfter = deferredInReleased(db)
   assert.deepEqual(
-    deferredInRelease(db).map((task) => task.id),
+    debtAfter.map((task) => task.id),
     [debt.id],
-    'долг не пропадает из отчёта и после релиза',
+    'долг не пропадает: он виден отдельно, с версией',
   )
+  assert.equal(debtAfter[0].version, '0.2.0')
 })
 
 test('выбор ревью попадает в changelog и событие', () => {
@@ -422,3 +427,4 @@ test('запись релиза в базу откатывается целик�
   const events = db.prepare("select count(*) as n from events where type = 'release.created'").get() as { n: number }
   assert.equal(events.n, 0)
 })
+

@@ -74,7 +74,7 @@ test('миграция 7 → 10 добавляет модель, права, ш�
   assert.equal(executor!.lastSeen, '2026-01-01T00:00:00.000Z')
   assert.equal(executor!.model, null)
   assert.deepEqual(executor!.permissions, [])
-  assert.equal(executor!.steps, 20)
+  assert.equal(executor!.steps, 60, 'старый дефолт 20 поднят миграцией')
 
   // схема 9 вернула сессию задачи и сторожевой триггер
   const column = db.prepare("select 1 as found from pragma_table_info('tasks') where name = 'session'").get()

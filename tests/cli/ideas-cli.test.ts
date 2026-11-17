@@ -50,6 +50,20 @@ test('idea remove удаляет свободную и отказывает пр
   assert.match(denied.err, /запрос/)
 })
 
+test('text-file не вытесняет текст молча и не принимается чужими командами', () => {
+  const dir = project()
+  writeFileSync(join(dir, 'idea.txt'), 'из файла', 'utf8')
+
+  const displaced = run(dir, ['idea', 'add', 'из аргумента', '--text-file', 'idea.txt'])
+  assert.equal(displaced.code, 0, displaced.err)
+  assert.match(displaced.err, /позиционный текст проигнорирован/)
+  assert.match(displaced.out, /из файла/)
+
+  const foreign = run(dir, ['task', 'add', 'Задача', '--text-file', 'idea.txt'])
+  assert.notEqual(foreign.code, 0)
+  assert.match(foreign.err, /не принимается командой task/)
+})
+
 test('idea add и edit читают текст из файла в UTF-8', () => {
   const dir = project()
   writeFileSync(join(dir, 'idea.txt'), 'Длинная идея\nв две строки', 'utf8')
