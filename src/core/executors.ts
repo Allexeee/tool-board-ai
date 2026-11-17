@@ -232,7 +232,7 @@ export function renameExecutor(
 export function removeExecutor(
   db: DatabaseSync,
   input: { executorId: string; actor: string },
-): void {
+): Executor {
   return tx(db, () => {
     const executor = getExecutor(db, input.executorId)
     if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
@@ -247,6 +247,8 @@ export function removeExecutor(
     db.prepare('delete from hand where executor_id = ?').run(executor.id)
     db.prepare('delete from executors where id = ?').run(executor.id)
     appendEvent(db, { type: 'executor.removed', actor: input.actor, subject: executor.id })
+
+    return executor
   })
 }
 

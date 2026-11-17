@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
 import type { Executor } from './executors.ts'
@@ -22,6 +22,36 @@ export interface AgentSync {
   id: string
   path: string
   status: AgentSyncStatus
+}
+
+/**
+ * Итог удаления файла: `removed` — файл убран, `absent` — файла и не было,
+ * `failed` — файл остался из-за ошибки файловой системы.
+ */
+export type AgentRemovalStatus = 'removed' | 'absent' | 'failed'
+
+export interface AgentRemoval {
+  id: string
+  /** Путь убранного файла от корня проекта; у `absent` пустой. */
+  path: string
+  status: AgentRemovalStatus
+  /** Почему файл остался; заполнено только у `failed`. */
+  warning?: string
+}
+
+/**
+ * Итог переноса файла: `moved` — новый файл создан (старый убран, если удалось),
+ * `absent` — переносить было нечего, `failed` — новый файл создать не удалось.
+ */
+export type AgentMoveStatus = 'moved' | 'absent' | 'failed'
+
+export interface AgentMove {
+  from: string
+  to: string
+  /** Путь нового файла от корня проекта; у `absent` пустой. */
+  path: string
+  /** Почему перенос неполон или не удался; у остатка старого файла тоже заполнено. */
+  warning?: string
 }
 
 /** id становится именем файла, поэтому в нём только латиница, цифры, точка, дефис, подчёркивание. */
@@ -114,6 +144,75 @@ export function syncAgents(root: string, executors: Executor[]): AgentSync[] {
     .map((executor) => syncAgent(root, executor))
 }
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Убирает файл агента. Ошибка файловой системы не бросается: база к этому моменту
+ * уже изменена, и откатывать её из-за файла нельзя — вызывающий сообщает предупреждение.
+ */
+export function removeAgent(root: string, id: string): AgentRemoval {
+  if (!isAgentId(id)) return { id, path: '', status: 'absent' }
+
+  const relative = agentRelativePath(id)
+  const path = join(root, AGENTS_DIR, `${id}.md`)
+  if (!existsSync(path)) return { id, path: '', status: 'absent' }
+
+  try {
+    rmSync(path)
+  } catch (error) {
+    return {
+      id,
+      path: relative,
+      status: 'failed',
+      warning: `файл ${relative} остался, удалите его вручную: ${errorText(error)}`,
+    }
+  }
+
+  return { id, path: relative, status: 'removed' }
+}
+
+/**
+ * Переносит файл агента на новое имя. Текст берётся из базы, поэтому в нём уже новое
+ * имя; новый файл пишется раньше, чем убирается старый, — сбой удаления оставляет
+ * старый файл с предупреждением, но перенос считается состоявшимся.
+ */
+export function moveAgent(root: string, from: string, executor: Executor): AgentMove {
+  // Имена совпадают или файла агента быть не должно — переносить нечего.
+  if (
+    from === executor.id ||
+    executor.kind !== 'agent' ||
+    !isAgentId(from) ||
+    !isAgentId(executor.id)
+  ) {
+    return { from, to: executor.id, path: '', status: 'absent' }
+  }
+
+  const source = join(root, AGENTS_DIR, `${from}.md`)
+  if (!existsSync(source)) return { from, to: executor.id, path: '', status: 'absent' }
+
+  const target = agentRelativePath(executor.id)
+  try {
+    syncAgent(root, executor)
+  } catch (error) {
+    return {
+      from,
+      to: executor.id,
+      path: target,
+      status: 'failed',
+      warning: `новый файл ${target} не создан, поможет executor sync: ${errorText(error)}`,
+    }
+  }
+
+  const removal = removeAgent(root, from)
+  if (removal.status === 'failed') {
+    return { from, to: executor.id, path: target, status: 'moved', warning: removal.warning }
+  }
+
+  return { from, to: executor.id, path: target, status: 'moved' }
+}
+
 /**
  * Расхождения файлов агентов с базой. Отсутствие каталога — это `missing`
  * у каждого, а не падение: doctor должен уметь сказать «выполните executor sync».
@@ -149,4 +248,18 @@ export function formatAgentProblem(problem: AgentProblem): string {
   if (problem.status === 'missing') return `${problem.id} (нет файла)`
   if (problem.status === 'drift') return `${problem.id} (правлен руками)`
   return `${problem.id} (недопустимый id)`
+}
+
+/** Строка для вывода `executor remove`: что стало с файлом агента. */
+export function formatAgentRemoval(removal: AgentRemoval): string {
+  if (removal.status === 'removed') return `файл агента удалён: ${removal.path}`
+  if (removal.status === 'failed') return `файл агента не удалён: ${removal.path}`
+  return 'файла агента не было'
+}
+
+/** Строка для вывода `executor rename`: что стало с файлом агента. */
+export function formatAgentMove(move: AgentMove): string {
+  if (move.status === 'failed') return `файл агента не создан: ${move.path}`
+  if (move.status === 'absent') return 'файла агента не было'
+  return `файл агента: ${agentRelativePath(move.from)} → ${move.path}`
 }

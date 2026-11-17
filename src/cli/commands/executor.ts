@@ -1,6 +1,14 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { syncAgent, syncAgents, type AgentSyncStatus } from '../../core/agents.ts'
+import {
+  formatAgentMove,
+  formatAgentRemoval,
+  moveAgent,
+  removeAgent,
+  syncAgent,
+  syncAgents,
+  type AgentSyncStatus,
+} from '../../core/agents.ts'
 import {
   addExecutor,
   bindSession,
@@ -53,7 +61,15 @@ export default async function command(args: ParsedArgs) {
     if (!from || !to) throw new UserError(3, 'использование: executor rename old new')
 
     const executor = renameExecutor(db, { from, to, actor: 'orchestrator' })
-    ok(executor, `${from} → ${executor.id}`)
+    if (from === executor.id) {
+      ok(executor, `${from} → ${executor.id}: имя не изменилось`)
+      return 0
+    }
+
+    // Файл агента переносится после базы: сбой с файлом не отменяет переименование.
+    const moved = executor.kind === 'agent' ? moveAgent(project.root, from, executor) : null
+    ok(executor, moved ? `${from} → ${executor.id}\n${formatAgentMove(moved)}` : `${from} → ${executor.id}`)
+    if (moved?.warning) warn(moved.warning)
     return 0
   }
 
@@ -61,8 +77,11 @@ export default async function command(args: ParsedArgs) {
     const id = args.positionals[0]
     if (!id) throw new UserError(3, 'использование: executor remove w1')
 
-    removeExecutor(db, { executorId: id, actor: 'owner' })
-    ok({ id }, `${id} удалён`)
+    const executor = removeExecutor(db, { executorId: id, actor: 'owner' })
+    // Файл убирается после базы: база уже изменена, поэтому ошибка файла — предупреждение.
+    const removed = executor.kind === 'agent' ? removeAgent(project.root, executor.id) : null
+    ok({ id }, removed ? `${id} удалён\n${formatAgentRemoval(removed)}` : `${id} удалён`)
+    if (removed?.warning) warn(removed.warning)
     return 0
   }
 
@@ -219,6 +238,11 @@ function syncStatusText(status: AgentSyncStatus): string {
   if (status === 'created') return 'создан'
   if (status === 'updated') return 'обновлён'
   return 'без изменений'
+}
+
+/** Файл не удался или перенёсся не полностью: база уже изменена, поэтому это не ошибка команды. */
+function warn(text: string): void {
+  process.stderr.write(`внимание: ${text}\n`)
 }
 
 
