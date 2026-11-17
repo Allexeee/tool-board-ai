@@ -74,6 +74,15 @@ test('take без id берёт первый готовый шаг, а посл�
   assert.match(second.out, /T2\s+Второй шаг/)
 })
 
+test('next обходит будущий шаг цепочки и показывает готовый', () => {
+  const dir = repo()
+
+  const next = run(dir, ['next', '--as', 'w1'])
+  assert.equal(next.code, 0, next.err)
+  assert.match(next.out, /T1\s+XS\s+Первый шаг/)
+  assert.doesNotMatch(next.out, /T2/)
+})
+
 test('take без id объясняет, какого шага ждёт рука', () => {
   const dir = repo()
 

@@ -59,10 +59,14 @@ test('done отказывается закрывать задачу с прав�
   assert.equal(misses.length, 0, 'отказ не должен записывать промах')
 })
 
-test('с --force-outside чужой файл попадает в коммит', () => {
+test('с --force-outside изменённый отслеживаемый файл попадает в коммит', () => {
   const dir = repo()
   mkdirSync(join(dir, 'src'), { recursive: true })
   mkdirSync(join(dir, 'docs'), { recursive: true })
+  writeFileSync(join(dir, 'docs/b.md'), 'старое')
+  execFileSync('git', ['add', 'docs/b.md'], { cwd: dir })
+  execFileSync('git', ['commit', '-m', 'docs'], { cwd: dir, env: { ...process.env, AL_ALLOW: '1' } })
+
   writeFileSync(join(dir, 'src/a.ts'), 'a')
   writeFileSync(join(dir, 'docs/b.md'), 'b')
 
@@ -74,10 +78,27 @@ test('с --force-outside чужой файл попадает в коммит', 
     encoding: 'utf8',
   })
   assert.match(committed, /src\/a\.ts/)
-  assert.match(committed, /docs\/b\.md/, 'файл вне области не должен теряться')
+  assert.match(committed, /docs\/b\.md/, 'правка отслеживаемого файла не должна теряться')
+})
+
+test('с --force-outside неотслеживаемый файл не попадает в коммит', () => {
+  const dir = repo()
+  mkdirSync(join(dir, 'src'), { recursive: true })
+  writeFileSync(join(dir, 'src/a.ts'), 'a')
+  writeFileSync(join(dir, '.env'), 'SECRET=1')
+
+  const out = run(dir, ['done', 'T1', '--as', 'w1', '--summary', 'готово', '--force-outside'])
+  assert.match(out, /закрыт/)
+
+  const committed = execFileSync('git', ['show', '--name-only', '--pretty=format:', 'HEAD'], {
+    cwd: dir,
+    encoding: 'utf8',
+  })
+  assert.match(committed, /src\/a\.ts/)
+  assert.doesNotMatch(committed, /\.env/, 'секрет не должен уехать в историю')
 
   const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' })
-  assert.equal(status.trim(), '')
+  assert.match(status, /\.env/, 'неотслеживаемый файл остался в дереве')
 })
 
 test('с --force-outside промах области пишется в журнал', () => {

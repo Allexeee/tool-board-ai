@@ -1,7 +1,9 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nextTask } from '../../core/hands.ts'
+import { getTask } from '../../core/tasks.ts'
+import { getHand, nextTask } from '../../core/hands.ts'
+import { waitingReason } from '../../core/lease.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -17,7 +19,9 @@ export default async function command(args: ParsedArgs) {
 
   const task = nextTask(db, executor)
   if (!task) {
-    process.stderr.write('делать нечего\n')
+    // рука может быть полна будущими шагами: это не «делать нечего», а ожидание цепочки
+    const hand = getHand(db, executor)
+    process.stderr.write(hand.length > 0 ? `${waitingReason(db, hand)}\n` : 'делать нечего\n')
     return 1
   }
 

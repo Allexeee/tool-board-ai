@@ -55,13 +55,26 @@ export function filesOutsideScope(worktree: string, task: Task): string[] {
   return changedFiles(worktree).filter((path) => !scopesOverlap(task.scope, [path]))
 }
 
+/** Только отслеживаемые git пути: мусор и секреты из дерева в коммит не тащим. */
+function trackedFiles(worktree: string): Set<string> {
+  return new Set(
+    runGit(worktree, ['ls-files', '-z'])
+      .split('\0')
+      .map((line) => line.trim())
+      .filter(Boolean),
+  )
+}
+
 function stage(
   worktree: string,
   task: Task,
   limitTo?: string[],
   extra: string[] = [],
 ): { specs: string[]; staged: string } {
-  const specs = [...pathspecs(task, limitTo), ...extra].filter(
+  const tracked = extra.length > 0 ? trackedFiles(worktree) : null
+  const allowed = extra.filter((path) => (tracked ? tracked.has(path) : true))
+
+  const specs = [...pathspecs(task, limitTo), ...allowed].filter(
     (spec) => runGit(worktree, ['status', '--porcelain', '--', spec]).length > 0,
   )
   if (specs.length === 0) return { specs, staged: '' }
