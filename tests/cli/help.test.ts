@@ -31,6 +31,14 @@ test('help упоминает map и task context', () => {
   assert.match(out, /task context/)
 })
 
+test('help объясняет, что роль живёт в .opencode/agents и обновляется sync', () => {
+  const { out } = run(['help'])
+
+  assert.match(out, /^\s+task brief\b/m)
+  assert.match(out, /executor sync/)
+  assert.match(out, /\.opencode\/agents/)
+})
+
 test('help показывает пример вызова dispatch', () => {
   const { out } = run(['--help'])
   assert.match(out, /пример: toolbox-al dispatch/)

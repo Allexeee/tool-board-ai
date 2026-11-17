@@ -1,7 +1,30 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addExecutor, bindSession, getExecutor, listExecutors, removeExecutor, renameExecutor, resetSession, setSkills } from '../../core/executors.ts'
-import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
+import {
+  formatAgentMove,
+  formatAgentRemoval,
+  moveAgent,
+  removeAgent,
+  syncAgent,
+  syncAgents,
+  type AgentSyncStatus,
+} from '../../core/agents.ts'
+import {
+  addExecutor,
+  bindSession,
+  formatPermission,
+  getExecutor,
+  listExecutors,
+  parsePermissions,
+  removeExecutor,
+  renameExecutor,
+  resetSession,
+  setModel,
+  setPermissions,
+  setSkills,
+  setSteps,
+} from '../../core/executors.ts'
+import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -19,10 +42,14 @@ export default async function command(args: ParsedArgs) {
       .map((value) => value.trim())
       .filter(Boolean)
 
+    const steps = stringFlag(args, 'steps')
     const executor = addExecutor(db, {
       id,
       kind: (stringFlag(args, 'kind') as 'human' | 'agent') ?? 'agent',
       skills,
+      model: stringFlag(args, 'model') ?? null,
+      permissions: parsePermissions({ allow: listFlag(args, 'allow'), deny: listFlag(args, 'deny') }),
+      steps: steps === undefined ? undefined : Number(steps),
     })
     ok(executor, `${executor.id} добавлен: ${executor.skills.join(', ') || 'без навыков'}`)
     return 0
@@ -34,7 +61,15 @@ export default async function command(args: ParsedArgs) {
     if (!from || !to) throw new UserError(3, 'использование: executor rename old new')
 
     const executor = renameExecutor(db, { from, to, actor: 'orchestrator' })
-    ok(executor, `${from} → ${executor.id}`)
+    if (from === executor.id) {
+      ok(executor, `${from} → ${executor.id}: имя не изменилось`)
+      return 0
+    }
+
+    // Файл агента переносится после базы: сбой с файлом не отменяет переименование.
+    const moved = executor.kind === 'agent' ? moveAgent(project.root, from, executor) : null
+    ok(executor, moved ? `${from} → ${executor.id}\n${formatAgentMove(moved)}` : `${from} → ${executor.id}`)
+    if (moved?.warning) warn(moved.warning)
     return 0
   }
 
@@ -42,8 +77,11 @@ export default async function command(args: ParsedArgs) {
     const id = args.positionals[0]
     if (!id) throw new UserError(3, 'использование: executor remove w1')
 
-    removeExecutor(db, { executorId: id, actor: 'owner' })
-    ok({ id }, `${id} удалён`)
+    const executor = removeExecutor(db, { executorId: id, actor: 'owner' })
+    // Файл убирается после базы: база уже изменена, поэтому ошибка файла — предупреждение.
+    const removed = executor.kind === 'agent' ? removeAgent(project.root, executor.id) : null
+    ok({ id }, removed ? `${id} удалён\n${formatAgentRemoval(removed)}` : `${id} удалён`)
+    if (removed?.warning) warn(removed.warning)
     return 0
   }
 
@@ -57,6 +95,93 @@ export default async function command(args: ParsedArgs) {
       actor: 'owner',
     })
     ok(executor, `${executor.id}: ${executor.skills.join(', ')}`)
+    return 0
+  }
+
+  if (args.sub === 'model') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor model w1 --model provider/model (или --model inherit)')
+
+    const raw = stringFlag(args, 'model')
+    if (raw === undefined) {
+      throw new UserError(3, 'использование: executor model w1 --model provider/model, --model inherit — наследовать модель родителя')
+    }
+
+    const executor = setModel(db, { executorId: id, model: raw, actor: 'owner' })
+    ok(
+      executor,
+      executor.model ? `${executor.id}: модель ${executor.model}` : `${executor.id}: модель наследуется от родителя`,
+    )
+    return 0
+  }
+
+  if (args.sub === 'permissions') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor permissions w1 --allow "shell:git *" --deny "edit:*"')
+
+    if (boolFlag(args, 'clear')) {
+      const executor = setPermissions(db, { executorId: id, permissions: [], actor: 'owner' })
+      ok(executor, `${executor.id}: особых прав нет`)
+      return 0
+    }
+
+    const permissions = parsePermissions({ allow: listFlag(args, 'allow'), deny: listFlag(args, 'deny') })
+    if (permissions.length === 0) {
+      throw new UserError(
+        3,
+        'нужно хотя бы одно правило: --allow action:resource, --deny action:resource или --clear',
+      )
+    }
+
+    const executor = setPermissions(db, { executorId: id, permissions, actor: 'owner' })
+    ok(executor, `${executor.id}: ${permissions.map(formatPermission).join(', ')}`)
+    return 0
+  }
+
+  if (args.sub === 'steps') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor steps w1 --steps 12')
+
+    const raw = stringFlag(args, 'steps')
+    if (raw === undefined) throw new UserError(3, 'использование: executor steps w1 --steps 12')
+
+    const executor = setSteps(db, { executorId: id, steps: raw, actor: 'owner' })
+    ok(executor, `${executor.id}: лимит шагов ${executor.steps}`)
+    return 0
+  }
+
+  if (args.sub === 'sync') {
+    const id = args.positionals[0]
+
+    if (id) {
+      const executor = getExecutor(db, id)
+      if (!executor) throw new UserError(3, `исполнитель ${id} не найден`)
+      if (executor.kind === 'human') {
+        ok({ id: executor.id, path: null, status: 'skipped' }, `${executor.id}: человек — файл агента не нужен`)
+        return 0
+      }
+
+      const result = syncAgent(project.root, executor)
+      ok(result, `${result.id}: ${syncStatusText(result.status)} ${result.path}`)
+      return 0
+    }
+
+    const agents = listExecutors(db).filter((executor) => executor.kind === 'agent')
+    if (agents.length === 0) {
+      ok([], 'исполнителей-агентов нет: добавьте executor add w1 --skills backend')
+      return 0
+    }
+
+    const results = syncAgents(project.root, agents)
+    const created = results.filter((result) => result.status === 'created').length
+    const updated = results.filter((result) => result.status === 'updated').length
+    const unchanged = results.filter((result) => result.status === 'unchanged').length
+
+    ok(
+      results,
+      results.map((result) => `${result.id.padEnd(12)} ${syncStatusText(result.status).padEnd(13)} ${result.path}`).join('\n') +
+        `\n\nсоздано: ${created}, обновлено: ${updated}, без изменений: ${unchanged}`,
+    )
     return 0
   }
 
@@ -95,9 +220,29 @@ export default async function command(args: ParsedArgs) {
     rows,
     rows.length === 0
       ? 'исполнителей нет'
-      : rows.map((e) => `${e.id.padEnd(12)} ${e.kind.padEnd(6)} ${e.skills.join(', ')}`).join('\n'),
+      : rows
+          .map((e) => {
+            const model = e.model ?? 'наследует'
+            const permissions = e.permissions.map(formatPermission).join(', ') || 'без особых прав'
+            return (
+              `${e.id.padEnd(12)} ${e.kind.padEnd(6)} ${e.skills.join(', ')}` +
+              `\n${' '.repeat(19)}модель: ${model} · шагов: ${e.steps} · права: ${permissions}`
+            )
+          })
+          .join('\n'),
   )
   return 0
+}
+
+function syncStatusText(status: AgentSyncStatus): string {
+  if (status === 'created') return 'создан'
+  if (status === 'updated') return 'обновлён'
+  return 'без изменений'
+}
+
+/** Файл не удался или перенёсся не полностью: база уже изменена, поэтому это не ошибка команды. */
+function warn(text: string): void {
+  process.stderr.write(`внимание: ${text}\n`)
 }
 
 

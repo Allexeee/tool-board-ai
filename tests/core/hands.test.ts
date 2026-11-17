@@ -84,6 +84,34 @@ test('зарезервированную задачу не берёт друго
   )
 })
 
+test('take без id берёт одну задачу и не запасает руку', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  const task = takeTask(db, { executor: 'w1' })
+
+  assert.equal(task.id, `${stageId}-1`)
+  assert.deepEqual(getHand(db, 'w1'), [])
+  const ready = db
+    .prepare("select count(*) as c from tasks where stage_id = ? and status = 'ready'")
+    .get(stageId) as { c: number }
+  assert.equal(ready.c, 2, 'остальные задачи остаются свободными')
+})
+
+test('take без id уважает порядок своей руки', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  setHand(db, 'w1', [`${stageId}-3`, `${stageId}-2`], 'owner')
+
+  const task = takeTask(db, { executor: 'w1' })
+
+  assert.equal(task.id, `${stageId}-3`)
+  assert.deepEqual(
+    getHand(db, 'w1').map((item) => item.id),
+    [`${stageId}-2`],
+  )
+})
+
 test('исполнитель offline теряет руку', () => {
   const db = openDb(':memory:')
   seed(db)

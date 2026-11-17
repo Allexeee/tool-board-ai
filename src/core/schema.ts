@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -209,6 +209,12 @@ export function migrate(db: DatabaseSync): number {
     }
     if (from < 7) {
       db.exec('alter table plans add column stale_at text')
+    }
+    if (from < 8) {
+      // модель, права и лимит шагов превращают исполнителя в агента OpenCode
+      db.exec('alter table executors add column model text')
+      db.exec("alter table executors add column permissions text not null default '[]'")
+      db.exec('alter table executors add column steps integer not null default 20')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +

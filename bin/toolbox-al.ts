@@ -15,8 +15,9 @@ const HELP = `toolbox-al — ящик инструментов для работ
   plan new|show|approve|apply планы: создать, показать, утвердить, применить
   task add|show|list|open задачи: добавить, карточка, список, открытые
   task context <id>       контекст задачи: файлы области, решения, коммиты
+  task brief <id>         конверт задачи: id, агент, каталог
   pool list|stale|merge   пул задач без фич
-  executor add|list       исполнители
+  executor add|list|sync  исполнители; sync пишет .opencode/agents/<id>.md
   hand show|set|add       руки исполнителей
   take / next             взять задачу
   touch                   продлить аренду
@@ -32,6 +33,8 @@ const HELP = `toolbox-al — ящик инструментов для работ
   dispatch                кому что достаётся
                           пример: toolbox-al dispatch --json
   doctor                  проверка настройки
+
+  роль исполнителя живёт в .opencode/agents/<id>.md; обновляет её executor sync
 
   --json                  машинный вывод
 

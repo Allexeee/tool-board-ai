@@ -1,5 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { listExecutors } from './executors.ts'
+import { agentProblems, formatAgentProblem } from './agents.ts'
 import { listTasks } from './tasks.ts'
 import { listFeatures } from './features.ts'
 import { existsSync } from 'node:fs'
@@ -110,6 +111,21 @@ export function doctorReport(
       detail: openCodeFilesPresent(options.root).plugin
         ? 'на месте'
         : 'нет .opencode/plugins/toolbox-al — выполните init',
+    })
+
+    const agentCount = executors.filter((executor) => executor.kind === 'agent').length
+    const agentDrift = agentCount > 0 ? agentProblems(options.root, executors) : []
+    checks.push({
+      name: 'агенты OpenCode',
+      ok: agentDrift.length === 0,
+      detail:
+        agentCount === 0
+          ? 'исполнителей-агентов нет'
+          : agentDrift.length === 0
+            ? `файлы сходятся с базой: ${agentCount}`
+            : 'расходятся с базой: ' +
+              agentDrift.map(formatAgentProblem).join(', ') +
+              ' — выполните executor sync',
     })
 
     const pendingFiles = [

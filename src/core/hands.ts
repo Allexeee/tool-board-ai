@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { getExecutor } from './executors.ts'
+import { getExecutor, type Executor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 
 const CLASS_ORDER: Record<string, number> = {
@@ -76,39 +76,7 @@ export function fillHand(db: DatabaseSync, executorId: string, limit?: number): 
     const free = size - getHand(db, executorId).length
     if (free <= 0) return getHand(db, executorId)
 
-    const affinity = currentStage(db, executorId)
-    const pool = candidates(db)
-      .filter((candidate) => executor.skills.includes(candidate.skill))
-      .map((candidate) => ({ candidate, task: getTask(db, candidate.id)! }))
-
-    pool.sort((a, b) => {
-      if (affinity.featureId !== null) {
-        const aSame = a.candidate.featureId === affinity.featureId ? 0 : 1
-        const bSame = b.candidate.featureId === affinity.featureId ? 0 : 1
-        if (aSame !== bSame) return aSame - bSame
-      }
-      const byRank = a.candidate.featureRank - b.candidate.featureRank
-      if (byRank !== 0) return byRank
-      const byStage = a.candidate.stageSeq - b.candidate.stageSeq
-      if (byStage !== 0) return byStage
-      return compareTasks(a.task, b.task)
-    })
-
-    const ordered = pool.map((item) => item.task)
-
-    const poolTasks = (
-      db
-        .prepare(
-          "select id from tasks where stage_id is null and status = 'ready' and holder is null " +
-            'and id not in (select task_id from hand)',
-        )
-        .all() as Array<{ id: string }>
-    )
-      .map((row) => getTask(db, row.id)!)
-      .filter((task) => task && executor.skills.includes(task.skill))
-      .sort(compareTasks)
-
-    ordered.push(...poolTasks)
+    const ordered = candidateOrder(db, executor)
 
     const base = getHand(db, executorId).length
     ordered.slice(0, free).forEach((task, index) => {
@@ -119,6 +87,44 @@ export function fillHand(db: DatabaseSync, executorId: string, limit?: number): 
 
     return getHand(db, executorId)
   })
+}
+
+/** Порядок подходящих задач для исполнителя. Ничего не пишет: резервирует только fillHand. */
+function candidateOrder(db: DatabaseSync, executor: Executor): Task[] {
+  const affinity = currentStage(db, executor.id)
+  const pool = candidates(db)
+    .filter((candidate) => executor.skills.includes(candidate.skill))
+    .map((candidate) => ({ candidate, task: getTask(db, candidate.id)! }))
+
+  pool.sort((a, b) => {
+    if (affinity.featureId !== null) {
+      const aSame = a.candidate.featureId === affinity.featureId ? 0 : 1
+      const bSame = b.candidate.featureId === affinity.featureId ? 0 : 1
+      if (aSame !== bSame) return aSame - bSame
+    }
+    const byRank = a.candidate.featureRank - b.candidate.featureRank
+    if (byRank !== 0) return byRank
+    const byStage = a.candidate.stageSeq - b.candidate.stageSeq
+    if (byStage !== 0) return byStage
+    return compareTasks(a.task, b.task)
+  })
+
+  const ordered = pool.map((item) => item.task)
+
+  const poolTasks = (
+    db
+      .prepare(
+        "select id from tasks where stage_id is null and status = 'ready' and holder is null " +
+          'and id not in (select task_id from hand)',
+      )
+      .all() as Array<{ id: string }>
+  )
+    .map((row) => getTask(db, row.id)!)
+    .filter((task) => task && executor.skills.includes(task.skill))
+    .sort(compareTasks)
+
+  ordered.push(...poolTasks)
+  return ordered
 }
 
 export function getHand(db: DatabaseSync, executorId: string): Task[] {
@@ -173,11 +179,10 @@ export function nextTask(db: DatabaseSync, executorId: string): Task | null {
   const executor = getExecutor(db, executorId)
   if (!executor) return null
 
-  const urgent = candidates(db).find(
-    (candidate) => candidate.klass === 'expedite' && executor.skills.includes(candidate.skill),
-  )
-  if (urgent) return getTask(db, urgent.id)
+  // рука — обещание: сначала берём из неё, в её порядке.
+  const hand = getHand(db, executorId)
+  if (hand.length > 0) return hand[0]
 
-  const hand = fillHand(db, executorId)
-  return hand[0] ?? null
+  // руки нет — берём одну лучшую задачу, но не бронируем остальные: это дело dispatch.
+  return candidateOrder(db, executor)[0] ?? null
 }
