@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process'
 import { advanceTime } from '../../core/clock.ts'
 import { lastSnapshot } from '../../core/lease.ts'
 import { appendEvent } from '../../core/events.ts'
+import { closeQuestionsFor } from '../../core/questions.ts'
 import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -115,6 +116,14 @@ export default async function command(args: ParsedArgs) {
       left: stringFlag(args, 'left'),
       commit: commit ?? undefined,
     },
+  })
+
+  // задача закрыта — вопросы, заданные по ней, больше не ждут владельца
+  closeQuestionsFor(db, {
+    subjectType: 'task',
+    subjectId: taskId,
+    actor: executor,
+    note: 'задача закрыта',
   })
 
   // промах не отменяет закрытие, но остаётся в журнале: doctor потом покажет его
