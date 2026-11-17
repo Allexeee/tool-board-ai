@@ -166,14 +166,20 @@ export function answer(
  */
 export function closeQuestionsFor(
   db: DatabaseSync,
-  input: { subjectType: SubjectType; subjectId: string; actor: string; note: string },
+  input: { subjectType: SubjectType; subjectId: string; actor: string; note: string; questionId?: string | null },
 ): number {
   return tx(db, () => {
-    const rows = db
-      .prepare(
-        "select id from questions where subject_type = ? and subject_id = ? and status = 'pending'",
-      )
-      .all(input.subjectType, input.subjectId) as Array<{ id: string }>
+    const rows = (
+      input.questionId
+        ? db
+            .prepare("select id from questions where id = ? and status = 'pending'")
+            .all(input.questionId)
+        : db
+            .prepare(
+              "select id from questions where subject_type = ? and subject_id = ? and status = 'pending'",
+            )
+            .all(input.subjectType, input.subjectId)
+    ) as Array<{ id: string }>
 
     const at = new Date().toISOString()
     for (const row of rows) {
