@@ -161,6 +161,36 @@ function followersOf(db: DatabaseSync, taskId: string): string[] {
   ).map((row) => row.id)
 }
 
+/**
+ * Кто уже держит этап: у кого его задача в работе или в руке. Задачи одного этапа живут
+ * в одном рабочем каталоге, поэтому этап не делят между исполнителями.
+ * Слитый этап ничей: его задачи закрыты, в очереди и в руке их нет.
+ */
+function stageOwner(db: DatabaseSync, stageId: string): string | null {
+  const inWork = db
+    .prepare(
+      "select holder as owner from tasks where stage_id = ? and status = 'active' and holder is not null " +
+        'order by id limit 1',
+    )
+    .get(stageId) as { owner: string } | undefined
+  if (inWork) return inWork.owner
+
+  const reserved = db
+    .prepare(
+      'select h.executor_id as owner from hand h join tasks t on t.id = h.task_id ' +
+        "where t.stage_id = ? and t.status in ('ready', 'open') order by h.position limit 1",
+    )
+    .get(stageId) as { owner: string } | undefined
+  return reserved?.owner ?? null
+}
+
+/** Этап не делят: его задачи достаются тому, кто уже держит этап. Свободный этап и пул — любому. */
+function ownsStage(db: DatabaseSync, executorId: string, stageId: string | null): boolean {
+  if (stageId === null) return true
+  const owner = stageOwner(db, stageId)
+  return owner === null || owner === executorId
+}
+
 /** Задача годится в руку исполнителя: навык подходит, чужих резервов нет, ждёт только эту руку. */
 function canHold(db: DatabaseSync, executor: Executor, taskId: string, taken: Set<string>): boolean {
   if (taken.has(taskId)) return false
@@ -182,6 +212,9 @@ function canHold(db: DatabaseSync, executor: Executor, taskId: string, taken: Se
       .get(task.stageId) as { stageStatus: string; worktree: string | null } | undefined
     if (!row || row.stageStatus !== 'active' || row.worktree === null) return false
   }
+
+  // этап не делят: задачу этапа, который уже держит другая рука, сюда не берут
+  if (!ownsStage(db, executor.id, task.stageId)) return false
 
   return unmetDep(db, taskId, taken) === null
 }
@@ -223,8 +256,10 @@ function reserve(db: DatabaseSync, executorId: string, ids: string[], base: numb
 
 /**
  * Раздача руки по кругам: независимые задачи — по одной каждому исполнителю с подходящим
- * навыком и свободным местом в руке, остаток уходит следующим кругом. Один исполнитель
+ * навыком и свободным местом в руке, остаток уходит следующими кругами. Один исполнитель
  * не забирает всё, пока другой свободен, и одна задача достаётся одной руке.
+ * Задачи одного этапа не делят: этап целиком достаётся тому, кто первый его взял, —
+ * иначе две руки правят один рабочий каталог фичи. Слитый этап задачами больше не связан.
  * За задачей в руку достраивается её цепочка — то, что setHand принимает одним списком.
  */
 export function dispatchHands(db: DatabaseSync): void {
@@ -239,7 +274,11 @@ export function dispatchHands(db: DatabaseSync): void {
         const hand = getHand(db, executor.id).map((task) => task.id)
         if (hand.length >= executor.handSize) continue
 
-        const base = candidateOrder(db, executor).find((task) => !stuck.has(task.id))
+        const free = candidateOrder(db, executor).filter((task) => !stuck.has(task.id))
+        // сначала добираем свой этап: остальные его задачи другой руке уже не достанутся
+        const base =
+          free.find((task) => task.stageId !== null && stageOwner(db, task.stageId) === executor.id) ??
+          free.find((task) => ownsStage(db, executor.id, task.stageId))
         if (!base) continue
 
         const taken = new Set(hand)
