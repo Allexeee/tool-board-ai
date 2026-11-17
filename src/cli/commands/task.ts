@@ -9,7 +9,7 @@ import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
 import { agentRelativePath } from '../../core/agents.ts'
 import { unblockTask } from '../../core/block.ts'
-import { createTask, editTask, getTask, listTasks, openTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
+import { createTask, editTask, getTask, listTasks, openTasks, setTaskSession, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -146,12 +146,13 @@ export default async function command(args: ParsedArgs) {
       `id: ${task.id}`,
       `агент: ${agent ?? 'не назначен'}`,
       ...(agentFile ? [`файл агента: ${agentFile}`] : []),
+      ...(task.session ? [`сессия: ${task.session}`] : []),
       `каталог: ${root}`,
       `дальше: node bin/toolbox-al.ts task show ${task.id}`,
       `        node bin/toolbox-al.ts task context ${task.id}`,
     ]
 
-    ok({ id: task.id, agent, root, agentFile }, lines.join('\n'))
+    ok({ id: task.id, agent, root, agentFile, session: task.session }, lines.join('\n'))
     return 0
   }
 
@@ -205,6 +206,38 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'session') {
+    const id = args.positionals[0]
+    if (!id) {
+      throw new UserError(3, 'использование: task session F1.S1-1 --session ses_… | --clear')
+    }
+
+    const clear = boolFlag(args, 'clear')
+    const session = stringFlag(args, 'session')
+    if (clear && session !== undefined) {
+      throw new UserError(3, 'нельзя одновременно --session и --clear: выберите одно')
+    }
+    if (!clear && args.flags.session !== undefined && session === undefined) {
+      throw new UserError(3, 'нужен идентификатор сессии: --session ses_…')
+    }
+
+    // без флагов команда только показывает — как executor session
+    if (!clear && session === undefined) {
+      const shown = getTask(db, id)
+      if (!shown) throw new UserError(3, `задача ${id} не найдена`)
+      ok(shown, shown.session ? `${shown.id}: ${shown.session}` : `${shown.id}: сессия не задана`)
+      return 0
+    }
+
+    const task = setTaskSession(db, {
+      id,
+      session: clear ? null : (session as string),
+      actor: stringFlag(args, 'as') ?? 'owner',
+    })
+    ok(task, clear ? `${task.id}: сессия сброшена` : `${task.id}: сессия ${task.session}`)
+    return 0
+  }
+
   if (args.sub === 'show') {
     // статус должен совпадать с list: время пересчитывается и здесь
     advanceTime(db)
@@ -254,10 +287,9 @@ export default async function command(args: ParsedArgs) {
       }
     }
 
-    if (task.holder) {
-      const executor = getExecutor(db, task.holder)
-      if (executor?.session) lines.push(`сессия: ${executor.session}`)
-    }
+    // своя сессия задачи главнее сессии держателя: доработка идёт туда же
+    const session = task.session ?? (task.holder ? getExecutor(db, task.holder)?.session ?? null : null)
+    if (session) lines.push(`сессия: ${session}`)
 
     const subjects = [task.id]
     if (task.stageId) {

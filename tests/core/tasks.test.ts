@@ -4,7 +4,8 @@ import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addStage } from '../../src/core/stages.ts'
-import { createTask, editTask, getTask, updateTask } from '../../src/core/tasks.ts'
+import { createTask, editTask, getTask, setTaskSession, updateTask } from '../../src/core/tasks.ts'
+import { migrate, SCHEMA_VERSION } from '../../src/core/schema.ts'
 import { validateTaskInput, type NewTask } from '../../src/core/validate.ts'
 
 function seed(db: DatabaseSync): string {
@@ -165,4 +166,89 @@ test('одиночный exclusive остаётся эксклюзивной о�
   const task = createTask(db, { ...base, stageId, scope: [' exclusive '] })
 
   assert.equal(task.scope, 'exclusive')
+})
+
+test('задача помнит сессию и стирает её', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  assert.equal(getTask(db, id)!.session, null, 'у новой задачи сессии нет')
+
+  const bound = setTaskSession(db, { id, session: ' ses_42 ', actor: 'w1' })
+  assert.equal(bound.session, 'ses_42')
+  assert.equal(getTask(db, id)!.session, 'ses_42', 'сессия переживает чтение')
+
+  const cleared = setTaskSession(db, { id, session: null, actor: 'owner' })
+  assert.equal(cleared.session, null)
+  assert.equal(getTask(db, id)!.session, null)
+})
+
+test('смена сессии пишется в журнал', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  setTaskSession(db, { id, session: 'ses_1', actor: 'w1' })
+  setTaskSession(db, { id, session: null, actor: 'owner' })
+
+  const bound = db
+    .prepare("select actor, after from events where type = 'task.session_bound'")
+    .get() as { actor: string; after: string }
+  assert.equal(bound.actor, 'w1')
+  assert.match(bound.after, /ses_1/)
+
+  const reset = db
+    .prepare("select before from events where type = 'task.session_reset'")
+    .get() as { before: string }
+  assert.match(reset.before, /ses_1/)
+})
+
+test('пустая сессия отвергается, прежняя остаётся', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+  setTaskSession(db, { id, session: 'ses_1', actor: 'w1' })
+
+  assert.throws(() => setTaskSession(db, { id, session: '   ', actor: 'w1' }), /--session/)
+  assert.equal(getTask(db, id)!.session, 'ses_1')
+})
+
+test('задача без сессии не считается изменённой', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  setTaskSession(db, { id, session: null, actor: 'owner' })
+
+  const count = db
+    .prepare("select count(*) as c from events where type like 'task.session%'")
+    .get() as { c: number }
+  assert.equal(count.c, 0, 'сброс и так пустой сессии не пишет событие')
+})
+
+test('миграция 9 добавляет сессию и не теряет задач', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  // откатываемся к схеме 8: колонки и триггера ещё нет
+  db.exec('drop trigger if exists trg_stage_merged_clears_task_sessions')
+  db.exec('alter table tasks drop column session')
+  db.prepare("update meta set value = '8' where key = 'schemaVersion'").run()
+
+  assert.equal(migrate(db), SCHEMA_VERSION)
+  assert.equal(getTask(db, id)!.id, id, 'задача на месте')
+  assert.equal(getTask(db, id)!.session, null, 'колонка появилась пустой')
+})
+
+test('слияние этапа стирает сессии его задач', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const task = createTask(db, { ...base, stageId })
+  const neighbourStage = addStage(db, { featureId: 'F1', name: 'S2', goal: 'g', appetite: '1 день' })
+  const neighbour = createTask(db, { ...base, stageId: neighbourStage.id })
+
+  setTaskSession(db, { id: task.id, session: 'ses_1', actor: 'w1' })
+  setTaskSession(db, { id: neighbour.id, session: 'ses_2', actor: 'w1' })
+
+  db.prepare("update stages set status = 'merged' where id = ?").run(stageId)
+
+  assert.equal(getTask(db, task.id)!.session, null, 'слитый этап забывает сессию')
+  assert.equal(getTask(db, neighbour.id)!.session, 'ses_2', 'соседний этап не тронут')
 })
