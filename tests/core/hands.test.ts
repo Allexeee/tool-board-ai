@@ -74,13 +74,18 @@ test('задача с чужим навыком не попадает в рук�
   assert.equal(fillHand(db, 'w1').some((task) => task.skill === 'audio'), false)
 })
 
-test('зарезервированную задачу не берёт другой исполнитель', () => {
+test('чужой резерв не мешает взять задачу', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)
   fillHand(db, 'w1')
-  assert.throws(
-    () => takeTask(db, { executor: 'w2', taskId: `${stageId}-1` }),
-    (error: { code?: number }) => error.code === 2,
+
+  const task = takeTask(db, { executor: 'w2', taskId: `${stageId}-1` })
+
+  assert.equal(task.holder, 'w2')
+  assert.deepEqual(
+    getHand(db, 'w2').map((item) => item.id).includes(`${stageId}-1`),
+    false,
+    'резерв снят при взятии',
   )
 })
 
