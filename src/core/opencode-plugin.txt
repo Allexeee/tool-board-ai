@@ -24,7 +24,7 @@ function resolve(ctx, args) {
 async function call(ctx, args) {
   const { file, args: full } = resolve(ctx, [...args, '--json'])
   try {
-    const { stdout } = await run(file, full, { cwd: ctx.location.directory })
+    const { stdout } = await run(file, full, { cwd: ctx.location.directory, windowsHide: true })
     return { content: stdout.trim() || '{}' }
   } catch (error) {
     if (error.code === 'ENOENT') {

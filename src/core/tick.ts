@@ -19,8 +19,8 @@ export interface TickResult {
 function shell(root: string, command: string): boolean {
   const result =
     process.platform === 'win32'
-      ? spawnSync('cmd.exe', ['/c', command], { cwd: root, encoding: 'utf8' })
-      : spawnSync('sh', ['-c', command], { cwd: root, encoding: 'utf8' })
+      ? spawnSync('cmd.exe', ['/c', command], { cwd: root, encoding: 'utf8', windowsHide: true })
+      : spawnSync('sh', ['-c', command], { cwd: root, encoding: 'utf8', windowsHide: true })
   return result.status === 0
 }
 
