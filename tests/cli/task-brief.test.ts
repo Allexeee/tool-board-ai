@@ -19,29 +19,51 @@ function project() {
   return dir
 }
 
-test('task brief печатает роль, ограничения, каталог и id задачи', () => {
+test('task brief печатает агента, файл агента, каталог и id задачи', () => {
   const dir = project()
   run(dir, ['task', 'add', 'Бриф', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
 
   const brief = run(dir, ['task', 'brief', 'T1', '--as', 'w1'])
   assert.equal(brief.code, 0, brief.err)
   assert.match(brief.out, /id: T1/)
-  assert.match(brief.out, /роль: исполнитель w1 · навык backend/)
+  assert.match(brief.out, /агент: w1/)
+  assert.match(brief.out, /файл агента: \.opencode\/agents\/w1\.md/)
   assert.ok(brief.out.includes(`каталог: ${dir}`) || brief.out.includes(basename(dir)), brief.out)
-  assert.match(brief.out, /ограничения:/)
-  assert.match(brief.out, /не запускать git/)
   assert.match(brief.out, /task show T1/)
   assert.match(brief.out, /task context T1/)
 })
 
-test('task brief берёт роль из держателя задачи', () => {
+test('task brief не пересказывает роль: навыки и правила живут в файле агента', () => {
+  const dir = project()
+  run(dir, ['task', 'add', 'Бриф', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+
+  const brief = run(dir, ['task', 'brief', 'T1', '--as', 'w1'])
+  assert.equal(brief.code, 0, brief.err)
+  assert.doesNotMatch(brief.out, /роль:/)
+  assert.doesNotMatch(brief.out, /навык/)
+  assert.doesNotMatch(brief.out, /ограничения:/)
+  assert.doesNotMatch(brief.out, /не запускать git/)
+  assert.doesNotMatch(brief.out, /только файлы области/)
+})
+
+test('task brief берёт агента из держателя задачи', () => {
   const dir = project()
   run(dir, ['task', 'add', 'Бриф', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
   run(dir, ['take', 'T1', '--as', 'w1'])
 
   const brief = run(dir, ['task', 'brief', 'T1'])
   assert.equal(brief.code, 0, brief.err)
-  assert.match(brief.out, /роль: исполнитель w1/)
+  assert.match(brief.out, /агент: w1/)
+})
+
+test('task brief без исполнителя честно говорит, что агент не назначен', () => {
+  const dir = project()
+  run(dir, ['task', 'add', 'Бриф', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+
+  const brief = run(dir, ['task', 'brief', 'T1'])
+  assert.equal(brief.code, 0, brief.err)
+  assert.match(brief.out, /агент: не назначен/)
+  assert.doesNotMatch(brief.out, /файл агента:/)
 })
 
 test('task brief не дублирует DoD и код', () => {
