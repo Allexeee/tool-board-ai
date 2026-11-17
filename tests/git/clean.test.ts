@@ -256,19 +256,24 @@ test('ветка с новым коммитом после слияния не �
   assert.equal(branchExists(root, branch), true)
 })
 
-test('игнорируемые файлы спасаются в архивный тег', () => {
+test('игнорируемые файлы не попадают в git, а спасаются в .toolbox-al/rescued', () => {
   const { root, db, config, feature, worktree } = cancelledFixture()
   writeFileSync(join(worktree, '.gitignore'), 'local/\n')
   mkdirSync(join(worktree, 'local'), { recursive: true })
   writeFileSync(join(worktree, 'local', 'секрет.env'), 'ключ')
-  runGit(worktree, ['add', '.gitignore'])
+  runGit(worktree, ['add', '.gitignore', 'src/a.ts'])
   runGit(worktree, ['commit', '-m', 'ignore'])
 
   cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
 
-  const tag = runGit(root, ['tag', '--list', 'archive/*']).split('\n')[0]
-  const tree = runGit(root, ['-c', 'core.quotepath=false', 'ls-tree', '-r', '--name-only', tag])
-  assert.match(tree, /local\/секрет\.env/)
+  const tags = runGit(root, ['tag', '--list', 'archive/*'])
+  assert.equal(tags, '', 'архивный тег не создаётся из-за ignored')
+  assert.equal(existsSync(join(worktree, 'local/секрет.env')), false)
+
+  const rescued = join(root, '.toolbox-al', 'rescued')
+  const found = runGit(root, ['status', '--porcelain'])
+  void found
+  assert.equal(existsSync(rescued), true)
 })
 
 

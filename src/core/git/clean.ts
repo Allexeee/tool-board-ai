@@ -1,5 +1,5 @@
-﻿import { existsSync, rmSync } from 'node:fs'
-import { isAbsolute, relative as relativePath } from 'node:path'
+﻿import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative as relativePath } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
@@ -44,20 +44,41 @@ export function cleanWorktree(
 
   const registered = isRegisteredWorktree(input.root, dir)
   const ignored = registered
-    ? runGit(dir, ['ls-files', '--others', '--ignored', '--exclude-standard'])
-        .split('\n')
+    ? runGit(dir, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'])
+        .split('\0')
         .filter(Boolean)
     : []
   const dirty =
-    registered &&
-    (runGit(dir, ['status', '--porcelain', '--untracked-files=normal']).length > 0 || ignored.length > 0)
+    registered && runGit(dir, ['status', '--porcelain', '--untracked-files=normal']).length > 0
   let tag: string | null = null
   let rescued = false
+
+  // ignored-файлы не тащим в git: секреты и node_modules в истории недопустимы.
+  // Складываем их рядом, в .toolbox-al/rescued, который сам игнорируется.
+  if (ignored.length > 0) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const target = join(input.root, '.toolbox-al', 'rescued', featureSlug(feature), stamp)
+    if (process.env.AL_DEBUG) console.error('TARGET=', target, 'ROOT=', input.root)
+
+    for (const relative of ignored) {
+      const from = join(dir, relative)
+      if (!existsSync(from)) continue
+      const to = join(target, relative)
+      mkdirSync(dirname(to), { recursive: true })
+      copyFileSync(from, to)
+    }
+
+    appendEvent(db, {
+      type: 'feature.ignored_rescued',
+      actor: input.actor,
+      subject: feature.id,
+      after: { dir: target, files: ignored.length },
+    })
+  }
 
   if (dirty) {
     try {
       runGit(dir, ['add', '-A'])
-      if (ignored.length > 0) runGit(dir, ['add', '-f', '.'])
       runGit(dir, ['commit', '-m', `wip: остатки ${feature.id} перед уборкой`])
       tag = archiveTag(feature)
       runGit(dir, ['tag', '-f', tag, 'HEAD'])
@@ -303,6 +324,12 @@ export function cleanFeature(
 
   return { ...cleaned, branchDeleted: true }
 }
+
+
+
+
+
+
 
 
 
