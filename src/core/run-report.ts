@@ -6,6 +6,7 @@ import { featureCost, type FeatureCost } from './cost.ts'
 import { listDecisions, type Decision } from './decisions.ts'
 import { ownerHand, type OwnerItem } from './questions.ts'
 import { pendingRelease } from './git/release.ts'
+import { countAssignments, type AssignCounts } from './views.ts'
 import {
   getRunRecord,
   reviewOf,
@@ -47,6 +48,8 @@ export interface RunReportData {
   waitingOwner: OwnerItem[]
   /** Взятые по ходу допущения: решения по фичам прогона. */
   assumptions: Decision[]
+  /** Как выдавались задачи за прогон: раздачей, руками, взятием без выдачи. */
+  assignment: AssignCounts
 }
 
 export interface RunReport extends RunReportData {
@@ -138,6 +141,7 @@ export function collectRunReport(
   const review = reviewOf(db, run.id)
   const merged = mergedInRun(db, run, now)
   const pending = pendingByFeature(db)
+  const to = run.endedAt ?? now.toISOString()
 
   const featureIds = [...new Set([...merged.map((row) => row.featureId), ...pending.map((row) => row.featureId)])]
 
@@ -149,6 +153,8 @@ export function collectRunReport(
     pending,
     waitingOwner: ownerHand(db),
     assumptions: assumptionsOf(db, featureIds),
+    // как задачи попадали в руки за прогон: тот же срез, что владелец видит в now
+    assignment: countAssignments(db, { since: run.startedAt, until: to }),
   }
 }
 
@@ -194,6 +200,8 @@ export function renderRunReport(report: RunReportData): string {
     `- запросы: ${requests}`,
     `- утверждение начального плана: ${run.approve ? 'да' : 'нет'}`,
     `- питание после прогона: ${POWER_TEXT[run.power]}`,
+    `- раздача: dispatch ${report.assignment.dispatch} · руками ${report.assignment.hand} · ` +
+      `без выдачи ${report.assignment.take}`,
     `- начат: ${stamp(run.startedAt)}`,
   ]
 

@@ -5,7 +5,8 @@ import { listStages, type StageStatus } from './stages.ts'
 import { busyOf, listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
 import { depsOf, isSatisfied } from './deps.ts'
-import { getHand, dispatchHands, nextTask } from './hands.ts'
+import { getHand, dispatchHands, nextTask, type AssignSource } from './hands.ts'
+import { activeRun, lastClosedRun } from './runs.ts'
 import { ownerHand } from './questions.ts'
 import { listDecisions } from './decisions.ts'
 import { listRequests } from './requests.ts'
@@ -28,6 +29,72 @@ export interface QueueRow {
 
 /** Причина у задачи, которой ничто не мешает: не хватает только раздачи. */
 export const queueFreeReason = 'ждёт раздачи'
+
+/** Откуда задача попала в руку: раздачей, прямой рукой или взятием по id. */
+export interface AssignCounts {
+  dispatch: number
+  hand: number
+  take: number
+}
+
+export interface AssignStats {
+  /** За всё время. */
+  total: AssignCounts
+  /** За текущий прогон: активный, иначе последний закрытый; null — прогонов не было. */
+  run: AssignCounts | null
+}
+
+const ASSIGN_SOURCES: AssignSource[] = ['dispatch', 'hand', 'take']
+
+/**
+ * Счётчики выдачи по журналу hand.assigned, а не по резервам: владелец видит,
+ * сколько задач выдала раздача, сколько выдано руками и сколько взято без выдачи.
+ */
+export function countAssignments(
+  db: DatabaseSync,
+  period: { since?: string; until?: string } = {},
+): AssignCounts {
+  const where = ["type = 'hand.assigned'"]
+  const params: string[] = []
+  if (period.since) {
+    where.push('at >= ?')
+    params.push(period.since)
+  }
+  if (period.until) {
+    where.push('at <= ?')
+    params.push(period.until)
+  }
+
+  const rows = db
+    .prepare(`select after from events where ${where.join(' and ')}`)
+    .all(...params) as Array<{ after: string | null }>
+
+  const counts: AssignCounts = { dispatch: 0, hand: 0, take: 0 }
+  for (const row of rows) {
+    if (!row.after) continue
+
+    let source: string
+    try {
+      source = String((JSON.parse(row.after) as { source?: unknown }).source ?? '')
+    } catch {
+      continue
+    }
+
+    if (ASSIGN_SOURCES.includes(source as AssignSource)) counts[source as AssignSource] += 1
+  }
+
+  return counts
+}
+
+/** За всё время и за текущий прогон: второй срез владельцу важнее — он про последнюю работу. */
+export function assignmentStats(db: DatabaseSync): AssignStats {
+  const run = activeRun(db) ?? lastClosedRun(db)
+
+  return {
+    total: countAssignments(db),
+    run: run ? countAssignments(db, { since: run.startedAt, until: run.endedAt ?? undefined }) : null,
+  }
+}
 
 /**
  * Порядок, в котором задачи будут взяты: ранг фичи, номер этапа, затем зависимости.
@@ -185,6 +252,8 @@ export interface NowView {
   requests: Array<{ id: string; title: string }>
   plans: Array<{ id: string; requestId: string; title: string }>
   unreleased: number
+  /** Как выдавались задачи: раздачей, руками, взятием без выдачи. */
+  assignment: AssignStats
 }
 
 export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowView {
@@ -276,6 +345,7 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     requests,
     plans,
     unreleased: pendingRelease(db).length,
+    assignment: assignmentStats(db),
   }
 }
 
