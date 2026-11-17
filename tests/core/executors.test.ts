@@ -4,12 +4,16 @@ import { openDb } from '../../src/core/db.ts'
 import {
   addExecutor,
   assertSkill,
+  busyOf,
+  clearBusy,
   DEFAULT_STEPS,
   getExecutor,
   listExecutors,
+  parseBusyUntil,
   parsePermissions,
   removeExecutor,
   renameExecutor,
+  setBusy,
   setModel,
   setPermissions,
   setSkills,
@@ -238,6 +242,90 @@ test('steps меняет лимит и пишет событие', () => {
   assert.equal(changed.type, 'executor.steps_changed')
   assert.deepEqual(JSON.parse(changed.before!), { steps: DEFAULT_STEPS })
   assert.deepEqual(JSON.parse(changed.after!), { steps: 7 })
+})
+
+test('busy пишет причину и срок, free снимает занятость', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+
+  const busy = setBusy(db, { executorId: 'w1', reason: 'разбор F41', until: '30m', actor: 'w1' })
+  assert.equal(busy.reason, 'разбор F41')
+  assert.ok(Date.parse(busy.until) > Date.now())
+  assert.deepEqual(busyOf(db, 'w1'), busy)
+
+  const event = lastEvent(db, 'w1')
+  assert.equal(event.type, 'executor.busy')
+  assert.equal(event.note, 'разбор F41')
+  assert.deepEqual(JSON.parse(event.after!), { reason: 'разбор F41', until: busy.until })
+
+  const freed = clearBusy(db, { executorId: 'w1', actor: 'owner' })
+  assert.equal(freed?.reason, 'разбор F41')
+  assert.equal(busyOf(db, 'w1'), null)
+  assert.equal(lastEvent(db, 'w1').type, 'executor.free')
+})
+
+test('free у свободного исполнителя ничего не пишет', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const before = listEvents(db, { subject: 'w1' }).length
+
+  assert.equal(clearBusy(db, { executorId: 'w1', actor: 'owner' }), null)
+  assert.equal(listEvents(db, { subject: 'w1' }).length, before)
+  assert.equal(busyOf(db, 'w1'), null)
+})
+
+test('истёкшая занятость перестаёт считаться сама', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const busy = setBusy(db, { executorId: 'w1', reason: 'план F41', until: '10m', actor: 'w1' })
+
+  // срок наступил — занятости нет, без фоновых процессов и без записи в журнал
+  assert.equal(busyOf(db, 'w1', busy.until), null)
+  assert.equal(busyOf(db, 'w1', new Date(Date.parse(busy.until) + 1_000).toISOString()), null)
+  assert.ok(busyOf(db, 'w1', busy.since))
+  assert.equal(lastEvent(db, 'w1').type, 'executor.busy')
+})
+
+test('busy требует причину и срок в будущем', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+
+  assert.throws(
+    () => setBusy(db, { executorId: 'w1', reason: '  ', until: '30m', actor: 'w1' }),
+    /причина/,
+  )
+  assert.throws(
+    () => setBusy(db, { executorId: 'w1', reason: 'разбор', until: '', actor: 'w1' }),
+    /срок/,
+  )
+  assert.throws(
+    () =>
+      setBusy(db, { executorId: 'w1', reason: 'разбор', until: 'скоро', actor: 'w1' }),
+    /формат/,
+  )
+  assert.throws(
+    () =>
+      setBusy(db, {
+        executorId: 'w1',
+        reason: 'разбор',
+        until: '2020-01-01T00:00:00.000Z',
+        actor: 'w1',
+      }),
+    /прошёл/,
+  )
+  assert.throws(
+    () => setBusy(db, { executorId: 'nobody', reason: 'разбор', until: '30m', actor: 'w1' }),
+    /не найден/,
+  )
+  assert.equal(busyOf(db, 'w1'), null)
+})
+
+test('срок занятости понимает 30m, 2h, 1d и ISO', () => {
+  const now = new Date('2026-11-17T10:00:00.000Z')
+  assert.equal(parseBusyUntil('30m', now), '2026-11-17T10:30:00.000Z')
+  assert.equal(parseBusyUntil('2h', now), '2026-11-17T12:00:00.000Z')
+  assert.equal(parseBusyUntil('1d', now), '2026-11-18T10:00:00.000Z')
+  assert.equal(parseBusyUntil('2026-11-17T12:00:00.000Z', now), '2026-11-17T12:00:00.000Z')
 })
 
 
