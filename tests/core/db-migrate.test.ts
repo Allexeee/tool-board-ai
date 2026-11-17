@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDb, migrate } from '../../src/core/db.ts'
+import { SCHEMA_VERSION } from '../../src/core/schema.ts'
 import { getExecutor } from '../../src/core/executors.ts'
 
 function oldDb() {
@@ -36,7 +37,7 @@ test('новая база создаётся сразу на текущей сх
   assert.ok(Number(row.value) > 0)
 })
 
-test('миграция 7 → 9 добавляет модель, права, шаги и сессию задачи без потери исполнителей', () => {
+test('миграция 7 → 10 добавляет модель, права, шаги, сессию задачи и прогоны без потери исполнителей', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-v7-'))
   const path = join(dir, 'tracker.db')
   const old = openDb(path)
@@ -59,10 +60,10 @@ test('миграция 7 → 9 добавляет модель, права, ша
   assert.throws(() => openDb(path), /устарела/)
 
   const db = openDb(path, { allowOutdated: true })
-  assert.equal(migrate(db), 9)
+  assert.equal(migrate(db), SCHEMA_VERSION)
 
   const version = db.prepare("select value from meta where key = 'schemaVersion'").get() as { value: string }
-  assert.equal(Number(version.value), 9)
+  assert.equal(Number(version.value), SCHEMA_VERSION)
 
   const executor = getExecutor(db, 'w1')
   assert.ok(executor, 'исполнитель пережил миграцию')
@@ -82,5 +83,9 @@ test('миграция 7 → 9 добавляет модель, права, ша
     .prepare("select 1 as found from sqlite_master where type = 'trigger' and name = 'trg_stage_merged_clears_task_sessions'")
     .get()
   assert.ok(trigger, 'триггер сброса сессий на месте')
+
+  // схема 10 добавила прогон: таблица runs
+  const runs = db.prepare("select 1 as found from sqlite_master where type = 'table' and name = 'runs'").get()
+  assert.ok(runs, 'прогоны лежат в базе')
   db.close()
 })
