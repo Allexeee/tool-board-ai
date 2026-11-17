@@ -9,7 +9,7 @@ import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
 import { unblockTask } from '../../core/block.ts'
 import { createTask, editTask, getTask, listTasks, openTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
-import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -93,6 +93,7 @@ export default async function command(args: ParsedArgs) {
 
   if (args.sub === 'open') {
     advanceTime(db)
+    const brief = boolFlag(args, 'brief')
     const tasks = openTasks(db)
     ok(
       tasks,
@@ -100,6 +101,7 @@ export default async function command(args: ParsedArgs) {
         ? 'открытых задач нет'
         : tasks
             .map((task) => {
+              if (brief) return `${task.id.padEnd(10)} ${task.status}`
               const holder = task.holder ? ` · ${task.holder}` : ''
               const reason = task.reason ? ` · ${task.reason}` : ''
               return `${task.id.padEnd(10)} ${task.status.padEnd(10)} ${task.title}${holder}${reason}`

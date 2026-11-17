@@ -6,7 +6,7 @@ import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
 import { listDecisions } from '../../core/decisions.ts'
 import { markPlansStale } from '../../core/plans.ts'
-import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -169,12 +169,19 @@ export default async function command(args: ParsedArgs) {
   }
 
   if (args.sub === 'open') {
+    const brief = boolFlag(args, 'brief')
     const requests = openRequests(db)
     ok(
       requests,
       requests.length === 0
         ? 'открытых запросов нет'
-        : requests.map((r) => `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}`).join('\n'),
+        : requests
+            .map((r) =>
+              brief
+                ? `${r.id.padEnd(5)} ${r.status}`
+                : `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}`,
+            )
+            .join('\n'),
     )
     return 0
   }
