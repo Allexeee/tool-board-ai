@@ -80,7 +80,7 @@ test('зарезервированную задачу не берёт друго
   fillHand(db, 'w1')
   assert.throws(
     () => takeTask(db, { executor: 'w2', taskId: `${stageId}-1` }),
-    (error: { code?: number }) => error.code === 1,
+    (error: { code?: number }) => error.code === 2,
   )
 })
 
@@ -142,5 +142,6 @@ test('abandon фичи чистит руку', () => {
 
   assert.deepEqual(getHand(db, 'w1'), [])
 })
+
 
 

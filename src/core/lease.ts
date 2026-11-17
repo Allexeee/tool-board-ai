@@ -82,7 +82,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
 
     if (active.c >= wipLimit) {
       throw new UserError(
-        1,
+        2,
         `WIP: у ${executor.id} уже ${active.c} активная задача (лимит ${wipLimit})`,
       )
     }
@@ -94,7 +94,8 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
     if (!task) throw new UserError(3, `задача ${taskId} не найдена`)
 
     if (task.status !== 'ready') {
-      throw new UserError(1, `задача ${task.id} не готова: ${task.status}`)
+      const code = task.status === 'active' ? 2 : 1
+      throw new UserError(code, `задача ${task.id} не готова: ${task.status}`)
     }
 
     assertSkill(executor, task.skill)
@@ -139,7 +140,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
         .prepare("select count(*) as c from tasks where holder = ? and status = 'active' and class = 'expedite'")
         .get(executor.id) as { c: number }
       if (activeUrgent.c >= 1) {
-        throw new UserError(1, `лимит: у ${executor.id} уже есть активная срочная задача`)
+        throw new UserError(2, `лимит: у ${executor.id} уже есть активная срочная задача`)
       }
     }
 
@@ -147,7 +148,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       | { executor_id: string }
       | undefined
     if (reserved && reserved.executor_id !== executor.id) {
-      throw new UserError(1, `задача ${task.id} зарезервирована за ${reserved.executor_id}`)
+      throw new UserError(2, `задача ${task.id} зарезервирована за ${reserved.executor_id}`)
     }
 
     const leaseUntil = new Date(Date.now() + (options.leaseMinutes ?? 30) * 60_000).toISOString()
@@ -160,7 +161,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       .run(executor.id, leaseUntil, task.id)
 
     if (Number(result.changes) === 0) {
-      throw new UserError(1, `задача ${task.id} уже занята или недоступна`)
+      throw new UserError(2, `задача ${task.id} уже занята или недоступна`)
     }
 
     db.prepare('delete from hand where task_id = ?').run(task.id)
@@ -216,3 +217,4 @@ export function releaseTask(
     return getTask(db, task.id)!
   })
 }
+

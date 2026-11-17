@@ -38,13 +38,14 @@ export function advanceTime(db: DatabaseSync, now = new Date().toISOString()): A
       db.prepare(
         "update tasks set status = 'ready', holder = null, lease_until = null where id = ? and status = 'active'",
       ).run(task.id)
-      attempt(db, task.id)
       appendEvent(db, {
         type: 'task.lease_expired',
         actor: 'system',
         subject: task.id,
         note: `аренда истекла, попытка ${task.attempts + 1}`,
       })
+      // сначала фиксируем истечение, потом решаем про исчерпание попыток
+      attempt(db, task.id)
     }
 
     const releasedHands = releaseOfflineHands(db, now)

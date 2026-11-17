@@ -58,7 +58,7 @@ test('двое одновременно: второй получает код 1'
 
   assert.throws(
     () => takeTask(db, { executor: 'w2', taskId: `${stageId}-1` }),
-    (error: { code?: number }) => error.code === 1,
+    (error: { code?: number }) => error.code === 2,
   )
 })
 
@@ -193,4 +193,27 @@ test('две задачи пула с одной областью не беру�
     () => takeTask(db, { executor: 'w2', taskId: 'T2' }),
     /пересекается/,
   )
+})
+
+
+test('журнал аренды не противоречит статусу, причина исчерпания сохраняется', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  for (let i = 0; i < 3; i++) {
+    takeTask(db, { executor: 'w1', taskId: `${stageId}-1` })
+    advanceTime(db, plusMinutes(31))
+  }
+
+  const task = getTask(db, `${stageId}-1`)!
+  assert.equal(task.status, 'needs_owner')
+  assert.equal(task.reason, 'attempts_exhausted')
+
+  const events = db
+    .prepare("select type from events where subject = ? order by id")
+    .all(task.id) as Array<{ type: string }>
+  const types = events.map((event) => event.type)
+  const lastExit = types.lastIndexOf('task.lease_expired')
+  const exhausted = types.lastIndexOf('task.attempts_exhausted')
+  assert.ok(lastExit < exhausted, 'истечение пишется до исчерпания')
 })

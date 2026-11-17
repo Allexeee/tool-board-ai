@@ -26,6 +26,8 @@ const HELP = `toolbox-al — ящик инструментов для работ
   doctor                  проверка настройки
 
   --json                  машинный вывод
+
+  коды выхода: 0 — успех, 1 — делать нечего, 2 — нужно решение, 3 — ошибка ввода
 `
 
 async function main(argv: string[]): Promise<number> {
