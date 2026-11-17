@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -235,6 +235,19 @@ export function migrate(db: DatabaseSync): number {
           'update tasks set session = null where stage_id = new.id; ' +
           'end',
       )
+    }
+    if (from < 10) {
+      // прогон (RUN) — запись в базе, а не договорённость в чате:
+      // с чем стартовали, когда, чем закончили; незакрытый прогон один
+      db.exec(
+        'create table if not exists runs (' +
+          'id text primary key, ' +
+          "mode text not null, requests text not null default '[]', " +
+          'nearest integer not null default 0, approve integer not null default 0, ' +
+          "power text not null default 'none', " +
+          'started_at text not null, ended_at text, end_reason text)',
+      )
+      db.exec('create index if not exists idx_runs_started on runs(started_at)')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +
