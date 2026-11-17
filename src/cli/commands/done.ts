@@ -55,8 +55,8 @@ export default async function command(args: ParsedArgs) {
   if (task.checkCmd) {
     const result =
       process.platform === 'win32'
-        ? spawnSync('cmd.exe', ['/c', task.checkCmd], { cwd: feature?.worktree ?? project.root, encoding: 'utf8' })
-        : spawnSync('sh', ['-c', task.checkCmd], { cwd: feature?.worktree ?? project.root, encoding: 'utf8' })
+        ? spawnSync('cmd.exe', ['/c', task.checkCmd], { cwd: feature?.worktree ?? project.root, encoding: 'utf8', windowsHide: true })
+        : spawnSync('sh', ['-c', task.checkCmd], { cwd: feature?.worktree ?? project.root, encoding: 'utf8', windowsHide: true })
     if (result.status !== 0) {
       throw new UserError(
         3,

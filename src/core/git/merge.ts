@@ -17,8 +17,8 @@ export interface MergeResult {
 function runCheck(cwd: string, command: string): { ok: boolean; output: string } {
   const result =
     process.platform === 'win32'
-      ? spawnSync('cmd.exe', ['/c', command], { cwd, encoding: 'utf8' })
-      : spawnSync('sh', ['-c', command], { cwd, encoding: 'utf8' })
+      ? spawnSync('cmd.exe', ['/c', command], { cwd, encoding: 'utf8', windowsHide: true })
+      : spawnSync('sh', ['-c', command], { cwd, encoding: 'utf8', windowsHide: true })
 
   return {
     ok: result.status === 0,

@@ -41,6 +41,7 @@ function compare(a: string, b: string): number {
 export function availableVersions(root = toolRoot): string[] {
   try {
     const out = execFileSync('git', ['-C', root, 'tag', '--list', 'v*'], {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     })

@@ -12,6 +12,7 @@ export function runGit(cwd: string, args: string[], env: Record<string, string> 
   try {
     return execFileSync('git', args, {
       cwd,
+      windowsHide: true,
       encoding: 'utf8',
       env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
