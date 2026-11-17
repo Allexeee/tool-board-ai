@@ -124,6 +124,7 @@ export default async function command(args: ParsedArgs) {
     const closedEvent = allEvents.filter((event) => event.type === 'request.closed').at(-1)
 
     const lines = [`${request.id}  ${request.title}`, `статус: ${request.status}`]
+    if (request.reviewAt) lines.push(`пересмотр: ${request.reviewAt}`)
     if (closedEvent?.note) lines.push(`закрыт: ${closedEvent.note}`)
     const land = landState(db, request.id)
     if (land) lines.push(`залито: ${land}`)
@@ -192,7 +193,8 @@ export default async function command(args: ParsedArgs) {
             if (land) parts.push(land)
 
             const suffix = parts.length > 0 ? `  (${parts.join(' · ')})` : ''
-            return `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}${suffix}`
+            const review = r.reviewAt ? ` · до ${r.reviewAt}` : ''
+            return `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}${suffix}${review}`
           })
           .join('\n'),
   )

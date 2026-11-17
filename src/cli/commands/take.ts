@@ -29,6 +29,6 @@ export default async function command(args: ParsedArgs) {
     leaseMinutes: project.config.leaseMinutes,
   })
 
-  ok(task, `${task.id}  ${task.title}\nаренда до ${task.leaseUntil}`)
+  ok(task, `${task.id}  ${task.title}\nаренда до ${new Date(task.leaseUntil!).toLocaleString('ru-RU')}`)
   return 0
 }

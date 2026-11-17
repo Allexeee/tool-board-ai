@@ -31,7 +31,12 @@ export default async function command(args: ParsedArgs) {
     ideas,
     ideas.length === 0
       ? 'идей нет'
-      : ideas.map((idea) => `${idea.id.padEnd(4)} ${idea.promotedTo ? '→ ' + idea.promotedTo : '  '} ${idea.text}`).join('\n'),
+      : ideas
+          .map((idea) => {
+            const review = idea.reviewAt ? `  (до ${idea.reviewAt})` : ''
+            return `${idea.id.padEnd(4)} ${idea.promotedTo ? '→ ' + idea.promotedTo : '  '} ${idea.text}${review}`
+          })
+          .join('\n'),
   )
   return 0
 }
