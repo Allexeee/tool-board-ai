@@ -1,7 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, type OwnerStageRow, type OwnerStageStatus } from '../../core/views.ts'
+import { nowView, ownerView, taskQueue, type OwnerStageRow, type OwnerStageStatus } from '../../core/views.ts'
 import { pendingRelease } from '../../core/git/release.ts'
 import { listTasks } from '../../core/tasks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
@@ -76,6 +76,19 @@ export default async function command(args: ParsedArgs) {
 
   const pool = view.pool.map((task) => `  ${task.id.padEnd(12)} ${task.title}`)
 
+  // очередь вместо рук: владельцу нужен порядок задач, а не то, как они разложены по исполнителям
+  const queue = taskQueue(db)
+  const queueIdWidth = Math.max(0, ...queue.map((row) => row.taskId.length))
+  const assignWidth = Math.max(
+    8,
+    ...queue.map((row) => (row.holder ?? row.hand ?? 'свободна').length),
+  )
+  const queueLines = queue.map((row) => {
+    const assign = row.holder ?? row.hand ?? 'свободна'
+    const waits = row.waitsFor.length > 0 ? ` · ждёт ${row.waitsFor.join(', ')}` : ''
+    return `  ${row.taskId.padEnd(queueIdWidth)}  ${assign.padEnd(assignWidth)}  ${row.title}${waits}`
+  })
+
   const holders = view.holders.map((holder) => {
     // занятость без задачи видна так же ясно, как выданная задача: причина и срок.
     const state: string[] = []
@@ -85,8 +98,7 @@ export default async function command(args: ParsedArgs) {
     }
     if (state.length === 0) state.push(paint('свободен', 'gray'))
 
-    const hand = holder.hand.length > 0 ? `рука: ${holder.hand.join(', ')}` : 'рука пуста'
-    return `  ${holder.executor.padEnd(12)} ${state.join(' · ')} · ${hand}`
+    return `  ${holder.executor.padEnd(12)} ${state.join(' · ')}`
   })
 
   const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
@@ -114,6 +126,7 @@ export default async function command(args: ParsedArgs) {
         : 'фич в работе нет') +
     (view.plans.length ? '\n\nПЛАНЫ НА УТВЕРЖДЕНИЕ\n' + plans.join('\n') : '') +
     pendingBlock +
+    (queue.length ? `\n\nОЧЕРЕДЬ\n` + queueLines.join('\n') : '') +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
     (holders.length ? holders.join('\n') : '  нет')
