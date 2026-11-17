@@ -13,6 +13,8 @@ import { makeRepoWithDev } from '../helpers/repo.ts'
 import { initProject } from '../../src/core/project.ts'
 import { readConfig } from '../../src/core/config.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
+import { createTask } from '../../src/core/tasks.ts'
+import { appendEvent } from '../../src/core/events.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
 import { runGit } from '../../src/core/git/git.ts'
 
@@ -61,6 +63,38 @@ test('doctor молчит, когда закрытые фичи прибраны
   const report = doctorReport(db)
   const check = report.checks.find((item) => item.name === 'каталоги закрытых фич')
   assert.ok(check?.ok)
+})
+
+test('doctor перечисляет фичи, где были промахи области', () => {
+  const db = openDb(':memory:')
+  const feature = addFeature(db, { name: 'Сверка', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  const task = createTask(db, {
+    stageId: stage.id,
+    title: 'Сверить отчёт',
+    dod: ['отчёт готов'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  appendEvent(db, {
+    type: 'task.outside_scope',
+    actor: 'w1',
+    subject: task.id,
+    after: { files: ['docs/b.md'] },
+  })
+
+  const check = doctorReport(db).checks.find((item) => item.name === 'промахи области')
+  assert.ok(check && !check.ok)
+  assert.match(check.detail ?? '', new RegExp(feature.id))
+  assert.match(check.detail ?? '', /docs\/b\.md/)
+})
+
+test('doctor молчит, когда промахов области не было', () => {
+  const check = doctorReport(openDb(':memory:')).checks.find((item) => item.name === 'промахи области')
+  assert.ok(check?.ok)
+  assert.doesNotMatch(check?.detail ?? '', /docs\//)
 })
 
 test('doctor показывает невлитую старую ветку закрытой фичи', () => {

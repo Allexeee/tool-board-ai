@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openDb } from '../../src/core/db.ts'
+import { listEvents } from '../../src/core/events.ts'
 
 const bin = resolve('bin/toolbox-al.ts')
 
@@ -51,6 +53,10 @@ test('done отказывается закрывать задачу с прав�
     () => run(dir, ['done', 'T1', '--as', 'w1', '--summary', 'готово']),
     /вне области/,
   )
+
+  const db = openDb(join(dir, '.toolbox-al/tracker.db'))
+  const misses = listEvents(db, { subject: 'T1' }).filter((event) => event.type === 'task.outside_scope')
+  assert.equal(misses.length, 0, 'отказ не должен записывать промах')
 })
 
 test('с --force-outside задача закрывается, а чужой файл остаётся', () => {
@@ -65,4 +71,20 @@ test('с --force-outside задача закрывается, а чужой фа
 
   const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' })
   assert.match(status, /docs\//)
+})
+
+test('с --force-outside промах области пишется в журнал', () => {
+  const dir = repo()
+  mkdirSync(join(dir, 'src'), { recursive: true })
+  mkdirSync(join(dir, 'docs'), { recursive: true })
+  writeFileSync(join(dir, 'src/a.ts'), 'a')
+  writeFileSync(join(dir, 'docs/b.md'), 'b')
+
+  run(dir, ['done', 'T1', '--as', 'w1', '--summary', 'готово', '--force-outside'])
+
+  const db = openDb(join(dir, '.toolbox-al/tracker.db'))
+  const misses = listEvents(db, { subject: 'T1' }).filter((event) => event.type === 'task.outside_scope')
+  assert.equal(misses.length, 1)
+  assert.deepEqual(JSON.parse(misses[0].after ?? '{}'), { files: ['docs/b.md'] })
+  assert.equal(misses[0].actor, 'w1')
 })
