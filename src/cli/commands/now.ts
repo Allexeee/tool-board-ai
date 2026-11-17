@@ -2,6 +2,8 @@
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { nowView, ownerView, type OwnerStageRow, type OwnerStageStatus } from '../../core/views.ts'
+import { pendingRelease } from '../../core/git/release.ts'
+import { listTasks } from '../../core/tasks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
 import { ok, paint, setColorMode, type ColorName } from '../output.ts'
 import { UserError } from '../errors.ts'
@@ -10,7 +12,7 @@ import { UserError } from '../errors.ts'
 const stageColor: Record<OwnerStageStatus, ColorName> = {
   done: 'green',
   merge: 'cyan',
-  wip: 'yellow',
+  wip: 'magenta',
   pending: 'gray',
 }
 
@@ -89,22 +91,43 @@ export default async function command(args: ParsedArgs) {
 
   const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
 
+  // два счётчика ожидания стоят рядом: сколько просит работы и сколько ждёт решения владельца.
+  // пустая строка сверху и табуляция в начале каждой строки: вывод читается как блок, а не как эхо команды.
+  const pending = pendingRelease(db)
+  const pendingBlock = pending.length
+    ? `\n\nОЖИДАЕТ РЕЛИЗА: ${pending.length} этапов\n` +
+      pending
+        .map((stage) => {
+          const count = listTasks(db, { stageId: stage.stageId }).length
+          return `  ${stage.stageId.padEnd(7)} ${stage.stageName}  (${count})`
+        })
+        .join('\n')
+    : ''
+
   const text =
-    `Открытых запросов: ${view.requests.length}\n\n` +
+    `Открытых запросов: ${view.requests.length}\n` +
+    `ждёт вас: ${view.waitingOwner}\n\n` +
     (features.length
       ? features.join('\n')
       : all
         ? 'фич нет'
         : 'фич в работе нет') +
     (view.plans.length ? '\n\nПЛАНЫ НА УТВЕРЖДЕНИЕ\n' + plans.join('\n') : '') +
-    (view.unreleased > 0 ? `\n\nНЕ ВЫПУЩЕНО\n  этапов в dev: ${view.unreleased} → release pending` : '') +
+    pendingBlock +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
-    (holders.length ? holders.join('\n') : '  нет') +
-    `\n\nждёт вас: ${view.waitingOwner}`
+    (holders.length ? holders.join('\n') : '  нет')
 
-  ok(view, text)
+  ok(view, '\n' + indent(text))
   return 0
+}
+
+/** Пустые строки остаются разделителями, содержательные — начинаются с табуляции. */
+function indent(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => (line.trim() === '' ? '' : '\t' + line))
+    .join('\n')
 }
 
 /** Срок занятости печатается локальным временем: человек читает часы, а не ISO. */
