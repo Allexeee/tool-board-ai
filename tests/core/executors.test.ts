@@ -1,5 +1,8 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
 import {
   addExecutor,
@@ -9,6 +12,7 @@ import {
   DEFAULT_STEPS,
   getExecutor,
   listExecutors,
+  normalizeSteps,
   parseBusyUntil,
   parsePermissions,
   removeExecutor,
@@ -126,13 +130,83 @@ test('skills заменяет список', () => {
   assert.deepEqual(updated.skills, ['frontend', 'design'])
 })
 
-test('по умолчанию модель наследуется, прав нет, шагов 20', () => {
+test('по умолчанию модель наследуется, прав нет, шагов 60', () => {
   const db = openDb(':memory:')
   const e = addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
 
+  assert.equal(DEFAULT_STEPS, 60)
   assert.equal(e.model, null)
   assert.deepEqual(e.permissions, [])
-  assert.equal(e.steps, DEFAULT_STEPS)
+  assert.equal(e.steps, 60)
+})
+
+test('новый исполнитель без явного лимита читается с дефолтом 60, в том числе из файла базы', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-executors-'))
+  const path = join(dir, 'queue.db')
+  const db = openDb(path)
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  db.close()
+
+  // повторное открытие — это чтение существующего исполнителя, из которого sync берёт шаги
+  const reopened = openDb(path)
+  assert.equal(getExecutor(reopened, 'w1')!.steps, 60)
+  assert.equal(listExecutors(reopened)[0].steps, 60)
+  reopened.close()
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('явный лимит шагов сохраняется при чтении и меняется через setSteps', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'], steps: 30 })
+
+  assert.equal(getExecutor(db, 'w1')!.steps, 30)
+  assert.equal(listExecutors(db)[0].steps, 30)
+
+  const changed = setSteps(db, { executorId: 'w1', steps: 90, actor: 'owner' })
+  assert.equal(changed.steps, 90)
+  assert.equal(getExecutor(db, 'w1')!.steps, 90)
+
+  // прежняя явная двадцатка — это выбор владельца, а не дефолт: чтение её не подменяет
+  setSteps(db, { executorId: 'w1', steps: 20, actor: 'owner' })
+  assert.equal(getExecutor(db, 'w1')!.steps, 20)
+})
+
+test('границы лимита шагов прежние: 1..500 включительно', () => {
+  const db = openDb(':memory:')
+
+  assert.equal(addExecutor(db, { id: 'low', kind: 'agent', skills: ['backend'], steps: 1 }).steps, 1)
+  assert.equal(addExecutor(db, { id: 'high', kind: 'agent', skills: ['backend'], steps: 500 }).steps, 500)
+  assert.equal(normalizeSteps('60'), 60)
+  assert.equal(normalizeSteps(undefined), 60)
+
+  assert.throws(() => normalizeSteps(0), /от 1/)
+  assert.throws(() => normalizeSteps(501), /от 1/)
+  assert.throws(() => normalizeSteps(2.5), /целое/)
+  assert.throws(() => normalizeSteps('  '), /целое/)
+})
+
+test('новая база задаёт дефолт шагов 60 самой схемой', () => {
+  const db = openDb(':memory:')
+  // мимо API: проверяем именно default колонки, а не normalizeSteps
+  db.prepare('insert into executors (id, kind, skills) values (?, ?, ?)').run(
+    'w1',
+    'agent',
+    JSON.stringify(['backend']),
+  )
+
+  assert.equal(getExecutor(db, 'w1')!.steps, 60)
+  assert.equal(listExecutors(db)[0].steps, 60)
+})
+
+test('испорченное значение шагов в базе читается как дефолт', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+
+  db.prepare('update executors set steps = 0 where id = ?').run('w1')
+  assert.equal(getExecutor(db, 'w1')!.steps, 60)
+
+  db.prepare('update executors set steps = 9000 where id = ?').run('w1')
+  assert.equal(listExecutors(db)[0].steps, 60)
 })
 
 test('add сохраняет модель, права и лимит шагов', () => {
