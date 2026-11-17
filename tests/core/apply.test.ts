@@ -169,3 +169,26 @@ test('новый файл в существующем каталоге прох�
   assert.doesNotMatch(validatePlan(plan, { root }).join('\n'), /не существует/)
 })
 
+test('каталог, объявленный предыдущим шагом, не считается отсутствующим', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-fs4-'))
+  mkdirSync(join(root, 'src'), { recursive: true })
+  const { plan } = fixture([
+    { ...step, title: 'Создать хранилище', scope: ['src/store/**'] },
+    { ...step, title: 'Добавить адаптер', scope: ['src/store/adapter.ts'], deps: [0] },
+  ])
+
+  const errors = validatePlan(plan, { root }).join('\n')
+  assert.doesNotMatch(errors, /не существует/, errors)
+})
+
+test('опечатка в каталоге по-прежнему ловится, даже если есть предыдущий шаг', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-fs5-'))
+  mkdirSync(join(root, 'src'), { recursive: true })
+  const { plan } = fixture([
+    { ...step, title: 'Создать хранилище', scope: ['src/store/**'] },
+    { ...step, title: 'Опечатка', scope: ['src/stroe/adapter.ts'], deps: [0] },
+  ])
+
+  assert.match(validatePlan(plan, { root }).join('\n'), /src\/stroe не существует/)
+})
+

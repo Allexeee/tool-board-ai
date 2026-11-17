@@ -10,12 +10,24 @@ import { getPlan, type Plan } from './plans.ts'
 import { appendEvent } from './events.ts'
 import { UserError } from '../cli/errors.ts'
 
+const missingDir = (root: string, rel: string): string | null => {
+  const parts = rel.split('/').filter(Boolean)
+  for (let i = 1; i <= parts.length; i++) {
+    const candidate = parts.slice(0, i).join('/')
+    if (!existsSync(join(root, candidate))) return candidate
+  }
+  return null
+}
+
 export function validatePlan(plan: Plan, options: { root?: string } = {}): string[] {
   const errors: string[] = []
 
   if (!plan.approvedAt) errors.push('план не утверждён владельцем')
 
   if (plan.stages.length === 0) errors.push('в плане нет ни одного этапа')
+
+  // каталоги, которые появятся благодаря предыдущим шагам: план режется заранее, кода ещё нет
+  const created = new Set<string>()
 
   for (const stage of plan.stages) {
     if (!stage.name?.trim()) errors.push(`этап без имени`)
@@ -53,17 +65,27 @@ export function validatePlan(plan: Plan, options: { root?: string } = {}): strin
         const globAt = normalized.search(/[*?[]/)
         const base = globAt === -1 ? normalized : normalized.slice(0, globAt).replace(/\/$/, '')
         const exists = existsSync(join(options.root, base))
-        const parent = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : ''
+        // для файла важен каталог, для глоба — сам префикс
+        const dir = globAt === -1 ? base.slice(0, Math.max(0, base.lastIndexOf('/'))) : base
+        const missing = dir ? missingDir(options.root, dir) : null
+
+        if (globAt !== -1) {
+          // «dir/**» — шаг сам объявляет каталог, его отсутствие не ошибка
+          if (missing) created.add(missing)
+          continue
+        }
 
         if (!exists) {
-          const parentExists = parent ? existsSync(join(options.root, parent)) : true
-          if (!parentExists) {
-            errors.push(`${place}: пути ${path} нет и каталог ${parent || '.'} не существует`)
-          } else if (globAt === -1 && parent) {
-            const parentIsDir = statSync(join(options.root, parent)).isDirectory()
-            if (!parentIsDir) errors.push(`${place}: ${parent} не каталог`)
+          if (missing && !created.has(missing)) {
+            errors.push(`${place}: пути ${path} нет и каталог ${missing} не существует`)
+          } else if (!missing && dir) {
+            const isDir = statSync(join(options.root, dir)).isDirectory()
+            if (!isDir) errors.push(`${place}: ${dir} не каталог`)
           }
         }
+
+        // файл в объявленном каталоге: каталог появится по ходу плана
+        if (missing) created.add(missing)
       }
 
       for (const dep of step.deps ?? []) {
