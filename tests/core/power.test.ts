@@ -1,19 +1,22 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { endRun, getRunRecord, startRun } from '../../src/core/runs.ts'
 import {
   effectivePower,
   hibernateSupported,
+  orderRunPower,
   planRunPower,
   reportFile,
   schedulePower,
   setRunPower,
   type CommandResult,
 } from '../../src/core/power.ts'
+import { makeRepo } from '../helpers/repo.ts'
 
 /** Настоящие shutdown и powercfg в тестах не зовутся: шпион записывает команды. */
 function spy() {
@@ -172,3 +175,149 @@ test('питание none ничего не делает', async () => {
   assert.deepEqual(ticks, [])
   assert.deepEqual(calls, [])
 })
+
+test('run end --power закрывает прогон с заказом одним шагом', () => {
+  const db = openDb(':memory:')
+  const dir = root()
+  const run = startRun(db, { mode: 'plan', power: 'none' })
+
+  const ended = endRun(db, { id: run.id, reason: 'tasks', power: 'hibernate' })
+  assert.equal(ended.power, 'hibernate', 'заказ лёг в запись вместе с концом')
+  assert.ok(ended.endedAt, 'прогон закрыт')
+  assert.equal(getRunRecord(db, run.id)?.power, 'hibernate')
+
+  // и дальше работает обычный путь: бумаги, потом питание
+  const report = writeReport(dir, run.id)
+  const plan = planRunPower(db, dir, run.id, { hibernateAvailable: true })
+  assert.equal(plan.requested, 'hibernate')
+  assert.equal(plan.reportPath, report)
+
+  // повторный run power не ломается: заказ уже на месте
+  assert.equal(orderRunPower(db, { runId: run.id, power: 'hibernate' }).power, 'hibernate')
+})
+
+test('неверное питание на конце не закрывает прогон', () => {
+  const db = openDb(':memory:')
+  const run = startRun(db, { mode: 'plan' })
+
+  // проверка заказа стоит до записи: прогон остаётся открытым, а не закрытым без питания
+  assert.throws(
+    () => endRun(db, { id: run.id, reason: 'tasks', power: 'sleep' as 'none' }),
+    /none, hibernate или shutdown/,
+  )
+
+  const record = getRunRecord(db, run.id)!
+  assert.equal(record.endedAt, null, 'прогон ещё идёт')
+  assert.equal(record.endReason, null)
+  assert.equal(record.power, 'none')
+
+  // отказ ничего не испортил: обычный end проходит
+  assert.ok(endRun(db, { id: run.id, reason: 'tasks' }).endedAt)
+})
+
+test('run power --power заказывает питание закрытому прогону', () => {
+  const db = openDb(':memory:')
+  const dir = root()
+
+  // end без питания: подсказка run power --power должна работать, а не упираться в «второй end»
+  const quiet = closedRun(db, 'none')
+  const ordered = orderRunPower(db, { runId: quiet.id, power: 'shutdown', actor: 'owner' })
+  assert.equal(ordered.power, 'shutdown')
+
+  const event = db
+    .prepare("select before, after from events where type = 'run.power' order by id desc limit 1")
+    .get() as { before: string; after: string }
+  assert.equal((JSON.parse(event.before) as { power: string }).power, 'none')
+  assert.equal((JSON.parse(event.after) as { power: string }).power, 'shutdown')
+
+  // отчёт по-прежнему обязателен: заказ — намерение, исполнение ждёт бумаг
+  assert.throws(
+    () => planRunPower(db, dir, quiet.id, { hibernateAvailable: true }),
+    /отчёта прогона RUN1 нет/,
+  )
+
+  writeReport(dir, quiet.id)
+  assert.equal(planRunPower(db, dir, quiet.id, { hibernateAvailable: true }).action, 'shutdown')
+
+  assert.throws(
+    () => orderRunPower(db, { runId: quiet.id, power: 'sleep' as 'none' }),
+    /none, hibernate или shutdown/,
+  )
+})
+
+test('run power --power открытому прогону отказывает', () => {
+  const db = openDb(':memory:')
+  const open = startRun(db, { mode: 'plan', power: 'none' })
+
+  assert.throws(
+    () => orderRunPower(db, { runId: open.id, power: 'shutdown' }),
+    /ещё идёт/,
+  )
+  assert.equal(getRunRecord(db, open.id)?.power, 'none', 'отказ не поставил заказ')
+  assert.equal(getRunRecord(db, open.id)?.endedAt, null)
+})
+
+// ─── тот же путь через CLI ──────────────────────────────────────────────────
+//
+// run power на win32 зовёт powercfg /a — это чтение, а не выключение. Все
+// проверки ниже отказывают до shutdown, поэтому настоящая машина не гаснет.
+
+const bin = resolve('bin/toolbox-al.ts')
+
+function runCli(dir: string, args: string[]) {
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
+}
+
+test(
+  'CLI: end --power и run power --power дают заказ, отчёт остаётся обязательным',
+  { skip: process.platform === 'win32' ? false : 'питание сделано для Windows' },
+  () => {
+    const dir = makeRepo()
+    const init = runCli(dir, ['init'])
+    assert.equal(init.code, 0, init.err)
+
+    const dbPath = join(dir, '.toolbox-al', 'tracker.db')
+    const powerOf = (id: string) => {
+      const db = openDb(dbPath)
+      try {
+        return getRunRecord(db, id)!
+      } finally {
+        db.close()
+      }
+    }
+
+    // 1. end с питанием: заказ лёг вместе с концом
+    assert.equal(runCli(dir, ['run', 'start', '--mode', 'plan']).code, 0)
+    const ended = runCli(dir, ['run', 'end', 'RUN1', '--reason', 'tasks', '--power', 'hibernate'])
+    assert.equal(ended.code, 0, ended.err)
+    assert.match(ended.out, /питание: гибернация/)
+    assert.equal(powerOf('RUN1').power, 'hibernate')
+    assert.ok(powerOf('RUN1').endedAt)
+
+    // 2. заказ переставляется на закрытом прогоне, но без отчёта не исполняется
+    const reordered = runCli(dir, ['run', 'power', 'RUN1', '--power', 'shutdown'])
+    assert.equal(reordered.code, 1)
+    assert.match(reordered.err, /отчёта прогона RUN1 нет/)
+    assert.equal(powerOf('RUN1').power, 'shutdown')
+
+    // 3. end без питания: подсказка run power --power ведёт к делу, а не в тупик
+    assert.equal(runCli(dir, ['run', 'start', '--mode', 'plan']).code, 0)
+    assert.equal(runCli(dir, ['run', 'end', 'RUN2', '--reason', 'owner']).code, 0)
+    const hint = runCli(dir, ['run', 'power', 'RUN2'])
+    assert.equal(hint.code, 1)
+    assert.match(hint.err, /run power RUN2 --power hibernate\|shutdown/)
+
+    const ordered = runCli(dir, ['run', 'power', 'RUN2', '--power', 'hibernate'])
+    assert.equal(ordered.code, 1)
+    assert.match(ordered.err, /отчёта прогона RUN2 нет/)
+    assert.equal(powerOf('RUN2').power, 'hibernate')
+
+    // 4. неверное питание на конце прогон не закрывает
+    assert.equal(runCli(dir, ['run', 'start', '--mode', 'plan']).code, 0)
+    const bad = runCli(dir, ['run', 'end', 'RUN3', '--reason', 'tasks', '--power', 'sleep'])
+    assert.equal(bad.code, 3)
+    assert.match(bad.err, /none, hibernate или shutdown/)
+    assert.equal(powerOf('RUN3').endedAt, null, 'прогон остался открытым')
+  },
+)

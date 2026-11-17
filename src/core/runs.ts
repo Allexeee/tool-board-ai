@@ -171,6 +171,20 @@ const RUN_POWERS: readonly string[] = ['none', 'hibernate', 'shutdown']
 const RUN_END_REASONS: readonly string[] = ['owner', 'tasks', 'decision']
 const RUN_VERDICTS: readonly string[] = ['ok', 'found']
 
+/**
+ * Питание прогона, проверенное до записи. Одна точка правды для start, end и
+ * `run power`: неверный заказ отказывает раньше, чем что-то ляжет в базу.
+ */
+export function runPowerOf(value: unknown): RunPower {
+  if (!RUN_POWERS.includes(String(value))) {
+    throw new UserError(
+      3,
+      `питание после прогона: none, hibernate или shutdown, а не ${String(value)}`,
+    )
+  }
+  return value as RunPower
+}
+
 function runRequests(raw: string): string[] {
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -255,10 +269,7 @@ export function startRun(db: DatabaseSync, input: StartRunInput): RunRecord {
     throw new UserError(3, `режим прогона бывает plan или all, а не ${String(mode)}`)
   }
 
-  const power = input.power ?? 'none'
-  if (!RUN_POWERS.includes(power)) {
-    throw new UserError(3, `питание после прогона: none, hibernate или shutdown, а не ${String(power)}`)
-  }
+  const power = runPowerOf(input.power ?? 'none')
 
   if (input.nearest === true && mode === 'all') {
     throw new UserError(
@@ -327,6 +338,11 @@ export function startRun(db: DatabaseSync, input: StartRunInput): RunRecord {
 export interface EndRunInput {
   id: string
   reason: RunEndReason
+  /**
+   * Заказ питания на конце: пишется той же транзакцией, что и сам конец.
+   * Иначе `end` с неверным питанием закрывал прогон, а заказ терялся.
+   */
+  power?: RunPower
   actor?: string
   now?: Date
 }
@@ -335,6 +351,9 @@ export interface EndRunInput {
  * Закрыть прогон с причиной. Прогон закрывается один раз: повторный end —
  * отказ, а не тихое переписывание конца. Остановка владельцем ревью не
  * требует, «задачи» и «решение» — требуют: непроверенный код к релизу не идёт.
+ *
+ * Питание проверяется до закрытия и ложится в ту же запись: `run end --power`
+ * либо закрывает прогон с заказом, либо не закрывает вовсе.
  */
 export function endRun(db: DatabaseSync, input: EndRunInput): RunRecord {
   return tx(db, () => {
@@ -344,6 +363,9 @@ export function endRun(db: DatabaseSync, input: EndRunInput): RunRecord {
         `причина конца прогона: owner, tasks или decision, а не ${String(input.reason)}`,
       )
     }
+
+    // проверка заказа стоит до записи: неверное питание не закрывает прогон
+    const power = input.power === undefined ? null : runPowerOf(input.power)
 
     const run = getRunRecord(db, input.id)
     if (!run) throw new UserError(3, `прогон ${input.id} не найден`)
@@ -356,17 +378,20 @@ export function endRun(db: DatabaseSync, input: EndRunInput): RunRecord {
     }
 
     const endedAt = (input.now ?? new Date()).toISOString()
-    db.prepare('update runs set ended_at = ?, end_reason = ? where id = ? and ended_at is null').run(
-      endedAt,
-      input.reason,
-      run.id,
-    )
+    db.prepare(
+      'update runs set ended_at = ?, end_reason = ?, power = coalesce(?, power) ' +
+        'where id = ? and ended_at is null',
+    ).run(endedAt, input.reason, power, run.id)
 
     appendEvent(db, {
       type: 'run.ended',
       actor: input.actor ?? 'owner',
       subject: run.id,
-      after: { reason: input.reason, reviewRequired: input.reason !== 'owner' },
+      after: {
+        reason: input.reason,
+        reviewRequired: input.reason !== 'owner',
+        ...(power === null ? {} : { power }),
+      },
     })
 
     return getRunRecord(db, run.id)!
