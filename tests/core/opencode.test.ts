@@ -93,6 +93,21 @@ test('doctor замечает отсутствие плагина', () => {
   )
 })
 
+test('скилл и AGENTS.md знают слова владельца', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+
+  for (const text of [skill, agents]) {
+    assert.match(text, /Добавь задачу/i)
+    assert.match(text, /запрос в inbox/i)
+    assert.match(text, /Запиши идею/i)
+    assert.match(text, /иде[юя]/i)
+  }
+})
+
 test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
   const current = `---\nname: x\n---\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nмоя заметка\n`
   const next = `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`
