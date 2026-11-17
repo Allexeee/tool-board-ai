@@ -17,6 +17,28 @@ const CLASS_ORDER: Record<string, number> = {
 
 const SIZE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3 }
 
+/** Откуда задача попала исполнителю: раздачей, прямой рукой или взятием по id из очереди. */
+export type AssignSource = 'dispatch' | 'hand' | 'take'
+
+/**
+ * След выдачи в журнале: без него резерв в hand не виден владельцу.
+ * Одно событие — одна выдача: кто получил, что получил и откуда.
+ */
+export function appendAssigned(
+  db: DatabaseSync,
+  executorId: string,
+  taskId: string,
+  source: AssignSource,
+  actor = 'system',
+): void {
+  appendEvent(db, {
+    type: 'hand.assigned',
+    actor,
+    subject: executorId,
+    after: { executor: executorId, task: taskId, source },
+  })
+}
+
 export function compareTasks(a: Task, b: Task): number {
   const byClass = (CLASS_ORDER[a.class] ?? 9) - (CLASS_ORDER[b.class] ?? 9)
   if (byClass !== 0) return byClass
@@ -82,9 +104,12 @@ export function fillHand(db: DatabaseSync, executorId: string, limit?: number): 
 
     const base = getHand(db, executorId).length
     ordered.slice(0, free).forEach((task, index) => {
-      db.prepare(
-        'insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)',
-      ).run(executorId, base + index + 1, task.id, new Date().toISOString())
+      const result = db
+        .prepare(
+          'insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)',
+        )
+        .run(executorId, base + index + 1, task.id, new Date().toISOString())
+      if (Number(result.changes) > 0) appendAssigned(db, executorId, task.id, 'hand')
     })
 
     return getHand(db, executorId)
@@ -180,14 +205,18 @@ function chainOf(db: DatabaseSync, executor: Executor, baseId: string, taken: Se
   return chain
 }
 
-function reserve(db: DatabaseSync, executorId: string, ids: string[], base: number): number {
+/** Резервирует задачи в руке и возвращает те, что действительно встали: событие — на каждую. */
+function reserve(db: DatabaseSync, executorId: string, ids: string[], base: number): string[] {
   const at = new Date().toISOString()
-  let inserted = 0
+  const inserted: string[] = []
   ids.forEach((id, index) => {
     const result = db
       .prepare('insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)')
       .run(executorId, base + index + 1, id, at)
-    inserted += Number(result.changes)
+    if (Number(result.changes) > 0) {
+      inserted.push(id)
+      appendAssigned(db, executorId, id, 'dispatch')
+    }
   })
   return inserted
 }
@@ -217,7 +246,7 @@ export function dispatchHands(db: DatabaseSync): void {
         taken.add(base.id)
         const ids = [base.id, ...chainOf(db, executor, base.id, taken)]
 
-        if (reserve(db, executor.id, ids, hand.length) === 0) {
+        if (reserve(db, executor.id, ids, hand.length).length === 0) {
           stuck.add(base.id)
           continue
         }
@@ -281,6 +310,15 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
       }
     }
 
+    // что уже выдано этой руке: повторная установка тех же задач — не новая выдача
+    const previous = new Set(
+      (
+        db.prepare('select task_id from hand where executor_id = ?').all(executorId) as Array<{
+          task_id: string
+        }>
+      ).map((row) => row.task_id),
+    )
+
     db.prepare('delete from hand where executor_id = ?').run(executorId)
     ids.forEach((id, index) => {
       db.prepare(
@@ -294,6 +332,11 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
       subject: executorId,
       after: { tasks: ids },
     })
+
+    // событие — только на новую выдачу: переустановка той же руки ничего не выдаёт заново
+    for (const id of ids) {
+      if (!previous.has(id)) appendAssigned(db, executorId, id, 'hand', actor)
+    }
 
     return getHand(db, executorId)
   })

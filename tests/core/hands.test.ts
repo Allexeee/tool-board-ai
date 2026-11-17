@@ -9,8 +9,9 @@ import { refreshReady, addDep } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { addExecutor } from '../../src/core/executors.ts'
-import { compareTasks, fillHand, getHand, setHand } from '../../src/core/hands.ts'
+import { compareTasks, dispatchHands, fillHand, getHand, setHand } from '../../src/core/hands.ts'
 import { dispatchPlan } from '../../src/core/views.ts'
+import { listEvents } from '../../src/core/events.ts'
 
 const plusMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -37,6 +38,19 @@ function seed(db: DatabaseSync): string {
   createTask(db, { ...base, title: 'Третий шаг' })
   refreshReady(db)
   return stage.id
+}
+
+interface Assigned {
+  executor: string
+  task: string
+  source: string
+}
+
+/** Выдачи из журнала: одно событие — одна выдача, по нему видно источник. */
+function assignedOf(db: DatabaseSync): Assigned[] {
+  return listEvents(db)
+    .filter((event) => event.type === 'hand.assigned')
+    .map((event) => JSON.parse(event.after!) as Assigned)
 }
 
 test('рука пополняется задачами того же этапа первыми', () => {
@@ -279,6 +293,71 @@ test('цепочка в руке обрывается на её размере',
 
   assert.deepEqual(w1, [`${stageId}-1`, `${stageId}-2`])
   assert.deepEqual(w2, [], 'шаг не отдают чужой руке в отрыве от цепочки')
+})
+
+test('каждая выдача оставляет hand.assigned со своим источником', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const [first, second, third] = [1, 2, 3].map((n) => `${stageId}-${n}`)
+
+  // рука выдаёт напрямую — источник hand
+  setHand(db, 'w1', [second], 'owner')
+  assert.deepEqual(assignedOf(db), [{ executor: 'w1', task: second, source: 'hand' }])
+
+  // раздача раскладывает остаток — источник dispatch
+  dispatchHands(db)
+  assert.deepEqual(assignedOf(db).slice(1), [
+    { executor: 'w1', task: first, source: 'dispatch' },
+    { executor: 'w2', task: third, source: 'dispatch' },
+  ])
+
+  // взятие по id задачи, лежавшей в чужой руке, — источник hand
+  takeTask(db, { executor: 'w1', taskId: third })
+
+  // взятие по id задачи, которой ни у кого не было — источник take
+  const pool = createTask(db, {
+    title: 'Поправить опечатку',
+    dod: ['опечатки нет'],
+    size: 'XS',
+    skill: 'backend',
+    class: 'quick',
+    scope: ['docs/**'],
+  })
+  refreshReady(db)
+  takeTask(db, { executor: 'w2', taskId: pool.id })
+
+  const events = assignedOf(db)
+  assert.deepEqual(
+    events.map((event) => event.source),
+    ['hand', 'dispatch', 'dispatch', 'hand', 'take'],
+    'источники различаются: рука, раздача и взятие по id',
+  )
+  assert.equal(
+    events.length,
+    5,
+    'событий ровно столько, сколько выдач: выдача рукой, две раздачи и два взятия по id',
+  )
+})
+
+test('повторная выдача не удваивает событие: их ровно по выдачам', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const [first, second] = [1, 2].map((n) => `${stageId}-${n}`)
+
+  setHand(db, 'w1', [first], 'owner')
+  setHand(db, 'w1', [first], 'owner')
+  assert.deepEqual(assignedOf(db).map((event) => event.task), [first], 'та же рука — не новая выдача')
+
+  setHand(db, 'w1', [first, second], 'owner')
+  assert.deepEqual(
+    assignedOf(db).map((event) => event.task),
+    [first, second],
+    'добавленная задача — одна выдача',
+  )
+
+  // взятие без id идёт из уже выданной руки: новых выдач нет
+  takeTask(db, { executor: 'w1' })
+  assert.equal(assignedOf(db).length, 2)
 })
 
 
