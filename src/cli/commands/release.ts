@@ -46,13 +46,22 @@ export default async function command(args: ParsedArgs) {
         ? `есть новые возможности: ${suggestion.features} задач`
         : `только исправления: ${suggestion.fixes} задач`
 
+    const pending = pendingRelease(db)
+    const changes = pending.map((stage) => `  ${stage.featureId}  ${stage.featureName} — ${stage.stageName}`)
+
     ok(
-      { suggestion },
+      { suggestion, pending },
       [
         `после v${suggestion.version}: задач ${suggestion.tasks}, из них новых возможностей ${suggestion.features}, дефектов и инцидентов ${suggestion.fixes}`,
         `предлагаю: ${suggestion.level} — ${reason}`,
         '',
-        `подтвердите уровень: release ${suggestion.level} --reason "почему"`,
+        'ИЗМЕНЕНИЯ РЕЛИЗА',
+        ...changes,
+        '',
+        'РЕВЬЮ (смотрит только эти изменения):',
+        `  1. тот же агент-оркестратор — дешевле, точность ниже: release ${suggestion.level} --reason "почему" --review same`,
+        `  2. свежий агент — дороже, точнее:                    release ${suggestion.level} --reason "почему" --review fresh`,
+        `  3. без ревью:                                        release ${suggestion.level} --reason "почему" --review none`,
       ].join('\n'),
     )
     return 0
@@ -60,7 +69,7 @@ export default async function command(args: ParsedArgs) {
 
   const level = requested as ReleaseLevel
   if (!words.includes(level)) {
-    throw new UserError(3, 'использование: release major|minor|patch --reason "почему"')
+    throw new UserError(3, 'использование: release major|minor|patch --reason "почему" --review same|fresh|none')
   }
 
   const reason = stringFlag(args, 'reason')
@@ -68,10 +77,22 @@ export default async function command(args: ParsedArgs) {
     throw new UserError(3, `нужна причина уровня: release ${level} --reason "почему именно так"`)
   }
 
+  const review = stringFlag(args, 'review')
+  if (!review) {
+    throw new UserError(
+      3,
+      `выберите ревью перед релизом: --review same (тот же агент), fresh (свежий агент) или none (без ревью)`,
+    )
+  }
+  if (!['same', 'fresh', 'none'].includes(review)) {
+    throw new UserError(3, `неизвестный вариант ревью ${review}: same, fresh или none`)
+  }
+
   const result = release(db, {
     root: project.root,
     level,
     reason: reason.trim(),
+    review: review as 'same' | 'fresh' | 'none',
     config: project.config,
     actor: 'owner',
   })

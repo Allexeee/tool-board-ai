@@ -192,3 +192,16 @@ test('этап, записанный в релиз, больше не попад
 
 
 
+
+test('выбор ревью попадает в changelog и событие', () => {
+  const { db, root } = repoWithMergedStage()
+  const config = readConfig(join(root, '.toolbox-al/config.json'))
+
+  const result = release(db, { root, level: 'minor', reason: 'новое', review: 'fresh', config, actor: 'owner' })
+
+  assert.match(result.changelog ?? '', /ревью: fresh/)
+  const event = db
+    .prepare("select after from events where type = 'release.created' order by id desc limit 1")
+    .get() as { after: string }
+  assert.equal((JSON.parse(event.after) as { review: string }).review, 'fresh')
+})

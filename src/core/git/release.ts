@@ -136,6 +136,7 @@ export function release(
     root: string
     level: ReleaseLevel
     reason?: string
+    review?: 'same' | 'fresh' | 'none'
     config: { branches: { main: string; dev: string } }
     actor: string
   },
@@ -162,6 +163,7 @@ export function release(
   const changelog =
     `## ${tag} — ${date}\n\n` +
     (input.reason ? `${input.reason}\n\n` : '') +
+    (input.review ? `ревью: ${input.review}\n\n` : '') +
     stages.map((stage) => `- ${stage.feature} — ${stage.stage}`).join('\n')
 
   const dirty = runGit(input.root, ['status', '--porcelain', '--untracked-files=no'])
@@ -219,9 +221,10 @@ export function release(
     type: 'release.created',
     actor: input.actor,
     subject: tag,
-    after: { version, level: input.level, reason: input.reason ?? null, stages: stages.map((stage) => stage.id) },
+    after: { version, level: input.level, reason: input.reason ?? null, review: input.review ?? null, stages: stages.map((stage) => stage.id) },
   })
 
   return { released: true, version, tag, changelog }
 }
+
 
