@@ -5,6 +5,7 @@ import { appendEvent } from './events.ts'
 import { depsOf, isSatisfied } from './deps.ts'
 import { getExecutor, listExecutors, type Executor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
+import { isReady } from './deps.ts'
 
 const CLASS_ORDER: Record<string, number> = {
   expedite: 0,
@@ -302,9 +303,11 @@ export function nextTask(db: DatabaseSync, executorId: string): Task | null {
   const executor = getExecutor(db, executorId)
   if (!executor) return null
 
-  // рука — обещание: сначала берём из неё, в её порядке.
+  // рука — обещание: берём из неё в её порядке, но только то, что действительно можно взять сейчас.
   const hand = getHand(db, executorId)
-  if (hand.length > 0) return hand[0]
+  if (hand.length > 0) {
+    return hand.find((task) => task.status === 'ready' && isReady(db, task.id)) ?? null
+  }
 
   // руки нет — берём одну лучшую задачу, но не бронируем остальные: это дело dispatch.
   return candidateOrder(db, executor)[0] ?? null
