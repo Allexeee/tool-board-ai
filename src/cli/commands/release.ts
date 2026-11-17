@@ -62,6 +62,11 @@ export default async function command(args: ParsedArgs) {
         `  1. тот же агент-оркестратор — дешевле, точность ниже: release ${suggestion.level} --reason "почему" --review same`,
         `  2. свежий агент — дороже, точнее:                    release ${suggestion.level} --reason "почему" --review fresh`,
         `  3. без ревью:                                        release ${suggestion.level} --reason "почему" --review none`,
+        '',
+        'ПОСЛЕ РЕВЬЮ:',
+        '  критические находки — исправить до релиза (или владелец явно откладывает)',
+        '  остальные — записать запросом: request add "Ревью релиза: замечания"',
+        '  затем слияние: release ' + suggestion.level + ' --reason "…" --review …',
       ].join('\n'),
     )
     return 0
