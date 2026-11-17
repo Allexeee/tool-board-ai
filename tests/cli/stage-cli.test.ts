@@ -107,3 +107,34 @@ test('stage merge сбрасывает сессии задач своего эт
   const shown = run(dir, ['task', 'session', 'F1.S1-1'])
   assert.match(shown.out, /сессия не задана/)
 })
+
+test('stage merge не ждёт отложенных и называет их', () => {
+  const dir = makeRepoWithDev()
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'S1', '--goal', 'можно платить', '--appetite', '2 дня'])
+  run(dir, ['stage', 'activate', 'F1'])
+  run(dir, ['task', 'add', 'F1.S1', 'Шаг', '--dod', 'а', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'add', 'F1.S1', 'Долг', '--dod', 'б', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['feature', 'start', 'F1'])
+
+  const deferred = run(dir, ['task', 'defer', 'F1.S1-2', '--reason', 'ждём решения владельца'])
+  assert.equal(deferred.code, 0, deferred.err)
+
+  // merge смотрит только на статус: первую закрываем без git-отчёта
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'done' where id = 'F1.S1-1'").run()
+  db.close()
+
+  const merged = run(dir, ['stage', 'merge', 'F1.S1'])
+  assert.equal(merged.code, 0, merged.err + merged.out)
+  assert.match(merged.out, /слит/)
+  assert.match(merged.out, /не вошло: F1\.S1-2/, 'отложенная названа, а не тихо пропущена')
+
+  const shown = run(dir, ['task', 'show', 'F1.S1-2'])
+  assert.match(shown.out, /статус: deferred/)
+  assert.match(shown.out, /причина: ждём решения владельца/)
+
+  assert.doesNotMatch(run(dir, ['task', 'open']).out, /F1\.S1-2/, 'отложенная не в открытых')
+})

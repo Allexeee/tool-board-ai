@@ -44,6 +44,29 @@ export function pendingRelease(db: DatabaseSync): PendingStage[] {
   return stages.filter((stage) => !released.has(stage.stageId))
 }
 
+export interface DeferredTask {
+  id: string
+  title: string
+  reason: string | null
+  stageId: string
+  featureId: string
+}
+
+/**
+ * Отложенные задачи уже слитых этапов: в релиз они не входят, но и не исчезают.
+ * Отчёт релиза показывает их, пока владелец не примет решение, — иначе пропуск был бы тихим.
+ */
+export function deferredInRelease(db: DatabaseSync): DeferredTask[] {
+  return db
+    .prepare(
+      `select t.id as id, t.title as title, t.reason as reason, t.stage_id as stageId, s.feature_id as featureId
+       from tasks t join stages s on s.id = t.stage_id
+       where t.status = 'deferred' and s.status = 'merged'
+       order by s.feature_id, t.created_at, t.id`,
+    )
+    .all() as unknown as DeferredTask[]
+}
+
 export interface LevelSuggestion {
   version: string
   level: 'minor' | 'patch'

@@ -3,6 +3,7 @@ import { UserError } from '../cli/errors.ts'
 import { allocateId, childId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
+import { refreshReady } from './deps.ts'
 import { normalizeScope, validateTaskInput, type NewTask, type TaskClass, type TaskKind, type TaskSeverity, type TaskSize, type TaskScope } from './validate.ts'
 
 export type { NewTask, TaskClass, TaskKind, TaskSeverity, TaskSize, TaskScope } from './validate.ts'
@@ -15,6 +16,7 @@ export type TaskStatus =
   | 'blocked'
   | 'needs_owner'
   | 'in_review'
+  | 'deferred'
   | 'done'
   | 'cancelled'
 
@@ -87,8 +89,11 @@ const toTask = (row: Row): Task => ({
   createdAt: row.created_at,
 })
 
+// отложенная задача не открыта: её ждёт владелец, а не исполнитель
 export function openTasks(db: DatabaseSync): Task[] {
-  return listTasks(db).filter((task) => task.status !== 'done' && task.status !== 'cancelled')
+  return listTasks(db).filter(
+    (task) => task.status !== 'done' && task.status !== 'cancelled' && task.status !== 'deferred',
+  )
 }
 
 export function createTask(db: DatabaseSync, input: NewTask): Task {
@@ -318,6 +323,70 @@ export function updateTask(db: DatabaseSync, id: string, patch: Partial<{
   if (next.status !== 'ready') db.prepare('delete from hand where task_id = ?').run(id)
 
   return next
+}
+
+/**
+ * Отложить задачу: решение владельца, а не исполнителя. Отложенная задача
+ * не держит этап — она перечисляется в результате слияния, но не ждёт его.
+ */
+export function deferTask(
+  db: DatabaseSync,
+  input: { id: string; actor: string; reason: string },
+): Task {
+  return tx(db, () => {
+    const reason = input.reason.trim()
+    if (!reason) throw new UserError(3, 'нужна причина: --reason "почему задача отложена"')
+
+    const current = getTask(db, input.id)
+    if (!current) throw new UserError(3, `задача ${input.id} не найдена`)
+    if (current.status === 'deferred') throw new UserError(1, `задача ${current.id} уже отложена`)
+    if (current.status === 'done' || current.status === 'cancelled') {
+      throw new UserError(1, `задача ${current.id} закрыта: ${current.status}`)
+    }
+
+    const updated = updateTask(db, current.id, {
+      status: 'deferred',
+      holder: null,
+      leaseUntil: null,
+      reason,
+    })
+
+    appendEvent(db, {
+      type: 'task.deferred',
+      actor: input.actor,
+      subject: current.id,
+      before: { status: current.status, holder: current.holder },
+      after: { status: 'deferred' },
+      note: reason,
+    })
+
+    return updated
+  })
+}
+
+/** Вернуть отложенную задачу в работу: статус пересчитывается по зависимостям, как у любой открытой. */
+export function undeferTask(db: DatabaseSync, input: { id: string; actor: string }): Task {
+  return tx(db, () => {
+    const current = getTask(db, input.id)
+    if (!current) throw new UserError(3, `задача ${input.id} не найдена`)
+    if (current.status !== 'deferred') {
+      throw new UserError(1, `задача ${current.id} не отложена: ${current.status}`)
+    }
+
+    updateTask(db, current.id, { status: 'open', holder: null, leaseUntil: null, reason: null })
+    refreshReady(db)
+
+    const updated = getTask(db, current.id)!
+    appendEvent(db, {
+      type: 'task.undeferred',
+      actor: input.actor,
+      subject: current.id,
+      before: { status: 'deferred' },
+      after: { status: updated.status },
+    })
+
+    return updated
+  })
 }
 
 /**

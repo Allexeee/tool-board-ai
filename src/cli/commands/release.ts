@@ -1,7 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { pendingRelease, release, suggestLevel, type ReleaseLevel } from '../../core/git/release.ts'
-import { stringFlag, type ParsedArgs } from '../args.ts'
+import { deferredInRelease, pendingRelease, release, suggestLevel, type ReleaseLevel } from '../../core/git/release.ts'
+import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
@@ -33,40 +33,52 @@ export default async function command(args: ParsedArgs) {
 
   const words = ['major', 'minor', 'patch'] as const
   const requested = args.sub ?? (args.positionals[0] ?? stringFlag(args, 'kind'))
+  // dry-run — это отчёт о том, что войдёт в релиз: ничего не пишет и не мержит
+  const dryRun = boolFlag(args, 'dry-run')
 
-  if (!requested) {
+  if (!requested || dryRun) {
     const suggestion = suggestLevel(db, project.root)
     if (!suggestion) {
       ok({ suggestion: null }, 'нет слитых этапов с прошлого релиза: релизить нечего')
       return 1
     }
 
+    const pending = pendingRelease(db)
+    const deferred = deferredInRelease(db)
+    const changes = pending.map((stage) => `  ${stage.featureId}  ${stage.featureName} — ${stage.stageName}`)
+    const level: ReleaseLevel = words.includes(requested as ReleaseLevel)
+      ? (requested as ReleaseLevel)
+      : suggestion.level
     const reason =
-      suggestion.level === 'minor'
+      level === 'minor'
         ? `есть новые возможности: ${suggestion.features} задач`
         : `только исправления: ${suggestion.fixes} задач`
 
-    const pending = pendingRelease(db)
-    const changes = pending.map((stage) => `  ${stage.featureId}  ${stage.featureName} — ${stage.stageName}`)
-
     ok(
-      { suggestion, pending },
+      { suggestion, pending, deferred },
       [
         `после v${suggestion.version}: задач ${suggestion.tasks}, из них новых возможностей ${suggestion.features}, дефектов и инцидентов ${suggestion.fixes}`,
-        `предлагаю: ${suggestion.level} — ${reason}`,
+        `предлагаю: ${level} — ${reason}`,
         '',
         'ИЗМЕНЕНИЯ РЕЛИЗА',
         ...changes,
+        ...(deferred.length === 0
+          ? []
+          : [
+              '',
+              'НЕ ВОШЛО, ЖДЁТ РЕШЕНИЯ',
+              ...deferred.map((task) => `  ${task.id}  ${task.reason ?? 'без причины'}`),
+            ]),
         '',
         'РЕВЬЮ (смотрит только эти изменения):',
-        `  1. тот же агент-оркестратор — дешевле, точность ниже: release ${suggestion.level} --reason "почему" --review same`,
-        `  2. свежий агент — дороже, точнее:                    release ${suggestion.level} --reason "почему" --review fresh`,
-        `  3. без ревью:                                        release ${suggestion.level} --reason "почему" --review none`,
+        `  1. тот же агент-оркестратор — дешевле, точность ниже: release ${level} --reason "почему" --review same`,
+        `  2. свежий агент — дороже, точнее:                    release ${level} --reason "почему" --review fresh`,
+        `  3. без ревью:                                        release ${level} --reason "почему" --review none`,
         '',
         'ПОСЛЕ РЕВЬЮ:',
         '  критические находки — исправить до релиза (или владелец явно откладывает)',
         '  остальные — записать запросом: request add "Ревью релиза: замечания"',
-        '  затем слияние: release ' + suggestion.level + ' --reason "…" --review …',
+        '  затем слияние: release ' + level + ' --reason "…" --review …',
       ].join('\n'),
     )
     return 0
