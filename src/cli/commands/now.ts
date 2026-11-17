@@ -38,23 +38,8 @@ export default async function command(args: ParsedArgs) {
   const view = nowView(db, { all })
   const owner = ownerView(db, { all })
 
-  // строки этапов уже отсортированы: готовые → в работе → очередь.
-  // фичу без этапов (или только с отменёнными) показываем одной строкой, иначе она исчезает из обзора.
+  // ownerView уже отдаёт по строке на каждую фичу, включая фичу без этапов
   const stageRows: OwnerStageRow[] = [...owner.stages]
-  const shown = new Set(stageRows.map((row) => row.featureId))
-  for (const feature of view.features) {
-    if (shown.has(feature.id)) continue
-    stageRows.push({
-      featureId: feature.id,
-      featureName: feature.name,
-      stageId: '',
-      seq: 0,
-      total: 0,
-      progress: { current: 0, total: 0 },
-      status: 'pending',
-      name: feature.name,
-    })
-  }
 
   const featureWidth = Math.max(0, ...stageRows.map((row) => row.featureId.length))
   const progressWidth = Math.max(

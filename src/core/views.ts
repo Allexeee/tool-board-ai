@@ -492,7 +492,7 @@ export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): Ow
 
     let status: OwnerStageStatus
     if (feature.status === 'done' || allMerged) status = 'done'
-    else if (allClosed) status = 'merge'
+    else if (allClosed || stageStates.includes('merge')) status = 'merge'
     else if (stageStates.includes('wip')) status = 'wip'
     else status = 'pending'
 
