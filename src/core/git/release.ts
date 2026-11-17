@@ -29,6 +29,36 @@ export function pendingRelease(db: DatabaseSync): PendingStage[] {
     .all(lastRelease.at ?? '0000-00-00') as unknown as PendingStage[]
 }
 
+export interface LevelSuggestion {
+  version: string
+  level: 'minor' | 'patch'
+  tasks: number
+  features: number
+  fixes: number
+}
+
+/** Что выпустим и каким уровнем: новые возможности — minor, только исправления — patch. */
+export function suggestLevel(db: DatabaseSync): LevelSuggestion | null {
+  const stages = pendingRelease(db)
+  if (stages.length === 0) return null
+
+  const placeholders = stages.map(() => '?').join(', ')
+  const rows = db
+    .prepare(`select kind from tasks where stage_id in (${placeholders}) and status = 'done'`)
+    .all(...stages.map((stage) => stage.stageId)) as Array<{ kind: string }>
+
+  const features = rows.filter((row) => row.kind === 'task').length
+  const fixes = rows.length - features
+
+  return {
+    version: currentVersion(db),
+    level: features > 0 ? 'minor' : 'patch',
+    tasks: rows.length,
+    features,
+    fixes,
+  }
+}
+
 export interface ReleaseResult {
   released: boolean
   version?: string
@@ -54,6 +84,7 @@ export function release(
   input: {
     root: string
     level: ReleaseLevel
+    reason?: string
     config: { branches: { main: string; dev: string } }
     actor: string
   },
@@ -82,7 +113,9 @@ export function release(
   const tag = `v${version}`
   const date = new Date().toISOString().slice(0, 10)
   const changelog =
-    `## ${tag} — ${date}\n\n` + stages.map((stage) => `- ${stage.feature} — ${stage.stage}`).join('\n')
+    `## ${tag} — ${date}\n\n` +
+    (input.reason ? `${input.reason}\n\n` : '') +
+    stages.map((stage) => `- ${stage.feature} — ${stage.stage}`).join('\n')
 
   const dirty = runGit(input.root, ['status', '--porcelain', '--untracked-files=no'])
   if (dirty) {
@@ -130,7 +163,7 @@ export function release(
     type: 'release.created',
     actor: input.actor,
     subject: tag,
-    after: { version, stages: stages.map((stage) => stage.id) },
+    after: { version, level: input.level, reason: input.reason ?? null, stages: stages.map((stage) => stage.id) },
   })
 
   return { released: true, version, tag, changelog }
