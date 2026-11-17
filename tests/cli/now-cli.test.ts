@@ -219,6 +219,32 @@ test('now показывает очередь руки исполнителя', 
   assert.match(view.out, /w1\s+свободен · рука: T1/)
 })
 
+test('now показывает занятость исполнителя: причину и срок', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  // --for — тот же срок, что --until: так занятость назначает владелец
+  const busy = run(dir, ['executor', 'busy', 'w1', '--note', 'разбор F41', '--for', '30m'])
+  assert.equal(busy.code, 0, busy.err)
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+занят: разбор F41 \(до \d{2}:\d{2}\) · рука пуста/)
+  assert.doesNotMatch(view.out, /w1\s+свободен/)
+})
+
+test('now различает занятого и свободного исполнителя', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['executor', 'add', 'w2', '--skills', 'backend'])
+  run(dir, ['executor', 'busy', 'w1', '--note', 'проверка чужой работы', '--until', '1h'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+занят: проверка чужой работы/)
+  assert.match(view.out, /w2\s+свободен · рука пуста/)
+})
+
 test('now в пайпе печатает чистый текст без escape-последовательностей', () => {
   const dir = project()
   run(dir, ['request', 'add', 'Платежи'])

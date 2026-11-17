@@ -2,7 +2,7 @@
 import { advanceTime } from './clock.ts'
 import { listFeatures } from './features.ts'
 import { listStages, type StageStatus } from './stages.ts'
-import { listExecutors } from './executors.ts'
+import { busyOf, listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
 import { getHand, fillHand, nextTask } from './hands.ts'
 import { ownerHand } from './questions.ts'
@@ -20,7 +20,15 @@ export interface NowView {
     stage: { id: string; seq: number; total: number; done: number; counts: Record<string, number> }
   }>
   pool: Array<{ id: string; title: string }>
-  holders: Array<{ executor: string; task: string | null; active: string[]; hand: string[]; session: string | null }>
+  holders: Array<{
+    executor: string
+    task: string | null
+    active: string[]
+    hand: string[]
+    session: string | null
+    /** занятость без задачи: причина и срок; null — свободен */
+    busy: { reason: string; until: string } | null
+  }>
   waitingOwner: number
   requests: Array<{ id: string; title: string }>
   plans: Array<{ id: string; requestId: string; title: string }>
@@ -80,12 +88,14 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
 
   const holders = listExecutors(db).map((executor) => {
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
+    const busy = busyOf(db, executor.id)
     return {
       executor: executor.id,
       session: executor.session,
       task: active[0]?.id ?? null,
       active: active.map((task) => task.id),
       hand: getHand(db, executor.id).map((task) => task.id),
+      busy: busy ? { reason: busy.reason, until: busy.until } : null,
     }
   })
 

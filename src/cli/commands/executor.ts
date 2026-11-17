@@ -12,6 +12,8 @@ import {
 import {
   addExecutor,
   bindSession,
+  busyOf,
+  clearBusy,
   formatPermission,
   getExecutor,
   listExecutors,
@@ -19,6 +21,7 @@ import {
   removeExecutor,
   renameExecutor,
   resetSession,
+  setBusy,
   setModel,
   setPermissions,
   setSkills,
@@ -215,6 +218,35 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'busy') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor busy w1 --note "разбор F41" --until 30m')
+
+    const note = stringFlag(args, 'note')
+    if (note === undefined || !note.trim()) {
+      throw new UserError(3, 'нужна причина занятости: --note "разбор F41"')
+    }
+
+    // срок: --for как в подсказке владельца, --until — как знает парсер аргументов
+    const until = stringFlag(args, 'for') ?? stringFlag(args, 'until')
+    if (until === undefined) {
+      throw new UserError(3, 'нужен срок занятости: --until 30m (2h, 1d или дата ISO)')
+    }
+
+    const busy = setBusy(db, { executorId: id, reason: note, until, actor: stringFlag(args, 'as') ?? id })
+    ok(busy, `${id}: занят до ${localTime(busy.until)} — ${busy.reason}`)
+    return 0
+  }
+
+  if (args.sub === 'free') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: executor free w1')
+
+    const busy = clearBusy(db, { executorId: id, actor: stringFlag(args, 'as') ?? id })
+    ok(busy, busy ? `${id}: свободен (было: ${busy.reason})` : `${id}: уже свободен`)
+    return 0
+  }
+
   const rows = listExecutors(db)
   ok(
     rows,
@@ -224,9 +256,12 @@ export default async function command(args: ParsedArgs) {
           .map((e) => {
             const model = e.model ?? 'наследует'
             const permissions = e.permissions.map(formatPermission).join(', ') || 'без особых прав'
+            const busy = busyOf(db, e.id)
+            const state = busy ? `занят до ${localTime(busy.until)}: ${busy.reason}` : null
             return (
               `${e.id.padEnd(12)} ${e.kind.padEnd(6)} ${e.skills.join(', ')}` +
-              `\n${' '.repeat(19)}модель: ${model} · шагов: ${e.steps} · права: ${permissions}`
+              `\n${' '.repeat(19)}модель: ${model} · шагов: ${e.steps} · права: ${permissions}` +
+              (state ? `\n${' '.repeat(19)}${state}` : '')
             )
           })
           .join('\n'),
@@ -238,6 +273,11 @@ function syncStatusText(status: AgentSyncStatus): string {
   if (status === 'created') return 'создан'
   if (status === 'updated') return 'обновлён'
   return 'без изменений'
+}
+
+/** Срок занятости печатается в локальном времени: так его читает человек. */
+function localTime(iso: string): string {
+  return new Date(iso).toLocaleString('ru-RU')
 }
 
 /** Файл не удался или перенёсся не полностью: база уже изменена, поэтому это не ошибка команды. */

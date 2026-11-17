@@ -8,7 +8,7 @@ import { createTask, getTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask, assertFeatureWorktree } from '../../src/core/lease.ts'
-import { addExecutor } from '../../src/core/executors.ts'
+import { addExecutor, busyOf, clearBusy, setBusy } from '../../src/core/executors.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -195,6 +195,41 @@ test('две задачи пула с одной областью не беру�
   )
 })
 
+
+test('взятие задачи снимает занятость исполнителя', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  setBusy(db, { executorId: 'w1', reason: 'разбор F41', until: '30m', actor: 'w1' })
+  assert.notEqual(busyOf(db, 'w1'), null)
+
+  takeTask(db, { executor: 'w1', taskId: `${stageId}-1` })
+
+  // отметка «разбор» больше не висит: держателя задачи видно по задаче
+  assert.equal(busyOf(db, 'w1'), null)
+})
+
+test('взятие задачи свободным исполнителем не пишет событие освобождения', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  takeTask(db, { executor: 'w1', taskId: `${stageId}-1` })
+
+  const free = db
+    .prepare("select count(*) as c from events where subject = 'w1' and type = 'executor.free'")
+    .get() as { c: number }
+  assert.equal(free.c, 0)
+})
+
+test('взятие задачи не трогает занятость другого исполнителя', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  setBusy(db, { executorId: 'w2', reason: 'проверка чужой работы', until: '1h', actor: 'w2' })
+
+  takeTask(db, { executor: 'w1', taskId: `${stageId}-1` })
+
+  assert.equal(busyOf(db, 'w2')?.reason, 'проверка чужой работы')
+  assert.equal(clearBusy(db, { executorId: 'w2', actor: 'owner' })?.reason, 'проверка чужой работы')
+})
 
 test('журнал аренды не противоречит статусу, причина исчерпания сохраняется', () => {
   const db = openDb(':memory:')

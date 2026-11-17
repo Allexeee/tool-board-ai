@@ -381,3 +381,110 @@ export function resetSession(db: DatabaseSync, input: { executorId: string; acto
     return getExecutor(db, executor.id)!
   })
 }
+
+/**
+ * Занятость без задачи: разбор кода, план, проверка чужой работы.
+ * Живёт в журнале событий — истёкший срок не считается занятостью сам, без фоновых процессов.
+ */
+export interface ExecutorBusy {
+  reason: string
+  until: string
+  since: string
+}
+
+const unitMs = (unit: string): number => {
+  const first = unit.toLowerCase()[0]
+  if (first === 'm' || first === 'м') return 60_000
+  if (first === 'h' || first === 'ч') return 3_600_000
+  if (first === 'd' || first === 'д') return 86_400_000
+  return 1_000
+}
+
+/**
+ * Срок занятости: «30m», «2h», «1d», «45s» или момент ISO.
+ * Возвращает ISO — в журнал и в ответы попадает один формат.
+ */
+export function parseBusyUntil(value: string, now: Date = new Date()): string {
+  const raw = value.trim()
+  if (!raw) throw new UserError(3, 'нужен срок занятости: --until 30m (2h, 1d или дата ISO)')
+
+  const relative = /^(\d+)\s*(m|min|минут\w*|h|ч|час\w*|d|д|дн\w*|s|с|сек\w*)$/i.exec(raw)
+  const until = relative
+    ? new Date(now.getTime() + Number(relative[1]) * unitMs(relative[2]))
+    : new Date(raw)
+  if (Number.isNaN(until.getTime())) {
+    throw new UserError(3, `срок «${raw}»: нужен формат 30m, 2h, 1d (или дата ISO)`)
+  }
+  if (until.getTime() <= now.getTime()) {
+    throw new UserError(3, `срок «${raw}» уже прошёл: занятость должна кончаться в будущем`)
+  }
+  return until.toISOString()
+}
+
+/** Текущая занятость или null: снятая, истёкшая и отсутствующая — одно и то же. */
+export function busyOf(
+  db: DatabaseSync,
+  executorId: string,
+  at = new Date().toISOString(),
+): ExecutorBusy | null {
+  const row = db
+    .prepare(
+      `select at, type, note, after from events
+       where subject = ? and type in ('executor.busy', 'executor.free')
+       order by id desc limit 1`,
+    )
+    .get(executorId) as { at: string; type: string; note: string | null; after: string | null } | undefined
+
+  if (!row || row.type !== 'executor.busy') return null
+
+  const after = JSON.parse(row.after ?? '{}') as { reason?: string; until?: string }
+  if (!after.until) return null
+  if (Date.parse(after.until) <= Date.parse(at)) return null
+
+  return { reason: after.reason ?? row.note ?? '', until: after.until, since: row.at }
+}
+
+export function setBusy(
+  db: DatabaseSync,
+  input: { executorId: string; reason: string; until: string; actor: string; now?: Date },
+): ExecutorBusy {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    const reason = input.reason.trim()
+    if (!reason) throw new UserError(3, 'нужна причина занятости: --note "разбор F41"')
+    const until = parseBusyUntil(input.until, input.now)
+
+    appendEvent(db, {
+      type: 'executor.busy',
+      actor: input.actor,
+      subject: executor.id,
+      note: reason,
+      after: { reason, until },
+    })
+
+    return busyOf(db, executor.id, (input.now ?? new Date()).toISOString())!
+  })
+}
+
+/** Снятие занятости: у свободного исполнителя это тихий no-op, а не ошибка. */
+export function clearBusy(db: DatabaseSync, input: { executorId: string; actor: string }): ExecutorBusy | null {
+  return tx(db, () => {
+    const executor = getExecutor(db, input.executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+
+    const busy = busyOf(db, executor.id)
+    if (!busy) return null
+
+    appendEvent(db, {
+      type: 'executor.free',
+      actor: input.actor,
+      subject: executor.id,
+      note: 'свободен',
+      before: { reason: busy.reason, until: busy.until },
+    })
+
+    return busy
+  })
+}

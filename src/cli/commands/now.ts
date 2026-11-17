@@ -74,12 +74,16 @@ export default async function command(args: ParsedArgs) {
   const pool = view.pool.map((task) => `  ${task.id.padEnd(12)} ${task.title}`)
 
   const holders = view.holders.map((holder) => {
-    const active =
-      holder.active.length > 0
-        ? paint(`держит ${holder.active.join(', ')}`, 'cyan')
-        : paint('свободен', 'gray')
+    // занятость без задачи видна так же ясно, как выданная задача: причина и срок.
+    const state: string[] = []
+    if (holder.active.length > 0) state.push(paint(`держит ${holder.active.join(', ')}`, 'cyan'))
+    if (holder.busy) {
+      state.push(paint(`занят: ${holder.busy.reason} (до ${shortTime(holder.busy.until)})`, 'cyan'))
+    }
+    if (state.length === 0) state.push(paint('свободен', 'gray'))
+
     const hand = holder.hand.length > 0 ? `рука: ${holder.hand.join(', ')}` : 'рука пуста'
-    return `  ${holder.executor.padEnd(12)} ${active} · ${hand}`
+    return `  ${holder.executor.padEnd(12)} ${state.join(' · ')} · ${hand}`
   })
 
   const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
@@ -100,5 +104,12 @@ export default async function command(args: ParsedArgs) {
 
   ok(view, text)
   return 0
+}
+
+/** Срок занятости печатается локальным временем: человек читает часы, а не ISO. */
+function shortTime(iso: string): string {
+  const at = new Date(iso)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}`
 }
 

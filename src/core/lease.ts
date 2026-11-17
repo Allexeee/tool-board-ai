@@ -2,7 +2,7 @@
 import { UserError } from '../cli/errors.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { getExecutor, assertSkill, touchExecutor } from './executors.ts'
+import { getExecutor, assertSkill, touchExecutor, clearBusy } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 import { nextTask } from './hands.ts'
 import { isReady } from './deps.ts'
@@ -161,6 +161,8 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
     }
 
     db.prepare('delete from hand where task_id = ?').run(task.id)
+    // занятость «без задачи» кончается вместе с появлением задачи: держатель теперь известен.
+    clearBusy(db, { executorId: executor.id, actor: executor.id })
     touchExecutor(db, executor.id)
     appendEvent(db, {
       type: 'task.taken',

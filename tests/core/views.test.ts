@@ -6,7 +6,7 @@ import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
-import { addExecutor } from '../../src/core/executors.ts'
+import { addExecutor, clearBusy, setBusy } from '../../src/core/executors.ts'
 import { nowView, dispatchPlan, ownerView } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
@@ -189,4 +189,33 @@ test('owner без all не показывает завершённые и от�
 
   assert.deepEqual(ownerView(db).stages, [])
   assert.equal(ownerView(db, { all: true }).stages.length, 2)
+})
+
+test('now отдаёт занятость рядом с рукой', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
+  addExecutor(db, { id: 'w3', kind: 'agent', skills: ['design'] })
+
+  const busy = setBusy(db, { executorId: 'w1', reason: 'разбор F41', until: '30m', actor: 'w1' })
+
+  const holders = nowView(db).holders
+  assert.deepEqual(holders.find((holder) => holder.executor === 'w1')!.busy, {
+    reason: 'разбор F41',
+    until: busy.until,
+  })
+
+  // у двух других занятости нет: строка говорит «свободен», а не падает
+  assert.equal(holders.find((holder) => holder.executor === 'w2')!.busy, null)
+  assert.equal(holders.find((holder) => holder.executor === 'w3')!.busy, null)
+})
+
+test('снятая занятость исчезает из now', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  setBusy(db, { executorId: 'w1', reason: 'проверка чужой работы', until: '1h', actor: 'w1' })
+  assert.notEqual(nowView(db).holders[0].busy, null)
+
+  clearBusy(db, { executorId: 'w1', actor: 'owner' })
+  assert.equal(nowView(db).holders[0].busy, null)
 })
