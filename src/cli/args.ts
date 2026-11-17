@@ -14,10 +14,10 @@ const KNOWN_FLAGS = new Set([
   'schedule', 'window', 'guard', 'action', 'cmd', 'on-missing', 'once', 'days', 'history', 'until', 'pin',
   'id', 'task', 'stage', 'feature', 'request', 'executor', 'session',
   'limit', 'from', 'main', 'dev', 'branch', 'force-outside', 'summary', 'checks', 'left', 'status',
-  'write', 'brief', 'model', 'steps', 'allow', 'deny', 'clear',
+  'write', 'brief', 'no-color', 'model', 'steps', 'allow', 'deny', 'clear',
 ])
 
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all', 'branch', 'pin', 'force-outside', 'write', 'brief', 'clear'])
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all', 'branch', 'pin', 'force-outside', 'write', 'brief', 'no-color', 'clear'])
 
 export type FlagValue = string | boolean | string[]
 

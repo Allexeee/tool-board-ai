@@ -7,7 +7,7 @@ import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { addExecutor } from '../../src/core/executors.ts'
-import { nowView, dispatchPlan } from '../../src/core/views.ts'
+import { nowView, dispatchPlan, ownerView } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
@@ -121,4 +121,72 @@ test('ready-задача пула видна в now отдельной стро�
   refreshReady(db)
 
   assert.ok(nowView(db).pool.some((task) => task.title === 'Поправить опечатку'))
+})
+
+test('owner строит строку на каждый этап фичи', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  addStage(db, { featureId: 'F1', name: 'S2', goal: 'g', appetite: '1 день' })
+
+  const rows = ownerView(db).stages
+  assert.equal(rows.length, 2)
+
+  const [first, second] = rows
+  assert.equal(first.featureId, 'F1')
+  assert.equal(first.featureName, 'A')
+  assert.equal(first.stageId, 'F1.S1')
+  assert.equal(first.seq, 1)
+  assert.equal(first.total, 2)
+  assert.equal(first.name, 'S1')
+  assert.equal(first.status, 'wip')
+  assert.deepEqual(first.progress, { current: 1, total: 3 })
+
+  assert.equal(second.seq, 2)
+  assert.equal(second.name, 'S2')
+  assert.equal(second.status, 'pending')
+  assert.deepEqual(second.progress, { current: 0, total: 0 })
+})
+
+test('owner показывает прогресс как текущую задачу из всех задач этапа', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update tasks set status = 'done' where id = ?").run(`${stageId}-1`)
+  db.prepare("update tasks set status = 'done' where id = ?").run(`${stageId}-2`)
+
+  const row = ownerView(db).stages[0]
+  assert.deepEqual(row.progress, { current: 3, total: 3 })
+})
+
+test('owner сортирует этапы: готовые, затем в работе, затем очередь', () => {
+  const db = openDb(':memory:')
+  seed(db)
+
+  const done = addFeature(db, { name: 'B', rank: 2 })
+  addStage(db, { featureId: done.id, name: 'B1', goal: 'g', appetite: '1 день' })
+  db.prepare("update stages set status = 'merged' where feature_id = ?").run(done.id)
+
+  const queued = addFeature(db, { name: 'C', rank: 3 })
+  addStage(db, { featureId: queued.id, name: 'C1', goal: 'g', appetite: '1 день' })
+
+  const working = addFeature(db, { name: 'D', rank: 4 })
+  addStage(db, { featureId: working.id, name: 'D1', goal: 'g', appetite: '1 день' })
+  db.prepare("update stages set status = 'active' where feature_id = ?").run(working.id)
+
+  assert.deepEqual(
+    ownerView(db).stages.map((row) => row.stageId),
+    [`${done.id}.S1`, 'F1.S1', `${working.id}.S1`, `${queued.id}.S1`],
+  )
+})
+
+test('owner без all не показывает завершённые и отменённые фичи', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  db.prepare("update features set status = 'done' where id = 'F1'").run()
+
+  const cancelled = addFeature(db, { name: 'B', rank: 2 })
+  addStage(db, { featureId: cancelled.id, name: 'B1', goal: 'g', appetite: '1 день' })
+  db.prepare("update features set status = 'cancelled' where id = ?").run(cancelled.id)
+
+  assert.deepEqual(ownerView(db).stages, [])
+  assert.equal(ownerView(db, { all: true }).stages.length, 2)
 })

@@ -8,8 +8,12 @@ import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/toolbox-al.ts')
 
-function run(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+function run(dir: string, args: string[], env: Record<string, string> = {}) {
+  const result = spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 
@@ -71,14 +75,15 @@ test('now не показывает план закрытого запроса',
   assert.doesNotMatch(view.out, /ПЛАНЫ НА УТВЕРЖДЕНИЕ/)
 })
 
-test('now показывает запрос в inbox и план на утверждение', () => {
+test('now считает запросы в inbox и показывает фичу без этапов', () => {
   const dir = project()
   run(dir, ['request', 'add', 'Оплата'])
   run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
 
   const view = run(dir, ['now'])
-  assert.match(view.out, /ЗАПРОСЫ В INBOX/)
-  assert.match(view.out, /Оплата/)
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^Открытых запросов: 1$/m)
+  assert.match(view.out, /^F1\s+\[0\/0\]\s+0\/0\s+pending\s+Оплата$/m)
 })
 
 test('now показывает, сколько этапов не выпущено', () => {
@@ -103,7 +108,41 @@ test('now на пустом проекте говорит, что работы �
   const view = run(dir, ['now'])
 
   assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^Открытых запросов: 0$/m)
   assert.match(view.out, /фич в работе нет/)
+})
+
+test('now первой строкой печатает число открытых запросов', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Первый'])
+  run(dir, ['request', 'add', 'Второй'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.equal(view.out.split('\n')[0], 'Открытых запросов: 2')
+})
+
+test('now печатает этапы таблицей: готовые, в работе, очередь', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Платежи'])
+  run(dir, ['feature', 'add', 'Платежи', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'Каркас', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['stage', 'add', 'F1', 'Проводка', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['stage', 'add', 'F1', 'Отчёты', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['task', 'add', 'F1.S2', 'Первая', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'add', 'F1.S2', 'Вторая', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'merged' where id = 'F1.S1'").run()
+  db.prepare("update stages set status = 'active' where id = 'F1.S2'").run()
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^F1\s+\[1\/3\]\s+0\/0\s+done\s+Каркас$/m)
+  assert.match(view.out, /^F1\s+\[2\/3\]\s+1\/2\s+wip\s+Проводка$/m)
+  assert.match(view.out, /^F1\s+\[3\/3\]\s+0\/0\s+pending\s+Отчёты$/m)
+  assert.doesNotMatch(view.out, /В РАБОТЕ|ГОТОВО К ЗАЛИВКЕ|^ФИЧИ$/m)
 })
 
 test('now прячет завершённые фичи, а --all показывает', () => {
@@ -119,6 +158,21 @@ test('now прячет завершённые фичи, а --all показыв�
 
   const all = run(dir, ['now', '--all'])
   assert.match(all.out, /Сделано/)
+})
+
+test('now --all показывает готовый этап завершённой фичи', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'Слитый', '--goal', 'g', '--appetite', '1 день'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'merged' where id = 'F1.S1'").run()
+  db.prepare("update features set status = 'done' where id = 'F1'").run()
+  db.close()
+
+  assert.doesNotMatch(run(dir, ['now']).out, /Слитый/)
+  assert.match(run(dir, ['now', '--all']).out, /^F1\s+\[1\/1\]\s+0\/0\s+done\s+Слитый$/m)
 })
 
 test('now показывает фичу в работе', () => {
@@ -163,5 +217,45 @@ test('now показывает очередь руки исполнителя', 
 
   const view = run(dir, ['now'])
   assert.match(view.out, /w1\s+свободен · рука: T1/)
+})
+
+test('now в пайпе печатает чистый текст без escape-последовательностей', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Платежи'])
+  run(dir, ['feature', 'add', 'Платежи', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'Каркас', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['task', 'add', 'F1.S1', 'Шаг', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'active' where id = 'F1.S1'").run()
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'F1.S1-1'").run()
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /\u001b\[/)
+  assert.match(view.out, /^F1\s+\[1\/1\]\s+1\/1\s+wip\s+Каркас$/m)
+  assert.match(view.out, /w1\s+держит F1\.S1-1 · рука пуста/)
+})
+
+test('now --json не добавляет цветовых кодов', () => {
+  const dir = project()
+  run(dir, ['feature', 'add', 'Оплата'])
+
+  const view = run(dir, ['now', '--json'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /\u001b\[/)
+  assert.doesNotThrow(() => JSON.parse(view.out))
+})
+
+test('now с NO_COLOR печатает чистый текст', () => {
+  const dir = project()
+  run(dir, ['feature', 'add', 'Оплата'])
+
+  const view = run(dir, ['now'], { NO_COLOR: '1' })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /\u001b\[/)
+  assert.match(view.out, /Оплата/)
 })
 

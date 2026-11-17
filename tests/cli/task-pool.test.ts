@@ -5,6 +5,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
+import { parseArgs } from '../../src/cli/args.ts'
 
 const bin = resolve('bin/toolbox-al.ts')
 const tmp = () => mkdtempSync(join(tmpdir(), 'al-pool-cli-'))
@@ -75,13 +76,18 @@ test('task list показывает ready после активации эта�
   assert.doesNotMatch(listed.out, /planned/)
 })
 
+// строка этапа: id, [seq/total], прогресс, статус, название — ширину пробелов не фиксируем.
+const stageLine = (featureId: string, seq: string, progress: string, status: string, name: string) =>
+  new RegExp(`${featureId}\\s+\\[${seq}\\]\\s+${progress}\\s+${status}\\s+${name}`)
+
 test('now считает planned отдельно и не выдаёт задачу за готовую', () => {
   const { dir } = projectWithPlannedStage()
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /planned 1/)
-  assert.doesNotMatch(view.out, /ready/)
+  assert.match(view.out, stageLine('F1', '1/1', '1/1', 'pending', 'S1'))
+  // задача неактивного этапа не попадает в пул: выдавать её за готовую нельзя.
+  assert.doesNotMatch(view.out, /ПУЛ/)
 })
 
 test('now показывает planned этап, когда предыдущий уже слит', () => {
@@ -95,8 +101,8 @@ test('now показывает planned этап, когда предыдущий
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /\[2\/2\] planned 1/)
-  assert.doesNotMatch(view.out, /\bdone\b/)
+  assert.match(view.out, stageLine('F1', '1/2', '1/1', 'done', 'S1'))
+  assert.match(view.out, stageLine('F1', '2/2', '1/1', 'pending', 'S2'))
 })
 
 test('now показывает активный этап', () => {
@@ -105,7 +111,7 @@ test('now показывает активный этап', () => {
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /\[1\/1\] ready 1/)
+  assert.match(view.out, stageLine('F1', '1/1', '1/1', 'wip', 'S1'))
 })
 
 test('приёмка двигает работу: следующий этап становится активным', () => {
@@ -138,4 +144,19 @@ test('now без этапов показывает фичу с нулевым с
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.match(view.out, /\[0\/0\]/)
+})
+
+test('now принимает --no-color и печатает без escape-кодов', () => {
+  const { dir } = projectWithPlannedStage()
+  run(dir, ['stage', 'activate', 'F1'])
+
+  // парсер не должен ругаться на неизвестный флаг
+  assert.equal(parseArgs(['now', '--no-color']).flags['no-color'], true)
+
+  const view = run(dir, ['now', '--no-color'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.err, /неизвестный флаг/)
+  assert.doesNotMatch(view.out, /\u001b\[/)
+  // данные на месте, выключен только цвет
+  assert.match(view.out, /\[1\/1\]/)
 })
