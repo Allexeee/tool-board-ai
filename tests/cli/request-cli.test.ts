@@ -97,6 +97,37 @@ test('request open на пустом срезе говорит об этом', (
   assert.match(opened.out, /открытых запросов нет/)
 })
 
+test('request open --brief печатает только id и статус', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-open-brief-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Первый'])
+  run(dir, ['request', 'add', 'Второй'])
+
+  const brief = run(dir, ['request', 'open', '--brief'])
+  assert.equal(brief.code, 0, brief.err)
+  assert.deepEqual(brief.out.trimEnd().split('\n'), ['R1    inbox', 'R2    inbox'])
+  assert.doesNotMatch(brief.out, /Первый|Второй/)
+})
+
+test('request open --brief без открытых запросов говорит об этом', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-open-brief-empty-'))
+  run(dir, ['init'])
+
+  const brief = run(dir, ['request', 'open', '--brief'])
+  assert.equal(brief.code, 0, brief.err)
+  assert.match(brief.out, /открытых запросов нет/)
+})
+
+test('request open без флага печатает заголовки как раньше', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-open-full-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Первый'])
+
+  const full = run(dir, ['request', 'open'])
+  assert.equal(full.code, 0, full.err)
+  assert.match(full.out, /^R1\s+inbox\s+Первый$/m)
+})
+
 test('request list показывает вид закрытия', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-req-kind-'))
   run(dir, ['init'])

@@ -53,3 +53,37 @@ test('task open показывает причину блокировки', () =>
   const opened = run(dir, ['task', 'open'])
   assert.match(opened.out, /нет доступа/)
 })
+
+test('task open --brief печатает только id и статус', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-task-open-brief-'))
+  run(dir, ['init'])
+  run(dir, ['task', 'add', 'Первая', ...flags])
+  run(dir, ['task', 'add', 'Вторая', ...flags])
+
+  const brief = run(dir, ['task', 'open', '--brief'])
+  assert.equal(brief.code, 0, brief.err)
+  const lines = brief.out.trimEnd().split('\n')
+  assert.equal(lines.length, 2)
+  assert.match(lines[0], /^T1\s+ready$/)
+  assert.match(lines[1], /^T2\s+ready$/)
+  assert.doesNotMatch(brief.out, /Первая|Вторая/)
+})
+
+test('task open --brief без открытых задач говорит об этом', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-task-open-brief-empty-'))
+  run(dir, ['init'])
+
+  const brief = run(dir, ['task', 'open', '--brief'])
+  assert.equal(brief.code, 0, brief.err)
+  assert.match(brief.out, /открытых задач нет/)
+})
+
+test('task open без флага печатает заголовки как раньше', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-task-open-full-'))
+  run(dir, ['init'])
+  run(dir, ['task', 'add', 'Первая', ...flags])
+
+  const full = run(dir, ['task', 'open'])
+  assert.equal(full.code, 0, full.err)
+  assert.match(full.out, /^T1\s+ready\s+Первая$/m)
+})
