@@ -117,6 +117,16 @@ test('скилл напоминает про tests в области шага', 
   assert.match(skill, /област/i)
 })
 
+test('скилл: уровень релиза выбирает агент с причиной', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+
+  assert.match(skill, /release/)
+  assert.match(skill, /причин/i)
+  assert.match(skill, /major/)
+})
+
 test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
   const current = `---\nname: x\n---\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nмоя заметка\n`
   const next = `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`

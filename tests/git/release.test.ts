@@ -16,7 +16,7 @@ import { doneTask } from '../../src/core/done.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
 import { commitTask } from '../../src/core/git/commit.ts'
 import { mergeStage } from '../../src/core/git/merge.ts'
-import { pendingRelease, release } from '../../src/core/git/release.ts'
+import { pendingRelease, release, suggestLevel } from '../../src/core/git/release.ts'
 import { runGit } from '../../src/core/git/git.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
@@ -104,5 +104,53 @@ test('pending на свежем проекте пуст', () => {
 
   assert.deepEqual(pendingRelease(db), [])
 })
+
+test('suggestLevel предлагает minor, когда есть новая возможность', () => {
+  const { db } = repoWithMergedStage()
+
+  const suggestion = suggestLevel(db)!
+  assert.equal(suggestion.level, 'minor')
+  assert.equal(suggestion.features, 1)
+  assert.equal(suggestion.tasks, 1)
+})
+
+test('suggestLevel предлагает patch, когда закрыты только дефекты', () => {
+  const { db } = repoWithMergedStage()
+  db.prepare("update tasks set kind = 'defect', severity = 'S2'").run()
+
+  const suggestion = suggestLevel(db)!
+  assert.equal(suggestion.level, 'patch')
+  assert.equal(suggestion.features, 0)
+  assert.equal(suggestion.fixes, 1)
+})
+
+test('suggestLevel молчит, когда релизить нечего', () => {
+  const { db, root, config } = repoWithMergedStage()
+  release(db, { root, level: 'minor', config, actor: 'owner' })
+
+  assert.equal(suggestLevel(db), null)
+})
+
+test('причина уровня попадает в changelog и событие', () => {
+  const { db, root, config } = repoWithMergedStage()
+
+  const result = release(db, {
+    root,
+    level: 'minor',
+    reason: 'новые команды',
+    config,
+    actor: 'owner',
+  })
+
+  assert.match(result.changelog ?? '', /новые команды/)
+  const event = db
+    .prepare("select after from events where type = 'release.created' order by id desc limit 1")
+    .get() as { after: string }
+  const after = JSON.parse(event.after) as { level: string; reason: string }
+  assert.equal(after.level, 'minor')
+  assert.equal(after.reason, 'новые команды')
+})
+
+
 
 
