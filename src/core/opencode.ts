@@ -253,7 +253,22 @@ export function refreshOpenCode(
       continue
     }
 
-    // плагин не перезаписываем: рядом кладём .new, чтобы правки не потерялись
+    // плагин не перезаписываем целиком: переносим только строку версии
+    const withVersion = current.replace(
+      /toolbox-al-plugin-version:\s*\S+/,
+      `toolbox-al-plugin-version: ${toolVersion}`,
+    )
+    if (withVersion !== current) {
+      if (options.yes) {
+        writeFileSync(path, withVersion, 'utf8')
+        result.push({ path: relative, status: 'updated' })
+      } else {
+        writeFileSync(`${path}.new`, withVersion, 'utf8')
+        result.push({ path: relative, status: 'pending' })
+      }
+      continue
+    }
+
     writeFileSync(`${path}.new`, next, 'utf8')
     result.push({ path: relative, status: 'pending' })
   }

@@ -111,6 +111,22 @@ export function doctorReport(
         ? 'на месте'
         : 'нет .opencode/plugins/toolbox-al — выполните init',
     })
+
+    const pendingFiles = [
+      '.opencode/plugins/toolbox-al/index.ts',
+      '.opencode/skills/toolbox-al/SKILL.md',
+      '.opencode/skills/toolbox-al-setup/SKILL.md',
+      'AGENTS.md',
+    ].filter((relative) => existsSync(join(options.root!, `${relative}.new`)))
+
+    checks.push({
+      name: 'обновление файлов',
+      ok: pendingFiles.length === 0,
+      detail:
+        pendingFiles.length === 0
+          ? 'применены'
+          : 'ждут переноса: ' + pendingFiles.map((file) => `${file}.new`).join(', '),
+    })
   }
 
   const noWorktree = listFeatures(db).filter(

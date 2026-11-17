@@ -1,6 +1,6 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -142,18 +142,19 @@ test('refresh обновляет блок AGENTS.md по маркерам', () =
   assert.match(after, /toolbox-al/)
 })
 
-test('плагин не перезаписывается, рядом появляется .new', () => {
+test('плагин обновляется построчно по версии и сохраняет остальное', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const path = join(root, '.opencode/plugins/toolbox-al/index.ts')
-  writeFileSync(path, '// моя правка\n', 'utf8')
+  const original = readFileSync(path, 'utf8').replace(/toolbox-al-plugin-version:\s*\S+/, 'toolbox-al-plugin-version: 0.0.1')
+  writeFileSync(path, original, 'utf8')
 
   const result = refreshOpenCode(root, '9.9.9', { yes: true })
   const plugin = result.find((item) => item.path.endsWith('index.ts'))!
 
-  assert.equal(plugin.status, 'pending')
-  assert.equal(readFileSync(path, 'utf8'), '// моя правка\n')
-  assert.match(readFileSync(`${path}.new`, 'utf8'), /9\.9\.9/)
+  assert.equal(plugin.status, 'updated')
+  assert.match(readFileSync(path, 'utf8'), /9\.9\.9/)
+  assert.equal(existsSync(`${path}.new`), false)
 })
 
 test('скилл: ревью задач не проводим, перед релизом три варианта', () => {
@@ -246,4 +247,5 @@ test('refreshOpenCode обновляет блок и сохраняет прав
   assert.match(after, /моя заметка/)
   assert.match(after, /toolbox-al/)
 })
+
 

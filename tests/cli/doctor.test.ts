@@ -1,7 +1,8 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
 import { doctorReport } from '../../src/core/doctor.ts'
+import { writeOpenCodeFiles } from '../../src/core/opencode.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { ok, setJsonMode } from '../../src/cli/output.ts'
@@ -84,6 +85,16 @@ test('doctor показывает невлитую старую ветку за�
   assert.match(check.detail ?? '', /feat\/f1/)
 })
 
+test('doctor видит файлы, ждущие переноса', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-doc-new-'))
+  writeOpenCodeFiles(dir)
+  writeFileSync(join(dir, 'AGENTS.md.new'), 'черновик', 'utf8')
+
+  const report = doctorReport(openDb(':memory:'), { root: dir })
+  const check = report.checks.find((item) => item.name === 'обновление файлов')
+  assert.ok(check && !check.ok)
+})
+
 test('--json печатает ровно один JSON-объект', () => {
   const chunks: string[] = []
   const original = process.stdout.write.bind(process.stdout)
@@ -104,3 +115,5 @@ test('--json печатает ровно один JSON-объект', () => {
   assert.deepEqual(JSON.parse(output), { a: 1 })
   assert.equal(output.trim().split('\n').length, 1)
 })
+
+
