@@ -59,7 +59,7 @@ test('done отказывается закрывать задачу с прав�
   assert.equal(misses.length, 0, 'отказ не должен записывать промах')
 })
 
-test('с --force-outside задача закрывается, а чужой файл остаётся', () => {
+test('с --force-outside чужой файл попадает в коммит', () => {
   const dir = repo()
   mkdirSync(join(dir, 'src'), { recursive: true })
   mkdirSync(join(dir, 'docs'), { recursive: true })
@@ -69,8 +69,15 @@ test('с --force-outside задача закрывается, а чужой фа
   const out = run(dir, ['done', 'T1', '--as', 'w1', '--summary', 'готово', '--force-outside'])
   assert.match(out, /закрыт/)
 
+  const committed = execFileSync('git', ['show', '--name-only', '--pretty=format:', 'HEAD'], {
+    cwd: dir,
+    encoding: 'utf8',
+  })
+  assert.match(committed, /src\/a\.ts/)
+  assert.match(committed, /docs\/b\.md/, 'файл вне области не должен теряться')
+
   const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' })
-  assert.match(status, /docs\//)
+  assert.equal(status.trim(), '')
 })
 
 test('с --force-outside промах области пишется в журнал', () => {

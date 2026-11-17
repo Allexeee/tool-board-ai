@@ -93,6 +93,7 @@ export default async function command(args: ParsedArgs) {
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
       expectedBranch: feature.branch,
       limitTo: task.scope === 'exclusive' ? (lastSnapshot(db, task.id) ?? undefined) : undefined,
+      extraPaths: outside,
     })
   } else {
     commit = commitTask({
@@ -101,6 +102,7 @@ export default async function command(args: ParsedArgs) {
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
       forbiddenBranches: [project.config.branches.main],
       limitTo: task.scope === 'exclusive' ? (lastSnapshot(db, task.id) ?? undefined) : undefined,
+      extraPaths: outside,
     })
   }
 
