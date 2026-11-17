@@ -164,6 +164,8 @@ test('скилл: ревью задач не проводим, перед рел
   assert.match(skill, /Ревью задач не проводим/)
   assert.match(skill, /--review same\|fresh\|none/)
   assert.match(skill, /только изменения релиза/)
+  assert.match(skill, /критические находки/i)
+  assert.match(skill, /request add/)
 })
 
 test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {

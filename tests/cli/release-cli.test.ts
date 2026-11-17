@@ -63,6 +63,9 @@ test('release показывает три варианта ревью', () => {
   assert.match(shown.out, /--review same/)
   assert.match(shown.out, /--review fresh/)
   assert.match(shown.out, /--review none/)
+  assert.match(shown.out, /ПОСЛЕ РЕВЬЮ/)
+  assert.match(shown.out, /критические находки/i)
+  assert.match(shown.out, /request add/)
 })
 
 test('release без выбора ревью отвергается', () => {
