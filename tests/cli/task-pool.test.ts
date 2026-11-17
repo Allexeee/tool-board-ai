@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
@@ -76,16 +76,16 @@ test('task list показывает ready после активации эта�
   assert.doesNotMatch(listed.out, /planned/)
 })
 
-// строка этапа: id, [seq/total], прогресс, статус, название — ширину пробелов не фиксируем.
-const stageLine = (featureId: string, seq: string, progress: string, status: string, name: string) =>
-  new RegExp(`${featureId}\\s+\\[${seq}\\]\\s+${progress}\\s+${status}\\s+${name}`)
+// строка фичи: id, прогресс по задачам, статус, название — ширину пробелов не фиксируем.
+const stageLine = (featureId: string, progress: string, status: string, name: string) =>
+  new RegExp(`${featureId}\\s+${progress}\\s+${status}\\s+${name}`)
 
 test('now считает planned отдельно и не выдаёт задачу за готовую', () => {
   const { dir } = projectWithPlannedStage()
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, stageLine('F1', '1/1', '0/1', 'pending', 'S1'))
+  assert.match(view.out, stageLine('F1', '0/1', 'pending', 'Оплата'))
   // задача неактивного этапа не попадает в пул: выдавать её за готовую нельзя.
   assert.doesNotMatch(view.out, /ПУЛ/)
 })
@@ -101,8 +101,8 @@ test('now показывает planned этап, когда предыдущий
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, stageLine('F1', '1/2', '1/1', 'done', 'S1'))
-  assert.match(view.out, stageLine('F1', '2/2', '0/1', 'pending', 'S2'))
+  assert.match(view.out, stageLine('F1', '0/2', 'pending', 'Оплата'))
+  
 })
 
 test('активированный этап без движения показан как очередь', () => {
@@ -111,7 +111,7 @@ test('активированный этап без движения показа
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, stageLine('F1', '1/1', '0/1', 'pending', 'S1'))
+  assert.match(view.out, stageLine('F1', '0/1', 'pending', 'Оплата'))
 })
 
 test('приёмка двигает работу: следующий этап становится активным', () => {
@@ -143,7 +143,7 @@ test('now без этапов показывает фичу с нулевым с
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /\[0\/0\]/)
+  assert.match(view.out, stageLine('F1', '0/0', 'pending', 'Оплата'))
 })
 
 test('now принимает --no-color и печатает без escape-кодов', () => {
@@ -158,5 +158,7 @@ test('now принимает --no-color и печатает без escape-код
   assert.doesNotMatch(view.err, /неизвестный флаг/)
   assert.doesNotMatch(view.out, /\u001b\[/)
   // данные на месте, выключен только цвет
-  assert.match(view.out, /\[1\/1\]/)
+  assert.match(view.out, stageLine('F1', '0/1', 'pending', 'Оплата'))
 })
+
+

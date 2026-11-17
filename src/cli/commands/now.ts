@@ -57,7 +57,6 @@ export default async function command(args: ParsedArgs) {
   }
 
   const featureWidth = Math.max(0, ...stageRows.map((row) => row.featureId.length))
-  const stageWidth = Math.max(0, ...stageRows.map((row) => `[${row.seq}/${row.total}]`.length))
   const progressWidth = Math.max(
     0,
     ...stageRows.map((row) => `${row.progress.current}/${row.progress.total}`.length),
@@ -66,11 +65,9 @@ export default async function command(args: ParsedArgs) {
 
   const printed = new Set<string>()
   const features = stageRows.map((row) => {
-    const mark = `[${row.seq}/${row.total}]`
     const progress = `${row.progress.current}/${row.progress.total}`
     const line = [
       row.featureId.padEnd(featureWidth),
-      mark.padEnd(stageWidth),
       progress.padEnd(progressWidth),
       paint(row.status.padEnd(7), stageColor[row.status]),
       row.name,
