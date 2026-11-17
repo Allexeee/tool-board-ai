@@ -238,22 +238,23 @@ export function applyUpgrade(
 
   migrate(db)
 
+  // закрепляем ровно ту версию, которая лежит на диске, а не найденную в тегах или --from
+  const installed = toolVersion(input.toolRoot ?? toolRoot)
+
   const journal = writeUpgradeJournal(projectRoot, {
     from: plan.current.current,
-    to: plan.current.latest ?? plan.current.current,
+    to: installed,
     schemaFrom: plan.schemaFrom,
     schemaTo: plan.schemaTo,
     backup,
-    files: input.root === toolRoot
-      ? []
-      : refreshOpenCode(projectRoot, plan.current.latest ?? plan.current.current, { yes: true })
-          .filter((item) => item.status !== 'same')
-          .map((item) => item.path),
+    files: projectRoot === toolRoot ? [] : refreshOpenCode(projectRoot, installed, { yes: true })
+      .filter((item) => item.status !== 'same')
+      .map((item) => item.path),
     now: input.now,
   })
   void journal
 
-  const target = plan.current.latest ?? plan.current.current
+  const target = installed
   if (existsSync(input.configPath)) {
     const raw = readFileSync(input.configPath, 'utf8').replace(/^\uFEFF/, '')
     const config = JSON.parse(raw) as Record<string, unknown>

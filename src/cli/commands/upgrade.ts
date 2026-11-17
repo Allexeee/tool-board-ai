@@ -1,6 +1,7 @@
-﻿import { findProject } from '../../core/project.ts'
+﻿import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { applyUpgrade, planUpgrade, toolRoot } from '../../core/upgrade.ts'
+import { applyUpgrade, planUpgrade, toolRoot, toolVersion } from '../../core/upgrade.ts'
 import { planOpenCode } from '../../core/opencode.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -13,6 +14,21 @@ export default async function command(args: ParsedArgs) {
 
   const from = stringFlag(args, 'from')
   const yes = boolFlag(args, 'yes')
+
+  if (boolFlag(args, 'pin')) {
+    const version = toolVersion()
+    if (existsSync(project.configPath)) {
+      const raw = readFileSync(project.configPath, 'utf8').replace(/^\uFEFF/, '')
+      const config = JSON.parse(raw) as Record<string, unknown>
+      writeFileSync(
+        project.configPath,
+        JSON.stringify({ ...config, toolVersion: version }, null, 2) + '\n',
+        'utf8',
+      )
+    }
+    ok({ version }, `проект закреплён на ${version}`)
+    return 0
+  }
 
   if (boolFlag(args, 'check') || !yes) {
     const plan = planUpgrade(db, { toolRoot, configPath: project.configPath, from })
@@ -67,4 +83,5 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
 
