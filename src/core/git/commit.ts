@@ -55,8 +55,13 @@ export function filesOutsideScope(worktree: string, task: Task): string[] {
   return changedFiles(worktree).filter((path) => !scopesOverlap(task.scope, [path]))
 }
 
-function stage(worktree: string, task: Task, limitTo?: string[]): { specs: string[]; staged: string } {
-  const specs = pathspecs(task, limitTo).filter(
+function stage(
+  worktree: string,
+  task: Task,
+  limitTo?: string[],
+  extra: string[] = [],
+): { specs: string[]; staged: string } {
+  const specs = [...pathspecs(task, limitTo), ...extra].filter(
     (spec) => runGit(worktree, ['status', '--porcelain', '--', spec]).length > 0,
   )
   if (specs.length === 0) return { specs, staged: '' }
@@ -72,13 +77,14 @@ export function commitTask(input: {
   expectedBranch?: string | null
   forbiddenBranches?: string[]
   limitTo?: string[]
+  extraPaths?: string[]
 }): string | null {
   assertSafeBranch(input.worktree, {
     expected: input.expectedBranch,
     forbidden: input.forbiddenBranches,
   })
 
-  const { specs, staged } = stage(input.worktree, input.task, input.limitTo)
+  const { specs, staged } = stage(input.worktree, input.task, input.limitTo, input.extraPaths)
   if (!staged) return null
 
   const body = [input.report.summary, ...input.report.checks.map((check) => `проверено: ${check}`)]
