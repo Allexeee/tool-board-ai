@@ -1,8 +1,9 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { branchExists, currentBranch, resolveBranches, runGit } from './git.ts'
 import { appendEvent } from '../events.ts'
+import { availableVersions } from '../upgrade.ts'
 import { UserError } from '../../cli/errors.ts'
 
 export type ReleaseLevel = 'major' | 'minor' | 'patch'
@@ -15,18 +16,31 @@ export interface PendingStage {
   mergedAt: string
 }
 
-// что уже в dev, но ещё не уехало в main: этапы, слитые после прошлого релиза
+// что уже в dev, но ещё не уехало в main: этапы, которых нет ни в одном релизе
 export function pendingRelease(db: DatabaseSync): PendingStage[] {
-  const lastRelease = db.prepare('select max(at) as at from releases').get() as { at: string | null }
+  const released = new Set<string>()
+  const rows = db.prepare("select after from events where type = 'release.created'").all() as Array<{
+    after: string | null
+  }>
+  for (const row of rows) {
+    if (!row.after) continue
+    try {
+      for (const id of (JSON.parse(row.after) as { stages?: string[] }).stages ?? []) released.add(id)
+    } catch {
+      // битое событие не должно прятать этапы
+    }
+  }
 
-  return db
+  const stages = db
     .prepare(
       `select f.id as featureId, f.name as featureName, s.id as stageId, s.name as stageName, s.merged_at as mergedAt
        from stages s join features f on f.id = s.feature_id
-       where s.status = 'merged' and s.merged_at > ?
+       where s.status = 'merged'
        order by f.rank, s.seq`,
     )
-    .all(lastRelease.at ?? '0000-00-00') as unknown as PendingStage[]
+    .all() as unknown as PendingStage[]
+
+  return stages.filter((stage) => !released.has(stage.stageId))
 }
 
 export interface LevelSuggestion {
@@ -38,7 +52,7 @@ export interface LevelSuggestion {
 }
 
 /** Что выпустим и каким уровнем: новые возможности — minor, только исправления — patch. */
-export function suggestLevel(db: DatabaseSync): LevelSuggestion | null {
+export function suggestLevel(db: DatabaseSync, root: string): LevelSuggestion | null {
   const stages = pendingRelease(db)
   if (stages.length === 0) return null
 
@@ -51,7 +65,7 @@ export function suggestLevel(db: DatabaseSync): LevelSuggestion | null {
   const fixes = rows.length - features
 
   return {
-    version: currentVersion(db),
+    version: currentVersion(db, root),
     level: features > 0 ? 'minor' : 'patch',
     tasks: rows.length,
     features,
@@ -67,9 +81,35 @@ export interface ReleaseResult {
   reason?: string
 }
 
-function currentVersion(db: DatabaseSync): string {
+function metaVersion(db: DatabaseSync): string | null {
   const row = db.prepare("select value from meta where key = 'version'").get() as { value: string } | undefined
-  return row?.value ?? '0.1.0'
+  return row?.value ?? null
+}
+
+function releasedVersion(db: DatabaseSync): string | null {
+  const row = db.prepare('select max(version) as version from releases').get() as
+    | { version: string | null }
+    | undefined
+  return row?.version ?? null
+}
+
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+/** База — наибольшее из сохранённых версий и тегов репозитория: тег переживает потерю базы. */
+function currentVersion(db: DatabaseSync, root: string): string {
+  const candidates = [metaVersion(db), releasedVersion(db), ...availableVersions(root)]
+    .filter((value): value is string => Boolean(value && /^\d+\.\d+\.\d+$/.test(value)))
+    .sort(compareVersions)
+
+  return candidates.at(-1) ?? '0.1.0'
 }
 
 function bump(version: string, level: ReleaseLevel): string {
@@ -77,6 +117,17 @@ function bump(version: string, level: ReleaseLevel): string {
   if (level === 'major') return `${major + 1}.0.0`
   if (level === 'minor') return `${major}.${minor + 1}.0`
   return `${major}.${minor}.${patch + 1}`
+}
+
+export function assertReleasePreflight(root: string, tag: string): void {
+  if (runGit(root, ['tag', '--list', tag]).trim()) {
+    throw new UserError(3, `тег ${tag} уже есть: релиз не начат, поднимите версию вручную`)
+  }
+
+  const changelogPath = join(root, 'CHANGELOG.md')
+  if (existsSync(changelogPath) && readFileSync(changelogPath, 'utf8').includes(`## ${tag}`)) {
+    throw new UserError(3, `в CHANGELOG уже есть раздел ${tag}: релиз не начат, проверьте историю`)
+  }
 }
 
 export function release(
@@ -89,17 +140,11 @@ export function release(
     actor: string
   },
 ): ReleaseResult {
-  const lastRelease = db.prepare('select max(at) as at from releases').get() as { at: string | null }
-  const since = lastRelease.at ?? '0000-00-00'
-
-  const stages = db
-    .prepare(
-      `select s.id as id, s.name as stage, f.name as feature
-       from stages s join features f on f.id = s.feature_id
-       where s.status = 'merged' and s.merged_at > ?
-       order by s.merged_at`,
-    )
-    .all(since) as Array<{ id: string; stage: string; feature: string }>
+  const stages = pendingRelease(db).map((stage) => ({
+    id: stage.stageId,
+    stage: stage.stageName,
+    feature: stage.featureName,
+  }))
 
   if (stages.length === 0) {
     return { released: false, reason: 'нет слитых этапов с прошлого релиза' }
@@ -109,8 +154,10 @@ export function release(
   if (!branchExists(input.root, main)) throw new UserError(3, `ветки ${main} нет`)
   if (!branchExists(input.root, dev)) throw new UserError(3, `ветки ${dev} нет`)
 
-  const version = bump(currentVersion(db), input.level)
+  const version = bump(currentVersion(db, input.root), input.level)
   const tag = `v${version}`
+  assertReleasePreflight(input.root, tag)
+
   const date = new Date().toISOString().slice(0, 10)
   const changelog =
     `## ${tag} — ${date}\n\n` +
@@ -122,6 +169,7 @@ export function release(
     throw new UserError(3, 'дерево грязное: релиз не начинается, закоммитьте или уберите изменения')
   }
 
+  const mainTip = runGit(input.root, ['rev-parse', main])
   const original = currentBranch(input.root)
   runGit(input.root, ['checkout', main])
   try {
@@ -142,6 +190,14 @@ export function release(
     runGit(input.root, ['add', 'CHANGELOG.md'])
     runGit(input.root, ['commit', '-m', `chore: release ${tag}`], { AL_ALLOW: '1' })
     runGit(input.root, ['tag', tag])
+  } catch (error) {
+    // релиз не состоялся — main возвращается туда, где был до попытки
+    try {
+      runGit(input.root, ['reset', '--hard', mainTip], { AL_ALLOW: '1' })
+    } catch {
+      appendEvent(db, { type: 'release.rollback_failed', actor: input.actor, subject: tag })
+    }
+    throw error
   } finally {
     if (original && original !== main) {
       try {
@@ -168,3 +224,4 @@ export function release(
 
   return { released: true, version, tag, changelog }
 }
+

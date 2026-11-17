@@ -35,7 +35,7 @@ export default async function command(args: ParsedArgs) {
   const requested = args.sub ?? (args.positionals[0] ?? stringFlag(args, 'kind'))
 
   if (!requested) {
-    const suggestion = suggestLevel(db)
+    const suggestion = suggestLevel(db, project.root)
     if (!suggestion) {
       ok({ suggestion: null }, 'нет слитых этапов с прошлого релиза: релизить нечего')
       return 1
@@ -78,4 +78,5 @@ export default async function command(args: ParsedArgs) {
   ok(result, result.released ? `${result.tag}\n\n${result.changelog}` : `релиза нет: ${result.reason}`)
   return result.released ? 0 : 1
 }
+
 
