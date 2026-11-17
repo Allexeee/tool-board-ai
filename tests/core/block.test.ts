@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -9,9 +9,9 @@ import { refreshReady } from '../../src/core/deps.ts'
 import { addExecutor } from '../../src/core/executors.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { fillHand, getHand } from '../../src/core/hands.ts'
-import { blockTask } from '../../src/core/block.ts'
+import { blockTask, unblockTask } from '../../src/core/block.ts'
 import { doneTask, reopenTask } from '../../src/core/done.ts'
-import { getQuestions } from '../../src/core/questions.ts'
+import { answer, getQuestions } from '../../src/core/questions.ts'
 
 function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
@@ -113,3 +113,42 @@ test('нельзя переоткрыть задачу слитого этапа
   assert.throws(() => reopenTask(db, { taskId: task.id, actor: 'owner', reason: 'вернуть' }), /слит/)
   assert.equal(getTask(db, task.id)!.status, 'done')
 })
+
+test('unblock возвращает задачу в ready и сбрасывает попытки', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  takeTask(db, { executor: 'w1', taskId: `${stageId}-1` })
+  blockTask(db, {
+    taskId: `${stageId}-1`,
+    executor: 'w1',
+    reason: 'needs_data',
+    note: 'нет ключей',
+  })
+  updateTask(db, `${stageId}-1`, { attempts: 2 })
+
+  const task = unblockTask(db, { taskId: `${stageId}-1`, actor: 'owner', note: 'ключи выданы' })
+
+  assert.equal(task.status, 'ready')
+  assert.equal(task.attempts, 0)
+  assert.equal(task.reason, null)
+})
+
+test('ответ на вопрос разблокирует задачу', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  takeTask(db, { executor: 'w1', taskId: `${stageId}-1` })
+  const blocked = blockTask(db, {
+    taskId: `${stageId}-1`,
+    executor: 'w1',
+    reason: 'needs_decision',
+    note: 'какой макет?',
+  })
+  const question = getQuestions(db, { addressee: 'owner' }).find((q) => q.subjectId === blocked.id)!
+
+  answer(db, { id: question.id, answer: 'первый', actor: 'owner' })
+
+  const task = getTask(db, blocked.id)!
+  assert.equal(task.status, 'ready')
+  assert.equal(task.reason, null)
+})
+

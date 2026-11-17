@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+﻿import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getTask, updateTask, type Task } from './tasks.ts'
@@ -81,7 +81,7 @@ export function unblockTask(
       throw new UserError(1, `задача ${task.id} не заблокирована: ${task.status}`)
     }
 
-    const updated = updateTask(db, task.id, { status: 'ready', reason: null })
+    const updated = updateTask(db, task.id, { status: 'ready', reason: null, attempts: 0 })
     appendEvent(db, {
       type: 'task.unblocked',
       actor: input.actor,
@@ -91,3 +91,4 @@ export function unblockTask(
     return updated
   })
 }
+

@@ -5,6 +5,7 @@ import { listEvents } from '../../core/events.ts'
 import { getStage } from '../../core/stages.ts'
 import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
+import { unblockTask } from '../../core/block.ts'
 import { createTask, editTask, getTask, listTasks, openTasks, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
 import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -106,6 +107,19 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'unblock') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: task unblock F1.S1-1 --note "почему"')
+
+    const task = unblockTask(db, {
+      taskId: id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      note: stringFlag(args, 'note'),
+    })
+    ok(task, `${task.id}  снова ready`)
+    return 0
+  }
+
   if (args.sub === 'show') {
     // статус должен совпадать с list: время пересчитывается и здесь
     advanceTime(db)
@@ -180,6 +194,7 @@ export default async function command(args: ParsedArgs) {
   )
   return 0
 }
+
 
 
 

@@ -2,7 +2,7 @@
 import { allocateId } from './ids.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { getTask, listTasks, type Task } from './tasks.ts'
+import { getTask, listTasks, updateTask, type Task } from './tasks.ts'
 import { listFeatures } from './features.ts'
 import { listStages, type Stage } from './stages.ts'
 import { UserError } from '../cli/errors.ts'
@@ -142,6 +142,20 @@ export function answer(
       after: { answer: input.answer },
     })
 
+    // ответ на вопрос по задаче снимает блок: дальше решает уже не человек
+    if (question.subjectType === 'task') {
+      const task = getTask(db, question.subjectId)
+      if (task && (task.status === 'needs_owner' || task.status === 'blocked')) {
+        updateTask(db, task.id, { status: 'ready', reason: null, attempts: 0 })
+        appendEvent(db, {
+          type: 'task.unblocked',
+          actor: input.actor,
+          subject: task.id,
+          note: 'ответ на вопрос',
+        })
+      }
+    }
+
     return getQuestion(db, question.id)!
   })
 }
@@ -258,3 +272,4 @@ export function inbox(db: DatabaseSync): OwnerItem[] {
 export function taskForQuestion(db: DatabaseSync, question: Question): Task | null {
   return question.subjectType === 'task' ? getTask(db, question.subjectId) : null
 }
+
