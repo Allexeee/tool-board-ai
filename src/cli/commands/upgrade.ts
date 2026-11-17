@@ -67,6 +67,7 @@ export default async function command(args: ParsedArgs) {
     toolRoot,
     from,
     yes,
+    config: project.config,
   })
 
   if (!result.applied) {

@@ -6,6 +6,8 @@ import type { DatabaseSync } from 'node:sqlite'
 import { SCHEMA_VERSION, migrate } from './schema.ts'
 import { refreshOpenCode } from './opencode.ts'
 import { saveConfig } from './config.ts'
+import { installHooks } from './git/hooks.ts'
+import { branchExists, isRepo, resolveBranches, runGit } from './git/git.ts'
 import { toolRoot, toolVersion } from './version.ts'
 import { UserError } from '../cli/errors.ts'
 
@@ -223,6 +225,7 @@ export function applyUpgrade(
     toolRoot?: string
     from?: string
     yes: boolean
+    config?: { branches: { main: string; dev: string } }
     now?: Date
   },
 ): UpgradeResult {
@@ -238,6 +241,15 @@ export function applyUpgrade(
   pruneBackups(input.dbPath)
 
   migrate(db)
+
+  // защита main и dev должна обновиться вместе с инструментом
+  if (isRepo(projectRoot)) {
+    const gitDir = runGit(projectRoot, ['rev-parse', '--absolute-git-dir'])
+    const { main, dev } = resolveBranches(projectRoot, input.config ?? { branches: { main: 'main', dev: 'dev' } })
+    const branches = new Set([main, dev])
+    if (branchExists(projectRoot, 'develop')) branches.add('develop')
+    installHooks(gitDir, { protectedBranches: [...branches] })
+  }
 
   // закрепляем ровно ту версию, которая лежит на диске, а не найденную в тегах или --from
   const installed = toolVersion(input.toolRoot ?? toolRoot)
@@ -266,4 +278,5 @@ export function applyUpgrade(
 
   return { applied: true, backup, plan }
 }
+
 

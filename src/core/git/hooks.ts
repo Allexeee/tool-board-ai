@@ -1,7 +1,8 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+﻿import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const MARKER = '# toolbox-al: protect branches'
+const LEGACY = '# toolbox-al: protect main and dev'
 const BEGIN = '# toolbox-al:begin'
 const END = '# toolbox-al:end'
 
@@ -80,7 +81,17 @@ export function installHooks(
   return { installed }
 }
 
+export type HookStatus = 'current' | 'legacy' | 'missing'
+
+export function hookStatus(gitDir: string): HookStatus {
+  const targets = ['pre-commit', 'pre-merge-commit'].map((name) => join(gitDir, 'hooks', name))
+  const texts = targets.filter((target) => existsSync(target)).map((target) => readFileSync(target, 'utf8'))
+  if (texts.some((text) => text.includes(LEGACY)) && !texts.every((text) => text.includes(MARKER))) return 'legacy'
+  return texts.length === 2 && texts.every((text) => text.includes(MARKER)) ? 'current' : 'missing'
+}
+
 export function hookInstalled(gitDir: string): boolean {
   const targets = ['pre-commit', 'pre-merge-commit'].map((name) => join(gitDir, 'hooks', name))
   return targets.every((target) => existsSync(target) && readFileSync(target, 'utf8').includes(MARKER))
 }
+
