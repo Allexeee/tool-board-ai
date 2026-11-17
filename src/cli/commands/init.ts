@@ -1,5 +1,6 @@
 ﻿import { initProject } from '../../core/project.ts'
 import { branchExists, isRepo, runGit } from '../../core/git/git.ts'
+import { hookStatus } from '../../core/git/hooks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
 
 const PLAN = [
@@ -9,8 +10,19 @@ const PLAN = [
   '.opencode/skills/toolbox-al-setup/SKILL.md',
   'блок в AGENTS.md между маркерами',
   'записи .toolbox-al/ и .worktrees/ в .gitignore',
-  'pre-commit хук, если это git-репозиторий',
+  'git-хуки pre-commit и pre-merge-commit, если это git-репозиторий',
 ]
+
+function hooksReport(gitDir: string): string {
+  const status = hookStatus(gitDir)
+  if (status === 'current') {
+    return 'git-хуки установлены: pre-commit и pre-merge-commit не пускают коммиты в защищённые ветки.'
+  }
+  if (status === 'legacy') {
+    return 'git-хуки устарели: обновите их командой toolbox-al upgrade.'
+  }
+  return 'git-хуки не установлены: pre-commit и pre-merge-commit не защищают ветки.'
+}
 
 export function runInit(dir: string, options: { dryRun?: boolean } = {}): string {
   if (options.dryRun) {
@@ -21,6 +33,10 @@ export function runInit(dir: string, options: { dryRun?: boolean } = {}): string
 
   const lines: string[] = []
   lines.push(created.length > 0 ? 'Создано: ' + created.join(', ') : 'Настройка уже существует, ничего не менялось.')
+  if (isRepo(root)) {
+    lines.push('')
+    lines.push(hooksReport(runGit(root, ['rev-parse', '--absolute-git-dir'])))
+  }
   lines.push('')
   lines.push('Первичную настройку выполняет агент — он знает проект, CLI нет.')
   lines.push('')

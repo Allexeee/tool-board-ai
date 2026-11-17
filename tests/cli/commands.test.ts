@@ -41,6 +41,23 @@ test('hand show и hand set работают', () => {
   assert.match(shown.out, /пусто|рука/i)
 })
 
+test('hand add с уже имеющейся задачей объясняет, а не падает на UNIQUE', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'сделано', '--skill', 'backend', '--scope', 'src/**'])
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  db.prepare("update tasks set status = 'ready' where id = 'T1'").run()
+  db.close()
+
+  assert.equal(run(dir, ['hand', 'add', 'w1', 'T1']).code, 0)
+
+  const again = run(dir, ['hand', 'add', 'w1', 'T1'])
+  assert.equal(again.code, 0)
+  assert.match(again.out, /уже в руке/)
+  assert.doesNotMatch(again.err, /UNIQUE/)
+})
+
 test('hand show ничего не резервирует', () => {
   const dir = tmp()
   run(dir, ['init'])
@@ -128,6 +145,23 @@ test('init подсказывает создать dev, если её нет', (
 
   const text = runInit(dir)
   assert.match(text, /git branch dev/)
+})
+
+test('init сообщает установленные git-хуки', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-init-hooks-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+
+  const text = runInit(dir)
+
+  assert.match(text, /git-хуки установлены/)
+  assert.match(text, /pre-commit/)
+  assert.match(text, /pre-merge-commit/)
+})
+
+test('help перечисляет stage activate', () => {
+  const result = run(tmp(), ['help'])
+  assert.equal(result.code, 0)
+  assert.match(result.out, /stage .*activate/)
 })
 
 test('старый бинарь на схеме новее просит обновить инструмент', () => {

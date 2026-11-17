@@ -100,6 +100,13 @@ test('setHand не отбирает задачу, зарезервированн
   assert.throws(() => setHand(db, 'w2', [`${stageId}-1`], 'orchestrator'), /зарезервирован/)
 })
 
+test('setHand не падает, если задача в списке повторяется', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const hand = setHand(db, 'w1', [`${stageId}-1`, `${stageId}-1`], 'orchestrator')
+  assert.deepEqual(hand.map((task) => task.id), [`${stageId}-1`])
+})
+
 test('пул набирается после блока фичи', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)

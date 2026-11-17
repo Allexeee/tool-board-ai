@@ -24,8 +24,14 @@ export default async function command(args: ParsedArgs) {
   if (args.sub === 'add') {
     const tasks = stringFlag(args, 'as') ? args.positionals : args.positionals.slice(1)
     const current = getHand(db, executor).map((task) => task.id)
-    const hand = setHand(db, executor, [...current, ...tasks], 'orchestrator')
-    ok(hand, hand.map((task) => task.id).join(', ') || 'рука пуста')
+    const have = new Set(current)
+    const already = tasks.filter((id) => have.has(id))
+    const fresh = tasks.filter((id) => !have.has(id))
+    const hand = setHand(db, executor, [...current, ...fresh], 'orchestrator')
+    const list = hand.map((task) => task.id).join(', ') || 'рука пуста'
+    const repeated = [...new Set(already)]
+    const note = repeated.length > 0 ? `\nуже в руке, повтор не добавлен: ${repeated.join(', ')}` : ''
+    ok(hand, list + note)
     return 0
   }
 

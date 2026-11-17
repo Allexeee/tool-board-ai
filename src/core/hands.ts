@@ -135,7 +135,10 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
   return tx(db, () => {
     if (!getExecutor(db, executorId)) throw new UserError(3, `исполнитель ${executorId} не найден`)
 
-    for (const id of taskIds) {
+    // повтор в списке — не ошибка: одна задача занимает в руке одно место
+    const ids = [...new Set(taskIds)]
+
+    for (const id of ids) {
       const task = getTask(db, id)
       if (!task) throw new UserError(3, `задача ${id} не найдена`)
       if (task.status !== 'ready') throw new UserError(3, `задача ${id} не готова: ${task.status}`)
@@ -149,7 +152,7 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
     }
 
     db.prepare('delete from hand where executor_id = ?').run(executorId)
-    taskIds.forEach((id, index) => {
+    ids.forEach((id, index) => {
       db.prepare(
         'insert into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)',
       ).run(executorId, index + 1, id, new Date().toISOString())
@@ -159,7 +162,7 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
       type: 'hand.set',
       actor,
       subject: executorId,
-      after: { tasks: taskIds },
+      after: { tasks: ids },
     })
 
     return getHand(db, executorId)
