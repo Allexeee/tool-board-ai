@@ -1,6 +1,9 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
+import { mkdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { addRequest, getRequest } from '../../src/core/requests.ts'
 import { listFeatures } from '../../src/core/features.ts'
 import { addPlan, approvePlan, type PlanStage, type PlanStep } from '../../src/core/plans.ts'
@@ -140,3 +143,29 @@ test('устаревший план требует переутверждени�
 
   assert.throws(() => applyPlan(db, { requestId: request.id }), /устарел/)
 })
+
+test('validatePlan отвергает абсолютный путь и выход из проекта', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-fs-'))
+  const { plan } = fixture([{ ...step, scope: ['/etc/passwd'] }])
+  assert.match(validatePlan(plan, { root }).join('\n'), /относительной/)
+
+  const escape = fixture([{ ...step, scope: ['../outside/**'] }])
+  assert.match(validatePlan(escape.plan, { root }).join('\n'), /выходить за проект/)
+})
+
+test('validatePlan ловит несуществующий родительский каталог', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-fs2-'))
+  mkdirSync(join(root, 'src'), { recursive: true })
+  const { plan } = fixture([{ ...step, scope: ['src/nope/deep/x.ts'] }])
+
+  assert.match(validatePlan(plan, { root }).join('\n'), /не существует/)
+})
+
+test('новый файл в существующем каталоге проходит', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-fs3-'))
+  mkdirSync(join(root, 'src'), { recursive: true })
+  const { plan } = fixture([{ ...step, scope: ['src/new-file.ts'] }])
+
+  assert.doesNotMatch(validatePlan(plan, { root }).join('\n'), /не существует/)
+})
+

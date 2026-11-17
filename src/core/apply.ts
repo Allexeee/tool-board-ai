@@ -1,4 +1,6 @@
-﻿import type { DatabaseSync } from 'node:sqlite'
+﻿import { existsSync, statSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
+import type { DatabaseSync } from 'node:sqlite'
 import { tx } from './db.ts'
 import { addFeature, type Feature } from './features.ts'
 import { activateNextStage, addStage, type Stage } from './stages.ts'
@@ -8,7 +10,7 @@ import { getPlan, type Plan } from './plans.ts'
 import { appendEvent } from './events.ts'
 import { UserError } from '../cli/errors.ts'
 
-export function validatePlan(plan: Plan): string[] {
+export function validatePlan(plan: Plan, options: { root?: string } = {}): string[] {
   const errors: string[] = []
 
   if (!plan.approvedAt) errors.push('план не утверждён владельцем')
@@ -34,6 +36,34 @@ export function validatePlan(plan: Plan): string[] {
       const hasTests = (step.scope ?? []).some((path) => /(^|[\\/])tests?([\\/]|$)/i.test(path))
       if (checksByTest && !hasTests) {
         errors.push(`${place}: шаг проверяется тестом — добавьте tests/ в область`)
+      }
+
+      for (const path of step.scope ?? []) {
+        const normalized = path.replace(/\\/g, '/')
+        if (isAbsolute(path) || /^[A-Za-z]:/.test(normalized) || normalized.startsWith('/')) {
+          errors.push(`${place}: область должна быть относительной, а не ${path}`)
+          continue
+        }
+        if (normalized.split('/').includes('..')) {
+          errors.push(`${place}: область не может выходить за проект: ${path}`)
+          continue
+        }
+        if (!options.root) continue
+
+        const globAt = normalized.search(/[*?[]/)
+        const base = globAt === -1 ? normalized : normalized.slice(0, globAt).replace(/\/$/, '')
+        const exists = existsSync(join(options.root, base))
+        const parent = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : ''
+
+        if (!exists) {
+          const parentExists = parent ? existsSync(join(options.root, parent)) : true
+          if (!parentExists) {
+            errors.push(`${place}: пути ${path} нет и каталог ${parent || '.'} не существует`)
+          } else if (globAt === -1 && parent) {
+            const parentIsDir = statSync(join(options.root, parent)).isDirectory()
+            if (!parentIsDir) errors.push(`${place}: ${parent} не каталог`)
+          }
+        }
       }
 
       for (const dep of step.deps ?? []) {

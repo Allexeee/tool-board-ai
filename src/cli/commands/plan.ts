@@ -50,7 +50,7 @@ export default async function command(args: ParsedArgs) {
     const pending = getPlan(db, { requestId, version })
     if (!pending) throw new UserError(3, `план для ${requestId} не найден`)
 
-    const errors = validatePlan({ ...pending, approvedAt: new Date().toISOString() })
+    const errors = validatePlan({ ...pending, approvedAt: new Date().toISOString() }, { root: project.root })
     if (errors.length > 0) {
       throw new UserError(3, 'план не утверждён:\n  ' + errors.join('\n  '))
     }
