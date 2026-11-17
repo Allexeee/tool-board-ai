@@ -19,7 +19,7 @@ export default async function command(args: ParsedArgs) {
   const db = openDb(project.dbPath)
   advanceTime(db)
 
-  // флаг ждёт своей строки в args.ts; здесь он уже включён в одну команду.
+  // цвет выключается и флагом, и NO_COLOR; в пайп он не течёт вовсе.
   if (boolFlag(args, 'no-color')) setColorMode(false)
 
   const all = boolFlag(args, 'all')
