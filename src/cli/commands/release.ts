@@ -1,7 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import type { DatabaseSync } from 'node:sqlite'
-import { deferredInRelease, pendingRelease, release, suggestLevel, type ReleaseLevel } from '../../core/git/release.ts'
+import { deferredInRelease, deferredInReleased, pendingRelease, release, suggestLevel, type ReleaseLevel } from '../../core/git/release.ts'
 import { unreviewedRun } from '../../core/runs.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -76,6 +76,7 @@ export default async function command(args: ParsedArgs) {
 
     const pending = pendingRelease(db)
     const deferred = deferredInRelease(db)
+    const releasedDeferred = deferredInReleased(db)
     const warning = reviewGapWarning(db, pending.length)
     const changes = pending.map((stage) => `  ${stage.featureId}  ${stage.featureName} — ${stage.stageName}`)
     const level: ReleaseLevel = words.includes(requested as ReleaseLevel)
@@ -101,6 +102,15 @@ export default async function command(args: ParsedArgs) {
               '',
               'НЕ ВОШЛО, ЖДЁТ РЕШЕНИЯ',
               ...deferred.map((task) => `  ${task.id}  ${task.reason ?? 'без причины'}`),
+            ]),
+        ...(releasedDeferred.length === 0
+          ? []
+          : [
+              '',
+              'ОТЛОЖЕНО В ПРОШЛЫХ РЕЛИЗАХ',
+              ...releasedDeferred.map(
+                (task) => `  ${task.id}  ${task.version ? `v${task.version}` : 'без версии'}  ${task.reason ?? 'без причины'}`,
+              ),
             ]),
         '',
         'РЕВЬЮ (смотрит только эти изменения):',
@@ -153,5 +163,6 @@ export default async function command(args: ParsedArgs) {
   ok(result, result.released ? `${result.tag}\n\n${result.changelog}` : `релиза нет: ${result.reason}`)
   return result.released ? 0 : 1
 }
+
 
 
