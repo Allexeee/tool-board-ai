@@ -16,6 +16,8 @@ import {
 import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
+import { renderRunReport, writeRunReport } from '../../core/run-report.ts'
+import { relative } from 'node:path'
 
 const MODE_LABEL = { plan: 'по плану', all: 'доталово' } as const
 const POWER_LABEL = { none: 'не трогать', hibernate: 'гибернация', shutdown: 'выключение' } as const
@@ -33,7 +35,7 @@ const REVIEW_LABEL: Record<RunReviewState, string | null> = {
 const USAGE =
   'использование: run start --mode plan|all [--request R1 …] [--nearest] [--approve] ' +
   '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision · ' +
-  'run review <id> --verdict ok|found [--note "…"] · run show'
+  'run review <id> --verdict ok|found [--note "…"] · run report <id> · run show'
 
 function stamp(iso: string): string {
   const at = new Date(iso)
@@ -115,6 +117,21 @@ export default async function command(args: ParsedArgs) {
     ok(
       { run, review },
       `${run.id}  ревью: ${verdict} · ${REVIEW_LABEL[state] ?? ''}${note}`.trim(),
+    )
+    return 0
+  }
+
+  if (args.sub === 'report') {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: run report RUN1')
+
+    // отчёт пишется файлом: владелец читает его утром, а не листает чат
+    const report = writeRunReport(db, id, { root: project.root })
+    const shown = relative(process.cwd(), report.path).replace(/\\/g, '/')
+
+    ok(
+      { ...report, path: shown },
+      `${renderRunReport(report)}\nотчёт: ${shown}`,
     )
     return 0
   }
