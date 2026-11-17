@@ -129,7 +129,7 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
 
 // владельцу нужен не журнал, а картина работы: строка на каждый этап.
 // группы не выносятся в заголовки — порядок строк и есть группировка.
-export type OwnerStageStatus = 'done' | 'wip' | 'pending'
+export type OwnerStageStatus = 'done' | 'merge' | 'wip' | 'pending'
 
 export interface OwnerStageRow {
   featureId: string
@@ -146,21 +146,35 @@ export interface OwnerView {
   stages: OwnerStageRow[]
 }
 
-const ownerStageStatus = (status: StageStatus): OwnerStageStatus | null => {
-  if (status === 'merged') return 'done'
-  if (status === 'planned') return 'pending'
-  if (status === 'abandoned') return null
+// статус этапа — по движению, а не по флагу: plan apply активирует этап, но работы в нём ещё нет.
+const ownerStageStatus = (stage: StageStatus, started: boolean, allDone: boolean): OwnerStageStatus | null => {
+  if (stage === 'merged') return 'done'
+  if (stage === 'abandoned') return null
+  if (!started) return 'pending'
+  if (allDone) return 'merge'
   return 'wip'
 }
 
-const ownerStatusRank: Record<OwnerStageStatus, number> = { done: 0, wip: 1, pending: 2 }
+const ownerStatusRank: Record<OwnerStageStatus, number> = { done: 0, merge: 1, wip: 2, pending: 3 }
 
-// прогресс — текущая задача из всех задач этапа: до работы 1/3, после двух закрытых 3/3.
-const stageProgress = (db: DatabaseSync, stageId: string): { current: number; total: number } => {
+// прогресс — текущая задача из всех задач этапа: до работы 0/3, в работе 2/3, после двух закрытых 3/3.
+const stageProgress = (
+  db: DatabaseSync,
+  stageId: string,
+  started = true,
+): { current: number; total: number } => {
   const tasks = listTasks(db, { stageId })
   const total = tasks.length
+  if (total === 0 || !started) return { current: 0, total }
+
   const completed = tasks.filter((task) => task.status === 'done' || task.status === 'cancelled').length
-  return { current: total === 0 ? 0 : Math.min(total, completed + 1), total }
+  return { current: Math.min(total, completed + 1), total }
+}
+
+/** Этап начат, если по нему была работа: задача взята, закрыта или этап ушёл на приёмку. */
+const stageStarted = (db: DatabaseSync, stageId: string, stage: StageStatus): boolean => {
+  if (stage === 'in_review' || stage === 'accepted' || stage === 'merged') return true
+  return listTasks(db, { stageId }).some((task) => task.status === 'done' || task.status === 'active')
 }
 
 export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): OwnerView {
@@ -171,7 +185,10 @@ export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): Ow
 
     const stages = listStages(db, feature.id)
     for (const stage of stages) {
-      const status = ownerStageStatus(stage.status)
+      const tasks = listTasks(db, { stageId: stage.id })
+      const started = stageStarted(db, stage.id, stage.status)
+      const allDone = tasks.length > 0 && tasks.every((task) => task.status === 'done' || task.status === 'cancelled')
+      const status = ownerStageStatus(stage.status, started, allDone)
       if (!status) continue
 
       rows.push({
@@ -182,7 +199,7 @@ export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): Ow
           stageId: stage.id,
           seq: stage.seq,
           total: stages.length,
-          progress: stageProgress(db, stage.id),
+          progress: stageProgress(db, stage.id, started),
           status,
           name: stage.name,
         },

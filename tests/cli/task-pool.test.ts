@@ -85,7 +85,7 @@ test('now считает planned отдельно и не выдаёт зада�
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, stageLine('F1', '1/1', '1/1', 'pending', 'S1'))
+  assert.match(view.out, stageLine('F1', '1/1', '0/1', 'pending', 'S1'))
   // задача неактивного этапа не попадает в пул: выдавать её за готовую нельзя.
   assert.doesNotMatch(view.out, /ПУЛ/)
 })
@@ -102,16 +102,16 @@ test('now показывает planned этап, когда предыдущий
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.match(view.out, stageLine('F1', '1/2', '1/1', 'done', 'S1'))
-  assert.match(view.out, stageLine('F1', '2/2', '1/1', 'pending', 'S2'))
+  assert.match(view.out, stageLine('F1', '2/2', '0/1', 'pending', 'S2'))
 })
 
-test('now показывает активный этап', () => {
+test('активированный этап без движения показан как очередь', () => {
   const { dir } = projectWithPlannedStage()
   run(dir, ['stage', 'activate', 'F1'])
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, stageLine('F1', '1/1', '1/1', 'wip', 'S1'))
+  assert.match(view.out, stageLine('F1', '1/1', '0/1', 'pending', 'S1'))
 })
 
 test('приёмка двигает работу: следующий этап становится активным', () => {
