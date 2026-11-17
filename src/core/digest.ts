@@ -28,7 +28,14 @@ export interface DigestStage {
 }
 
 // ядро очереди и миграции: ошибка здесь тихо портит данные или ход работы
-const HIGH_FILES = new Set(['src/core/schema.ts', 'src/core/hands.ts', 'src/core/lease.ts'])
+const HIGH_FILES = new Set([
+  'src/core/schema.ts',
+  'src/core/hands.ts',
+  'src/core/lease.ts',
+  'src/core/power.ts',
+  'src/core/runs.ts',
+  'src/core/run-report.ts',
+])
 const HIGH_DIRS = ['src/core/git/']
 
 const RISK_WEIGHT: Record<Risk, number> = { low: 1, normal: 2, high: 3 }
