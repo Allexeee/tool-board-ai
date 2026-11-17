@@ -5,6 +5,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { queueColor } from '../../src/cli/commands/now.ts'
+import { queueFreeReason, type QueueRow } from '../../src/core/views.ts'
 
 const bin = resolve('bin/toolbox-al.ts')
 
@@ -320,6 +322,58 @@ test('now с NO_COLOR печатает чистый текст', () => {
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /\u001b\[/)
   assert.match(view.out, /Оплата/)
+})
+
+test('now показывает причину свободной задачи и сводку НЕ РАЗДАНО', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'add', 'Звук', '--dod', 'готово', '--skill', 'audio', '--scope', 'assets/**'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+
+  // причина стоит в строке очереди вместо пустого места
+  assert.match(view.out, /T1\s+свободна\s+Пул · ждёт раздачи/)
+  assert.match(view.out, /T2\s+свободна\s+Звук · нет исполнителя: audio/)
+
+  // внизу — сводка: сколько задач на каждую причину
+  assert.match(view.out, /^\tНЕ РАЗДАНО$/m)
+  assert.match(view.out, /^\t {2}ждёт раздачи\s+1$/m)
+  assert.match(view.out, /^\t {2}нет исполнителя: audio\s+1$/m)
+})
+
+test('у назначенной задачи причины нет, и сводка её не считает', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /T1\s+w1\s+Пул/)
+  assert.doesNotMatch(view.out, /ждёт раздачи/)
+  assert.doesNotMatch(view.out, /НЕ РАЗДАНО/)
+})
+
+test('цвет очереди: зелёный — брать, жёлтый — в руке, циан — в работе, серый — ждёт', () => {
+  const base: QueueRow = {
+    taskId: 'T1',
+    title: 'Шаг',
+    status: 'ready',
+    featureId: null,
+    stageId: null,
+    waitsFor: [],
+    holder: null,
+    hand: null,
+    reason: queueFreeReason,
+  }
+
+  assert.equal(queueColor(base), 'green', 'готовую к взятию — зелёным')
+  assert.equal(queueColor({ ...base, hand: 'w1', reason: null }), 'yellow', 'в руке — жёлтым')
+  assert.equal(queueColor({ ...base, status: 'active', holder: 'w1', reason: null }), 'cyan', 'в работе — цианом')
+  assert.equal(queueColor({ ...base, waitsFor: ['T0'], reason: 'ждёт T0' }), 'gray', 'ждёт зависимости — серым')
+  assert.equal(queueColor({ ...base, reason: 'нет исполнителя: audio' }), 'gray', 'некому брать — тоже ждёт')
 })
 
 
