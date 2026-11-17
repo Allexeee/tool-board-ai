@@ -11,7 +11,7 @@ const TASK = 'toolbox-al tick'
 function taskExists(): boolean {
   if (process.platform !== 'win32') return false
   try {
-    execFileSync('schtasks', ['/query', '/tn', TASK], { stdio: 'ignore' })
+    execFileSync('schtasks', ['/query', '/tn', TASK], { stdio: 'ignore', windowsHide: true })
     return true
   } catch {
     return false
@@ -43,7 +43,9 @@ export default async function command(args: ParsedArgs) {
     }
 
     try {
-      execFileSync('schtasks', ['/create', '/tn', TASK, '/tr', 'toolbox-al tick', '/sc', 'minute', '/f'])
+      execFileSync('schtasks', ['/create', '/tn', TASK, '/tr', 'toolbox-al tick', '/sc', 'minute', '/f'], {
+        windowsHide: true,
+      })
     } catch (error) {
       throw new UserError(3, `планировщик не принял задачу: ${String((error as Error).message)}`)
     }
@@ -56,7 +58,7 @@ export default async function command(args: ParsedArgs) {
   if (action === 'disable') {
     if (taskExists()) {
       try {
-        execFileSync('schtasks', ['/delete', '/tn', TASK, '/f'])
+        execFileSync('schtasks', ['/delete', '/tn', TASK, '/f'], { windowsHide: true })
       } catch (error) {
         throw new UserError(3, `планировщик не удалил задачу: ${String((error as Error).message)}`)
       }
