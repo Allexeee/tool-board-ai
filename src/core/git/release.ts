@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { branchExists, currentBranch, resolveBranches, runGit } from './git.ts'
+import { tx } from '../db.ts'
 import { appendEvent } from '../events.ts'
 import { availableVersions } from '../upgrade.ts'
 import { UserError } from '../../cli/errors.ts'
@@ -87,10 +88,12 @@ function metaVersion(db: DatabaseSync): string | null {
 }
 
 function releasedVersion(db: DatabaseSync): string | null {
-  const row = db.prepare('select max(version) as version from releases').get() as
-    | { version: string | null }
-    | undefined
-  return row?.version ?? null
+  const rows = db.prepare('select version from releases').all() as Array<{ version: string }>
+  const versions = rows
+    .map((row) => row.version)
+    .filter((value) => /^\d+\.\d+\.\d+$/.test(value))
+    .sort(compareVersions)
+  return versions.at(-1) ?? null
 }
 
 function compareVersions(a: string, b: string): number {
@@ -117,6 +120,29 @@ function bump(version: string, level: ReleaseLevel): string {
   if (level === 'major') return `${major + 1}.0.0`
   if (level === 'minor') return `${major}.${minor + 1}.0`
   return `${major}.${minor}.${patch + 1}`
+}
+
+/** Дата в формате проекта: 16.11.2026. */
+function projectDate(now = new Date()): string {
+  const [year, month, day] = now.toISOString().slice(0, 10).split('-')
+  return `${day}.${month}.${year}`
+}
+
+/** Новая секция идёт сразу после заголовка файла: свежее сверху, старое не теряется. */
+function insertChangelog(previous: string, section: string): string {
+  const text = previous.replace(/^\uFEFF/, '').trim()
+  if (!text) return `# Changelog\n\n${section}\n`
+
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const body = section.split('\n').join(eol)
+  const [first, ...rest] = text.split(/\r?\n/)
+  const tail = rest.join(eol).trim()
+
+  if (!first.startsWith('#')) return `# Changelog${eol}${eol}${body}${eol}${eol}${text}${eol}`
+
+  return tail
+    ? `${first}${eol}${eol}${body}${eol}${eol}${tail}${eol}`
+    : `${first}${eol}${eol}${body}${eol}`
 }
 
 export function assertReleasePreflight(root: string, tag: string): void {
@@ -159,7 +185,7 @@ export function release(
   const tag = `v${version}`
   assertReleasePreflight(input.root, tag)
 
-  const date = new Date().toISOString().slice(0, 10)
+  const date = projectDate()
   const changelog =
     `## ${tag} — ${date}\n\n` +
     (input.reason ? `${input.reason}\n\n` : '') +
@@ -188,7 +214,7 @@ export function release(
 
     const changelogPath = join(input.root, 'CHANGELOG.md')
     const previous = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '# Changelog\n\n'
-    writeFileSync(changelogPath, previous.trimEnd() + '\n\n' + changelog + '\n')
+    writeFileSync(changelogPath, insertChangelog(previous, changelog))
 
     const pkgPath = join(input.root, 'package.json')
     const hasPackage = existsSync(pkgPath)
@@ -218,18 +244,21 @@ export function release(
     }
   }
 
-  db.prepare("insert or replace into meta (key, value) values ('version', ?)").run(version)
-  db.prepare('insert into releases (version, tag, changelog, at) values (?, ?, ?, ?)').run(
-    version,
-    tag,
-    changelog,
-    new Date().toISOString(),
-  )
-  appendEvent(db, {
-    type: 'release.created',
-    actor: input.actor,
-    subject: tag,
-    after: { version, level: input.level, reason: input.reason ?? null, review: input.review ?? null, stages: stages.map((stage) => stage.id) },
+  // тег уже стоит: база и история обновляются одной транзакцией, чтобы не разъехаться
+  tx(db, () => {
+    db.prepare("insert or replace into meta (key, value) values ('version', ?)").run(version)
+    db.prepare('insert into releases (version, tag, changelog, at) values (?, ?, ?, ?)').run(
+      version,
+      tag,
+      changelog,
+      new Date().toISOString(),
+    )
+    appendEvent(db, {
+      type: 'release.created',
+      actor: input.actor,
+      subject: tag,
+      after: { version, level: input.level, reason: input.reason ?? null, review: input.review ?? null, stages: stages.map((stage) => stage.id) },
+    })
   })
 
   return { released: true, version, tag, changelog }

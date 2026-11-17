@@ -219,3 +219,46 @@ test('релиз бампает версию в package.json проекта', ()
   assert.equal(pkg.version, '0.2.0')
   assert.equal(pkg.name, 'app')
 })
+
+test('версии в releases сравниваются численно, а не по алфавиту', () => {
+  const { db, root, config } = repoWithMergedStage()
+  const insert = db.prepare('insert into releases (version, tag, changelog, at) values (?, ?, ?, ?)')
+  insert.run('0.9.0', 'v0.9.0', '', '2026-01-01T00:00:00.000Z')
+  insert.run('0.10.0', 'v0.10.0', '', '2026-01-02T00:00:00.000Z')
+
+  assert.equal(suggestLevel(db, root)!.version, '0.10.0')
+
+  const result = release(db, { root, level: 'minor', config, actor: 'owner' })
+  assert.equal(result.version, '0.11.0')
+  assert.equal(result.tag, 'v0.11.0')
+})
+
+test('новая секция changelog встаёт после заголовка и в формате проекта', () => {
+  const { db, root, config } = repoWithMergedStage()
+  writeFileSync(join(root, 'CHANGELOG.md'), '# Changelog\n\n## v0.1.0 - 01.01.2026\n\n- старое\n')
+  runGit(root, ['add', 'CHANGELOG.md'])
+  runGit(root, ['commit', '-m', 'changelog'], { AL_ALLOW: '1' })
+
+  release(db, { root, level: 'minor', reason: 'новое', config, actor: 'owner' })
+
+  const text = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
+  const lines = text.split(/\r?\n/)
+  assert.equal(lines[0], '# Changelog')
+  assert.match(lines[2], /^## v0\.2\.0 — \d{2}\.\d{2}\.\d{4}$/)
+  assert.ok(text.indexOf('## v0.2.0') < text.indexOf('## v0.1.0'), 'свежая секция должна быть выше старой')
+  assert.match(text, /- старое/)
+})
+
+test('запись релиза в базу откатывается целиком, если не легла в releases', () => {
+  const { db, root, config } = repoWithMergedStage()
+  db.exec("create trigger reject_release before insert on releases begin select raise(abort, 'нет места'); end")
+
+  assert.throws(() => release(db, { root, level: 'minor', config, actor: 'owner' }), /нет места/)
+
+  const meta = db.prepare("select value from meta where key = 'version'").get()
+  assert.equal(meta, undefined)
+  const releases = db.prepare('select count(*) as n from releases').get() as { n: number }
+  assert.equal(releases.n, 0)
+  const events = db.prepare("select count(*) as n from events where type = 'release.created'").get() as { n: number }
+  assert.equal(events.n, 0)
+})
