@@ -87,3 +87,21 @@ test('корректные deps проходят проверку и план п
   const result = applyPlan(db, { requestId: request.id })
   assert.equal(result.tasks.length, 2)
 })
+
+test('шаг, проверяемый тестом, требует tests в области', () => {
+  const { plan } = fixture([{ ...step, dod: ['тест покрывает отказ'], scope: ['src/**'] }])
+
+  assert.match(validatePlan(plan).join('\n'), /Каркас\/1: шаг проверяется тестом — добавьте tests\/ в область/)
+})
+
+test('шаг с tests в области проходит', () => {
+  const { plan } = fixture([{ ...step, dod: ['тест покрывает отказ'], scope: ['src/**', 'tests/**'] }])
+
+  assert.doesNotMatch(validatePlan(plan).join('\n'), /tests/)
+})
+
+test('шаг без упоминания теста не проверяется', () => {
+  const { plan } = fixture([{ ...step, dod: ['клиент создаётся'], scope: ['src/**'] }])
+
+  assert.doesNotMatch(validatePlan(plan).join('\n'), /tests/)
+})
