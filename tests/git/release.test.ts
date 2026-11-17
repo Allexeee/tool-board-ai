@@ -1,14 +1,15 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { makeRepoWithDev } from '../helpers/repo.ts'
 import { initProject } from '../../src/core/project.ts'
 import { openDb } from '../../src/core/db.ts'
 import { readConfig } from '../../src/core/config.ts'
 import { addFeature } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
-import { createTask } from '../../src/core/tasks.ts'
+import { createTask, deferTask, getTask } from '../../src/core/tasks.ts'
 import { refreshReady } from '../../src/core/deps.ts'
 import { addExecutor } from '../../src/core/executors.ts'
 import { takeTask } from '../../src/core/lease.ts'
@@ -16,7 +17,13 @@ import { doneTask } from '../../src/core/done.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
 import { commitTask } from '../../src/core/git/commit.ts'
 import { mergeStage } from '../../src/core/git/merge.ts'
-import { assertReleasePreflight, pendingRelease, release, suggestLevel } from '../../src/core/git/release.ts'
+import {
+  assertReleasePreflight,
+  deferredInRelease,
+  pendingRelease,
+  release,
+  suggestLevel,
+} from '../../src/core/git/release.ts'
 import { runGit } from '../../src/core/git/git.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
@@ -50,6 +57,49 @@ function repoWithMergedStage() {
   mergeStage(db, { root, stageId: stage.id, config })
 
   return { db, root, config, stage }
+}
+
+/** Этап, где одна задача закрыта, а вторая отложена: релиз не должен её брать, но обязан показать. */
+function repoWithDeferredTask() {
+  const root = makeRepoWithDev()
+  initProject(root)
+  const db = openDb(join(root, '.toolbox-al/tracker.db'))
+  const config = readConfig(join(root, '.toolbox-al/config.json'))
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+
+  const feature = addFeature(db, { name: 'Оплата', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'Каркас', goal: 'g', appetite: '2 дня' })
+  activateNextStage(db, feature.id)
+  const task = createTask(db, {
+    stageId: stage.id,
+    title: 'Добавить вебхук',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  const debt = createTask(db, {
+    stageId: stage.id,
+    title: 'Доделать отчёт',
+    dod: ['b'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  refreshReady(db)
+
+  const { worktree } = startFeature(db, { root, featureId: feature.id, config })
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+  takeTask(db, { executor: 'w1', taskId: task.id })
+  commitTask({ worktree, task, report: { summary: 'готово', checks: [] } })
+  doneTask(db, { taskId: task.id, executor: 'w1', report: { summary: 'готово', checks: [] } })
+  deferTask(db, { id: debt.id, actor: 'owner', reason: 'ждём решения владельца по отчёту' })
+  mergeStage(db, { root, stageId: stage.id, config })
+
+  return { db, root, config, stage, debt }
 }
 
 test('релиз собирает changelog из этапов и ставит тег', () => {
@@ -192,6 +242,45 @@ test('этап, записанный в релиз, больше не попад
 
 
 
+
+test('dry-run показывает отложенные задачи и их причины', () => {
+  const { db, root, debt } = repoWithDeferredTask()
+
+  const waiting = deferredInRelease(db)
+  assert.deepEqual(waiting.map((task) => task.id), [debt.id])
+  assert.equal(waiting[0].stageId, 'F1.S1')
+  assert.match(waiting[0].reason ?? '', /ждём решения владельца/)
+
+  // блок dry-run — текст CLI; отдельного CLI-теста релиза в области нет, поэтому проверяем здесь
+  const shown = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(shown.status, 0, shown.stderr)
+  assert.match(shown.stdout, /НЕ ВОШЛО, ЖДЁТ РЕШЕНИЯ/)
+  assert.match(shown.stdout, /F1\.S1-2/)
+  assert.match(shown.stdout, /ждём решения владельца/)
+})
+
+test('отложенная задача не входит в релиз, но остаётся долгом', () => {
+  const { db, root, config, debt } = repoWithDeferredTask()
+
+  const suggestion = suggestLevel(db, root)!
+  assert.equal(suggestion.tasks, 1, 'отложенная не считается задачей релиза')
+  assert.equal(suggestion.features, 1)
+
+  const result = release(db, { root, level: 'minor', reason: 'новое', config, actor: 'owner' })
+  assert.equal(result.released, true)
+  assert.doesNotMatch(result.changelog ?? '', /F1\.S1-2/, 'в changelog только этапы, не отложенные задачи')
+  assert.doesNotMatch(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), /Доделать отчёт/)
+
+  assert.equal(getTask(db, debt.id)!.status, 'deferred', 'задача осталась отложенной')
+  assert.deepEqual(
+    deferredInRelease(db).map((task) => task.id),
+    [debt.id],
+    'долг не пропадает из отчёта и после релиза',
+  )
+})
 
 test('выбор ревью попадает в changelog и событие', () => {
   const { db, root } = repoWithMergedStage()
