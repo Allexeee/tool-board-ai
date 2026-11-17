@@ -1,6 +1,6 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeRepoWithDev } from '../helpers/repo.ts'
 import { initProject } from '../../src/core/project.ts'
@@ -10,7 +10,7 @@ import { addFeature } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
 import { startFeature } from '../../src/core/git/worktree.ts'
-import { assertScopeRespected, commitTask, saveDraft } from '../../src/core/git/commit.ts'
+import { commitTask, filesOutsideScope, saveDraft } from '../../src/core/git/commit.ts'
 import { runGit } from '../../src/core/git/git.ts'
 
 function fixture() {
@@ -110,29 +110,45 @@ test('save пишет черновик', () => {
   assert.match(runGit(worktree, ['log', '-1', '--pretty=%s', sha!]), /wip:/)
 })
 
-test('изменения вне области отвергаются', () => {
+test('файл вне области не коммитится и не мешает', () => {
   const { worktree, task } = fixture()
   mkdirSync(join(worktree, 'src'), { recursive: true })
   mkdirSync(join(worktree, 'docs'), { recursive: true })
   writeFileSync(join(worktree, 'src/a.ts'), 'a')
   writeFileSync(join(worktree, 'docs/b.md'), 'b')
 
-  assert.throws(
-    () => commitTask({ worktree, task, report: { summary: 's', checks: [] } }),
-    /вне области/,
-  )
+  const sha = commitTask({ worktree, task, report: { summary: 's', checks: [] } })
+  const files = runGit(worktree, ['show', '--name-only', '--pretty=', sha!]).split('\n')
+
+  assert.deepEqual(files, ['src/a.ts'])
+  assert.equal(existsSync(join(worktree, 'docs/b.md')), true)
 })
 
-test('несохранённое изменение в области не считается чужим', () => {
+test('файл с русским именем попадает в область', () => {
   const { worktree, task } = fixture()
   mkdirSync(join(worktree, 'src'), { recursive: true })
-  writeFileSync(join(worktree, 'src/a.ts'), 'a')
-  assert.doesNotThrow(() => assertScopeRespected(worktree, task))
+  writeFileSync(join(worktree, 'src', 'тест.ts'), 'a')
+
+  const sha = commitTask({ worktree, task, report: { summary: 's', checks: [] } })
+  assert.ok(sha)
 })
 
-test('чужой файл в дереве виден как изменение вне области', () => {
+test('scope-каталог покрывает файлы внутри', () => {
+  const { worktree, task } = fixture()
+  const dirTask = { ...task, scope: ['src'] as const }
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src/a.ts'), 'a')
+
+  const sha = commitTask({ worktree, task: dirTask, report: { summary: 's', checks: [] } })
+  assert.ok(sha)
+})
+
+test('файлы вне области видны отдельным списком', () => {
   const { worktree, task } = fixture()
   mkdirSync(join(worktree, 'docs'), { recursive: true })
   writeFileSync(join(worktree, 'docs/b.md'), 'b')
-  assert.throws(() => assertScopeRespected(worktree, task), /вне области/)
+
+  assert.deepEqual(filesOutsideScope(worktree, task), ['docs/b.md'])
 })
+
+

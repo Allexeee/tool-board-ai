@@ -5,18 +5,20 @@ import type { Task } from '../tasks.ts'
 
 function pathspecs(task: Task): string[] {
   if (task.scope === 'exclusive') return ['.']
-  return task.scope.map((pattern) => `:(glob)${pattern}`)
+  // каталог без глобов git понимает как префикс; шаблону нужен glob-магик
+  return task.scope.map((pattern) => (/[*?[]/.test(pattern) ? `:(glob)${pattern}` : pattern))
 }
 
 function changedFiles(worktree: string): string[] {
   const parts = [
-    runGit(worktree, ['diff', '--name-only']),
-    runGit(worktree, ['diff', '--cached', '--name-only']),
-    runGit(worktree, ['ls-files', '--others', '--exclude-standard']),
+    runGit(worktree, ['diff', '--name-only', '-z']),
+    runGit(worktree, ['diff', '--cached', '--name-only', '-z']),
+    runGit(worktree, ['ls-files', '--others', '--exclude-standard', '-z']),
   ]
 
+  // -z снимает квотирование: русские имена приходят как есть
   return parts
-    .flatMap((part) => part.split('\n'))
+    .flatMap((part) => part.split('\0'))
     .map((line) => line.trim())
     .filter(Boolean)
 }
@@ -47,17 +49,10 @@ export function assertSafeBranch(
   }
 }
 
-export function assertScopeRespected(worktree: string, task: Task): void {
-  if (task.scope === 'exclusive') return
-
-  const outside = changedFiles(worktree).filter((path) => !scopesOverlap(task.scope, [path]))
-  if (outside.length > 0) {
-    throw new UserError(
-      3,
-      `изменены файлы вне области задачи ${task.id}: ${outside.join(', ')}. ` +
-        'Верните их или заведите отдельную задачу с этой областью',
-    )
-  }
+/** Файлы вне области, которые коммит не тронет: их оставляем хозяину. */
+export function filesOutsideScope(worktree: string, task: Task): string[] {
+  if (task.scope === 'exclusive') return []
+  return changedFiles(worktree).filter((path) => !scopesOverlap(task.scope, [path]))
 }
 
 function stage(worktree: string, task: Task): { specs: string[]; staged: string } {
@@ -81,7 +76,7 @@ export function commitTask(input: {
     expected: input.expectedBranch,
     forbidden: input.forbiddenBranches,
   })
-  assertScopeRespected(input.worktree, input.task)
+
   const { specs, staged } = stage(input.worktree, input.task)
   if (!staged) return null
 
@@ -99,7 +94,7 @@ export function commitTask(input: {
 }
 
 export function saveDraft(input: { worktree: string; task: Task; summary: string }): string | null {
-  assertScopeRespected(input.worktree, input.task)
+
   const { specs, staged } = stage(input.worktree, input.task)
   if (!staged) return null
 
@@ -111,4 +106,5 @@ export function saveDraft(input: { worktree: string; task: Task; summary: string
 
   return runGit(input.worktree, ['rev-parse', 'HEAD'])
 }
+
 
