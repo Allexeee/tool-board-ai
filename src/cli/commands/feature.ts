@@ -56,6 +56,11 @@ export default async function command(args: ParsedArgs) {
       actor: 'owner',
     })
 
+    if (!result.removed && result.reason) {
+      ok(result, `${id}: каталог остался — ${result.reason}`)
+      return 1
+    }
+
     const what = [
       result.removed ? 'каталог убран' : 'каталога не было',
       result.rescued ? 'наработки спасены в тег' : null,

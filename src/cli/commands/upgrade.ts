@@ -67,6 +67,7 @@ export default async function command(args: ParsedArgs) {
     toolRoot,
     from,
     yes,
+    config: project.config,
   })
 
   if (!result.applied) {
@@ -76,7 +77,7 @@ export default async function command(args: ParsedArgs) {
 
   ok(
     { applied: true, backup: result.backup, plan: result.plan },
-    `обновлено до ${result.plan.current.latest ?? result.plan.current.current}\nкопия базы: ${result.backup}`,
+    `обновлено до ${toolVersion()}\nкопия базы: ${result.backup}`,
   )
   return 0
 }

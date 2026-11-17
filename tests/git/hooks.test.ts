@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { installHooks, hookInstalled } from '../../src/core/git/hooks.ts'
+import { installHooks, hookInstalled, hookStatus } from '../../src/core/git/hooks.ts'
 import { runGit } from '../../src/core/git/git.ts'
 import { makeRepo } from '../helpers/repo.ts'
 
@@ -71,9 +71,17 @@ test('повторная установка не плодит дублей', () 
 
 import { initProject } from '../../src/core/project.ts'
 
+test('старый формат хука распознаётся отдельно', () => {
+  const dir = makeRepo()
+  writeFileSync(join(dir, '.git/hooks/pre-commit'), '#!/bin/sh\\n# toolbox-al: protect main and dev\\n', 'utf8')
+
+  assert.equal(hookStatus(join(dir, '.git')), 'legacy')
+})
+
 test('init ставит хук сам', () => {
   const dir = makeRepo()
   initProject(dir)
   assert.equal(hookInstalled(join(dir, '.git')), true)
 })
+
 

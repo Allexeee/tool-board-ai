@@ -4,13 +4,25 @@ import { doneTask } from '../../core/done.ts'
 import { getTask } from '../../core/tasks.ts'
 import { getStage } from '../../core/stages.ts'
 import { getFeature } from '../../core/features.ts'
-import { commitTask } from '../../core/git/commit.ts'
+import { commitTask, filesOutsideScope } from '../../core/git/commit.ts'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { advanceTime } from '../../core/clock.ts'
-import { listFlag, stringFlag, type ParsedArgs } from '../args.ts'
+import { lastSnapshot } from '../../core/lease.ts'
+import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
+
+function isToolFile(path: string): boolean {
+  const normalized = path.replace(/\\\\/g, '/')
+  return (
+    normalized === 'AGENTS.md' ||
+    normalized === '.gitignore' ||
+    normalized.startsWith('.toolbox-al/') ||
+    normalized.startsWith('.worktrees/') ||
+    normalized.startsWith('.opencode/')
+  )
+}
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
@@ -53,6 +65,18 @@ export default async function command(args: ParsedArgs) {
     }
   }
 
+  const worktreeForScope = feature?.worktree ?? project.root
+  const outside = existsSync(worktreeForScope)
+    ? filesOutsideScope(worktreeForScope, task).filter((path) => !isToolFile(path))
+    : []
+  if (outside.length > 0 && !boolFlag(args, 'force-outside')) {
+    throw new UserError(
+      2,
+      `правки вне области ${task.id} останутся незакоммиченными: ${outside.join(', ')}. ` +
+        'Добавьте их в область или повторите с --force-outside',
+    )
+  }
+
   let commit: string | null = null
 
   if (task.stageId) {
@@ -67,6 +91,7 @@ export default async function command(args: ParsedArgs) {
       task,
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
       expectedBranch: feature.branch,
+      limitTo: task.scope === 'exclusive' ? (lastSnapshot(db, task.id) ?? undefined) : undefined,
     })
   } else {
     commit = commitTask({
@@ -74,6 +99,7 @@ export default async function command(args: ParsedArgs) {
       task,
       report: { summary, checks: listFlag(args, 'checks'), left: stringFlag(args, 'left') },
       forbiddenBranches: [project.config.branches.main],
+      limitTo: task.scope === 'exclusive' ? (lastSnapshot(db, task.id) ?? undefined) : undefined,
     })
   }
 
@@ -91,3 +117,5 @@ export default async function command(args: ParsedArgs) {
   ok(closed, `${closed.id}  ${closed.status === 'in_review' ? 'на ревью' : 'закрыта'}`)
   return 0
 }
+
+

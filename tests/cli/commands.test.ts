@@ -77,6 +77,20 @@ test('release pending на свежем проекте говорит, что р
   assert.match(pending.out, /нечего релизить/)
 })
 
+test('feature clean сообщает причину и возвращает код 1, если каталог остался', () => {
+  const dir = tmp()
+  run(dir, ['init'])
+  run(dir, ['feature', 'add', 'Оплата'])
+  const outside = mkdtempSync(join(tmpdir(), 'al-keep-'))
+  const db = new DatabaseSync(join(dir, '.toolbox-al', 'tracker.db'))
+  db.prepare("update features set status = 'done', worktree = ? where id = 'F1'").run(outside)
+  db.close()
+
+  const cleaned = run(dir, ['feature', 'clean', 'F1'])
+  assert.equal(cleaned.code, 1)
+  assert.match(cleaned.out + cleaned.err, /вне \.worktrees|каталог остался/)
+})
+
 test('init подсказывает закоммитить скелет в git-репозитории', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-init-git-'))
   execFileSync('git', ['init', '-q'], { cwd: dir })
@@ -102,4 +116,7 @@ test('done без аргументов отвечает кодом 3, а не п
   assert.equal(result.code, 3)
   assert.match(result.err, /использование/)
 })
+
+
+
 

@@ -4,7 +4,7 @@ import { listTasks } from './tasks.ts'
 import { listFeatures } from './features.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { hookInstalled } from './git/hooks.ts'
+import { hookStatus } from './git/hooks.ts'
 import { branchExists, isRepo, runGit } from './git/git.ts'
 import { openCodeFilesPresent } from './opencode.ts'
 import { stalePoolTasks } from './pool.ts'
@@ -111,6 +111,22 @@ export function doctorReport(
         ? 'на месте'
         : 'нет .opencode/plugins/toolbox-al — выполните init',
     })
+
+    const pendingFiles = [
+      '.opencode/plugins/toolbox-al/index.ts',
+      '.opencode/skills/toolbox-al/SKILL.md',
+      '.opencode/skills/toolbox-al-setup/SKILL.md',
+      'AGENTS.md',
+    ].filter((relative) => existsSync(join(options.root!, `${relative}.new`)))
+
+    checks.push({
+      name: 'обновление файлов',
+      ok: pendingFiles.length === 0,
+      detail:
+        pendingFiles.length === 0
+          ? 'применены'
+          : 'ждут переноса: ' + pendingFiles.map((file) => `${file}.new`).join(', '),
+    })
   }
 
   const noWorktree = listFeatures(db).filter(
@@ -201,13 +217,17 @@ function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
   }
 
   const gitDir = runGit(root, ['rev-parse', '--absolute-git-dir'])
+  const status = hookStatus(gitDir)
 
   checks.push({
     name: 'git-хук',
-    ok: hookInstalled(gitDir),
-    detail: hookInstalled(gitDir)
-      ? `защищены коммит и merge в ${devBranch} и main`
-      : 'хук не установлен: коммит и merge в main пройдут',
+    ok: status === 'current',
+    detail:
+      status === 'current'
+        ? `защищены коммит и merge в ${devBranch} и main`
+        : status === 'legacy'
+          ? 'хук старого формата: выполните toolbox-al init, merge в main не защищён'
+          : 'хук не установлен: коммит и merge в main пройдут',
   })
 
   checks.push({
@@ -259,5 +279,6 @@ function fairness(db: DatabaseSync): Check {
 
   return { name: 'приоритеты', ok: true, detail: 'очередь соответствует рангам' }
 }
+
 
 
