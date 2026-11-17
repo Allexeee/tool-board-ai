@@ -17,6 +17,28 @@ const CLASS_ORDER: Record<string, number> = {
 
 const SIZE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3 }
 
+/** Откуда задача попала исполнителю: раздачей, прямой рукой или взятием по id из очереди. */
+export type AssignSource = 'dispatch' | 'hand' | 'take'
+
+/**
+ * След выдачи в журнале: без него резерв в hand не виден владельцу.
+ * Одно событие — одна выдача: кто получил, что получил и откуда.
+ */
+export function appendAssigned(
+  db: DatabaseSync,
+  executorId: string,
+  taskId: string,
+  source: AssignSource,
+  actor = 'system',
+): void {
+  appendEvent(db, {
+    type: 'hand.assigned',
+    actor,
+    subject: executorId,
+    after: { executor: executorId, task: taskId, source },
+  })
+}
+
 export function compareTasks(a: Task, b: Task): number {
   const byClass = (CLASS_ORDER[a.class] ?? 9) - (CLASS_ORDER[b.class] ?? 9)
   if (byClass !== 0) return byClass
@@ -82,9 +104,12 @@ export function fillHand(db: DatabaseSync, executorId: string, limit?: number): 
 
     const base = getHand(db, executorId).length
     ordered.slice(0, free).forEach((task, index) => {
-      db.prepare(
-        'insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)',
-      ).run(executorId, base + index + 1, task.id, new Date().toISOString())
+      const result = db
+        .prepare(
+          'insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)',
+        )
+        .run(executorId, base + index + 1, task.id, new Date().toISOString())
+      if (Number(result.changes) > 0) appendAssigned(db, executorId, task.id, 'hand')
     })
 
     return getHand(db, executorId)
@@ -136,6 +161,36 @@ function followersOf(db: DatabaseSync, taskId: string): string[] {
   ).map((row) => row.id)
 }
 
+/**
+ * Кто уже держит этап: у кого его задача в работе или в руке. Задачи одного этапа живут
+ * в одном рабочем каталоге, поэтому этап не делят между исполнителями.
+ * Слитый этап ничей: его задачи закрыты, в очереди и в руке их нет.
+ */
+function stageOwner(db: DatabaseSync, stageId: string): string | null {
+  const inWork = db
+    .prepare(
+      "select holder as owner from tasks where stage_id = ? and status = 'active' and holder is not null " +
+        'order by id limit 1',
+    )
+    .get(stageId) as { owner: string } | undefined
+  if (inWork) return inWork.owner
+
+  const reserved = db
+    .prepare(
+      'select h.executor_id as owner from hand h join tasks t on t.id = h.task_id ' +
+        "where t.stage_id = ? and t.status in ('ready', 'open') order by h.position limit 1",
+    )
+    .get(stageId) as { owner: string } | undefined
+  return reserved?.owner ?? null
+}
+
+/** Этап не делят: его задачи достаются тому, кто уже держит этап. Свободный этап и пул — любому. */
+function ownsStage(db: DatabaseSync, executorId: string, stageId: string | null): boolean {
+  if (stageId === null) return true
+  const owner = stageOwner(db, stageId)
+  return owner === null || owner === executorId
+}
+
 /** Задача годится в руку исполнителя: навык подходит, чужих резервов нет, ждёт только эту руку. */
 function canHold(db: DatabaseSync, executor: Executor, taskId: string, taken: Set<string>): boolean {
   if (taken.has(taskId)) return false
@@ -157,6 +212,9 @@ function canHold(db: DatabaseSync, executor: Executor, taskId: string, taken: Se
       .get(task.stageId) as { stageStatus: string; worktree: string | null } | undefined
     if (!row || row.stageStatus !== 'active' || row.worktree === null) return false
   }
+
+  // этап не делят: задачу этапа, который уже держит другая рука, сюда не берут
+  if (!ownsStage(db, executor.id, task.stageId)) return false
 
   return unmetDep(db, taskId, taken) === null
 }
@@ -180,22 +238,28 @@ function chainOf(db: DatabaseSync, executor: Executor, baseId: string, taken: Se
   return chain
 }
 
-function reserve(db: DatabaseSync, executorId: string, ids: string[], base: number): number {
+/** Резервирует задачи в руке и возвращает те, что действительно встали: событие — на каждую. */
+function reserve(db: DatabaseSync, executorId: string, ids: string[], base: number): string[] {
   const at = new Date().toISOString()
-  let inserted = 0
+  const inserted: string[] = []
   ids.forEach((id, index) => {
     const result = db
       .prepare('insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)')
       .run(executorId, base + index + 1, id, at)
-    inserted += Number(result.changes)
+    if (Number(result.changes) > 0) {
+      inserted.push(id)
+      appendAssigned(db, executorId, id, 'dispatch')
+    }
   })
   return inserted
 }
 
 /**
  * Раздача руки по кругам: независимые задачи — по одной каждому исполнителю с подходящим
- * навыком и свободным местом в руке, остаток уходит следующим кругом. Один исполнитель
+ * навыком и свободным местом в руке, остаток уходит следующими кругами. Один исполнитель
  * не забирает всё, пока другой свободен, и одна задача достаётся одной руке.
+ * Задачи одного этапа не делят: этап целиком достаётся тому, кто первый его взял, —
+ * иначе две руки правят один рабочий каталог фичи. Слитый этап задачами больше не связан.
  * За задачей в руку достраивается её цепочка — то, что setHand принимает одним списком.
  */
 export function dispatchHands(db: DatabaseSync): void {
@@ -210,14 +274,18 @@ export function dispatchHands(db: DatabaseSync): void {
         const hand = getHand(db, executor.id).map((task) => task.id)
         if (hand.length >= executor.handSize) continue
 
-        const base = candidateOrder(db, executor).find((task) => !stuck.has(task.id))
+        const free = candidateOrder(db, executor).filter((task) => !stuck.has(task.id))
+        // сначала добираем свой этап: остальные его задачи другой руке уже не достанутся
+        const base =
+          free.find((task) => task.stageId !== null && stageOwner(db, task.stageId) === executor.id) ??
+          free.find((task) => ownsStage(db, executor.id, task.stageId))
         if (!base) continue
 
         const taken = new Set(hand)
         taken.add(base.id)
         const ids = [base.id, ...chainOf(db, executor, base.id, taken)]
 
-        if (reserve(db, executor.id, ids, hand.length) === 0) {
+        if (reserve(db, executor.id, ids, hand.length).length === 0) {
           stuck.add(base.id)
           continue
         }
@@ -281,6 +349,15 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
       }
     }
 
+    // что уже выдано этой руке: повторная установка тех же задач — не новая выдача
+    const previous = new Set(
+      (
+        db.prepare('select task_id from hand where executor_id = ?').all(executorId) as Array<{
+          task_id: string
+        }>
+      ).map((row) => row.task_id),
+    )
+
     db.prepare('delete from hand where executor_id = ?').run(executorId)
     ids.forEach((id, index) => {
       db.prepare(
@@ -294,6 +371,11 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
       subject: executorId,
       after: { tasks: ids },
     })
+
+    // событие — только на новую выдачу: переустановка той же руки ничего не выдаёт заново
+    for (const id of ids) {
+      if (!previous.has(id)) appendAssigned(db, executorId, id, 'hand', actor)
+    }
 
     return getHand(db, executorId)
   })

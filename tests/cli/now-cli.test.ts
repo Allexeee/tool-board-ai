@@ -331,6 +331,32 @@ test('у назначенной задачи причины нет, и свод�
   assert.doesNotMatch(view.out, /НЕ РАЗДАНО/)
 })
 
+test('now показывает раздачу: dispatch, руками и без выдачи', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^\tРАЗДАЧА$/m)
+  assert.match(view.out, /^\t {2}за всё время\s+dispatch 0 · руками 1 · без выдачи 0$/m)
+  assert.doesNotMatch(view.out, /за прогон/, 'прогонов не было — строку про прогон не печатаем')
+})
+
+test('now показывает раздачу за прогон', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['run', 'start', '--mode', 'plan'])
+  run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^\t {2}за прогон\s+dispatch 0 · руками 1 · без выдачи 0$/m)
+  assert.match(view.out, /^\t {2}за всё время\s+dispatch 0 · руками 1 · без выдачи 0$/m)
+})
+
 test('цвет очереди: зелёный — брать, жёлтый — в руке, циан — в работе, серый — ждёт', () => {
   const base: QueueRow = {
     taskId: 'T1',

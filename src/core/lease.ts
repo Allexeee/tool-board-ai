@@ -4,7 +4,7 @@ import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor, assertSkill, touchExecutor, clearBusy } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
-import { getHand, nextTask } from './hands.ts'
+import { getHand, nextTask, appendAssigned } from './hands.ts'
 import { depsOf, isReady, isSatisfied } from './deps.ts'
 import { scopesOverlap } from './git/scope.ts'
 import { runGit } from './git/git.ts'
@@ -108,6 +108,7 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
     }
 
     const hand = getHand(db, executor.id)
+    const byId = options.taskId !== undefined
     let taskId = options.taskId
     if (!taskId) {
       // рука хранит и будущие шаги: берём первый, который уже разрешён,
@@ -192,6 +193,13 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       throw new UserError(2, `задача ${task.id} уже занята или недоступна`)
     }
 
+    // взятие по id видно владельцу: задачу выдали рукой или её взяли прямо из очереди
+    const reserved = byId
+      ? (db.prepare('select executor_id from hand where task_id = ?').get(task.id) as
+          | { executor_id: string }
+          | undefined)
+      : undefined
+
     db.prepare('delete from hand where task_id = ?').run(task.id)
     // занятость «без задачи» кончается вместе с появлением задачи: держатель теперь известен.
     clearBusy(db, { executorId: executor.id, actor: executor.id })
@@ -202,6 +210,8 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       subject: task.id,
       after: snapshot ? { leaseUntil, snapshot } : { leaseUntil },
     })
+
+    if (byId) appendAssigned(db, executor.id, task.id, reserved ? 'hand' : 'take', executor.id)
 
     return getTask(db, task.id)!
   })

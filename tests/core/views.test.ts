@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -9,7 +9,10 @@ import { refreshReady } from '../../src/core/deps.ts'
 import { addExecutor, clearBusy, setBusy } from '../../src/core/executors.ts'
 import { setHand } from '../../src/core/hands.ts'
 import { addDep } from '../../src/core/deps.ts'
-import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason } from '../../src/core/views.ts'
+import { takeTask } from '../../src/core/lease.ts'
+import { endRun, startRun } from '../../src/core/runs.ts'
+import { collectRunReport, renderRunReport } from '../../src/core/run-report.ts'
+import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
@@ -388,3 +391,36 @@ test('причина свободной задачи: статус не ready', 
 
   assert.equal(reasonOf(db, `${stageId}-1`), 'не готова: blocked')
 })
+
+test('счётчики раздачи различают источник и период прогона', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
+  const [, second, third] = [1, 2, 3].map((n) => `${stageId}-${n}`)
+
+  // выдача рукой до прогона: в срез прогона не попадает
+  setHand(db, 'w1', [third], 'owner')
+  db.prepare("update events set at = '2000-01-01T00:00:00.000Z' where type = 'hand.assigned'").run()
+
+  const run = startRun(db, { mode: 'plan' })
+
+  // в прогоне: взятие по id без выдачи и добор раздачей
+  takeTask(db, { executor: 'w2', taskId: second })
+  dispatchPlan(db)
+
+  const stats = assignmentStats(db)
+  assert.deepEqual(stats.total, { dispatch: 1, hand: 1, take: 1 }, 'смешанная выдача: по одной на источник')
+  assert.deepEqual(stats.run, { dispatch: 1, hand: 0, take: 1 }, 'за прогон — только выдачи прогона')
+  assert.deepEqual(nowView(db).assignment, stats, 'now видит те же числа')
+
+  // отчёт пишется только по закрытому прогону — закрываем перед проверкой
+  endRun(db, { id: run.id, reason: 'tasks', actor: 'owner' })
+  const data = collectRunReport(db, run.id)
+  assert.deepEqual(data.assignment, stats.run, 'отчёт прогона считает тот же срез')
+  assert.match(
+    renderRunReport(data),
+    /- раздача: dispatch 1 · руками 0 · без выдачи 1/,
+    'в шапке отчёта те же числа',
+  )
+})
+
