@@ -27,7 +27,9 @@ create table if not exists executors (
   wip_limit  integer not null default 1,
   hand_size  integer not null default 5,
   session    text,
-  last_seen  text
+  last_seen  text,
+  -- модель и права добавляет миграция 8, steps есть сразу: у новой базы дефолт 60
+  steps      integer not null default 60
 );
 
 create table if not exists requests (
@@ -214,7 +216,12 @@ export function migrate(db: DatabaseSync): number {
       // модель, права и лимит шагов превращают исполнителя в агента OpenCode
       db.exec('alter table executors add column model text')
       db.exec("alter table executors add column permissions text not null default '[]'")
-      db.exec('alter table executors add column steps integer not null default 20')
+      // у новой базы steps уже есть из create table с дефолтом 60;
+      // апгрейд старой базы получает прежний дефолт 20 — backfill не делаем
+      const hasSteps = db
+        .prepare("select 1 as found from pragma_table_info('executors') where name = 'steps'")
+        .get()
+      if (!hasSteps) db.exec('alter table executors add column steps integer not null default 20')
     }
     if (from < 9) {
       // задача помнит сессию, в которой её делают: доработка возвращается туда же

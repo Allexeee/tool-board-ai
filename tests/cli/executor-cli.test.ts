@@ -164,7 +164,7 @@ test('sync w1 создаёт файл агента OpenCode', () => {
   const text = readFileSync(agentFile(dir, 'w1'), 'utf8')
   assert.match(text, /^---\n/)
   assert.match(text, /^mode: subagent$/m)
-  assert.match(text, /^steps: 20$/m)
+  assert.match(text, /^steps: 60$/m)
   assert.match(text, /^description: "исполнитель w1 · навыки: backend"$/m)
   assert.match(text, /take --as w1/)
 })

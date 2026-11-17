@@ -17,7 +17,11 @@ export interface PermissionRule {
   effect: PermissionEffect
 }
 
-export const DEFAULT_STEPS = 20
+/**
+ * Лимит шагов агента по умолчанию. Двадцати не хватало: агент упирался в лимит
+ * на середине задачи и не доходил до тестов.
+ */
+export const DEFAULT_STEPS = 60
 export const MAX_STEPS = 500
 
 export interface Executor {
@@ -43,8 +47,17 @@ interface Row {
   last_seen: string | null
   model: string | null
   permissions: string
-  steps: number
+  steps: number | null
 }
+
+/**
+ * Шаги из строки базы. Пустое или испорченное значение (старая база, ручная правка)
+ * читается как текущий дефолт: файл агента получает 60 без правки строки.
+ */
+const stepsOf = (value: number | null | undefined): number =>
+  value === null || value === undefined || !Number.isInteger(value) || value < 1 || value > MAX_STEPS
+    ? DEFAULT_STEPS
+    : value
 
 const toExecutor = (row: Row): Executor => ({
   id: row.id,
@@ -56,7 +69,7 @@ const toExecutor = (row: Row): Executor => ({
   lastSeen: row.last_seen,
   model: row.model,
   permissions: JSON.parse(row.permissions) as PermissionRule[],
-  steps: row.steps,
+  steps: stepsOf(row.steps),
 })
 
 /** Модель хранится как provider/model; null — агент наследует модель родителя. */

@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
 import {
   addExecutor,
+  DEFAULT_STEPS,
   getExecutor,
   listExecutors,
   renameExecutor,
@@ -65,7 +66,7 @@ test('без прав остаётся пустой список, а шаги б
   const text = renderAgent(worker({ permissions: [], steps: undefined }))
 
   assert.match(text, /^permissions: \[\]$/m)
-  assert.match(text, /^steps: 20$/m)
+  assert.match(text, new RegExp(`^steps: ${DEFAULT_STEPS}$`, 'm'))
 })
 
 test('непригодный для имени файла id отвергается с объяснением', () => {
