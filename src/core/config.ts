@@ -16,6 +16,8 @@ export interface Config {
   worktreePool: number
   /** Субагенты: выключены по умолчанию, включаются только настройкой и только в ране. */
   subagents: boolean
+  /** Параллельные тесты: true — node --test, false — один процесс без окон. */
+  parallelTests: boolean
   branches: { main: string; dev: string }
   locale: string
 }
@@ -32,6 +34,7 @@ export const DEFAULT_CONFIG: Config = {
   wipLimit: 1,
   worktreePool: 2,
   subagents: false,
+  parallelTests: false,
   branches: { main: 'main', dev: 'dev' },
   locale: 'ru',
 }
@@ -57,6 +60,7 @@ export function readConfig(path: string): Config {
     ...parsed,
     worktreePool: worktreePoolOf(parsed.worktreePool),
     subagents: parsed.subagents === true,
+    parallelTests: parsed.parallelTests === true,
     branches: { ...DEFAULT_CONFIG.branches, ...(parsed.branches ?? {}) },
   }
 }
