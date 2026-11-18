@@ -129,18 +129,35 @@ export default async function command(args: ParsedArgs) {
   return 0
 }
 
-/** Строка исполнителя: работа с подписью из задачи, ожидание с причиной или отдых. */
+/** Строка исполнителя: работа, ожидание с причиной или отдых — по фактическим сигналам. */
 function stateText(state: ExecutorState): string {
-  if (state.kind === 'work') {
-    return state.taskId
-      ? paint(`работает над ${state.taskId} · ${state.title ?? ''}`.trimEnd(), 'cyan')
-      : paint('работает', 'cyan')
+  switch (state.kind) {
+    case 'work':
+      return state.taskId
+        ? paint(`работает над ${state.taskId} · ${state.title ?? ''}`.trimEnd(), 'cyan')
+        : paint('работает', 'cyan')
+    case 'silent':
+      return paint(`работает над ${state.taskId} · молчит ${silentMinutes(state.silentMs)}`, 'cyan')
+    case 'test':
+      return paint(`ждёт результата теста: ${state.taskId}`, 'cyan')
+    case 'command':
+      return paint(`ждёт команды: ${state.taskId}`, 'cyan')
+    case 'reserved':
+      return paint(`работа зарезервирована: ${state.taskId}`, 'cyan')
+    case 'review':
+      return paint(`на ревью: ${state.taskId}`, 'cyan')
+    case 'wait': {
+      const until = state.until ? ` (до ${shortTime(state.until)})` : ''
+      return paint(`ждёт: ${state.reason}${until}`, 'cyan')
+    }
+    default:
+      return paint('отдыхает', 'gray')
   }
-  if (state.kind === 'wait') {
-    const until = state.until ? ` (до ${shortTime(state.until)})` : ''
-    return paint(`ждёт: ${state.reason}${until}`, 'cyan')
-  }
-  return paint('отдыхает', 'gray')
+}
+
+/** «молчит N мин»: минута — минимальная единица, ноль минут читается как ошибка. */
+function silentMinutes(ms: number): string {
+  return `${Math.max(1, Math.round(ms / 60_000))} мин`
 }
 
 /** Пустые строки остаются разделителями, содержательные — начинаются с табуляции. */

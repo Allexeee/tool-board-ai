@@ -14,9 +14,10 @@ import { addExecutor, clearBusy, setBusy } from '../../src/core/executors.ts'
 import { setHand } from '../../src/core/hands.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { takeTask } from '../../src/core/lease.ts'
+import { doneTask } from '../../src/core/done.ts'
 import { endRun, startRun } from '../../src/core/runs.ts'
 import { collectRunReport, renderRunReport } from '../../src/core/run-report.ts'
-import { readLiveSessions } from '../../src/core/usage.ts'
+import { readLiveSessions, type LiveSession, type LiveTool } from '../../src/core/usage.ts'
 import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
@@ -350,6 +351,81 @@ test('занятая свежая сессия исполнителя — раб
   assert.deepEqual(state(session(true, 20 * 60_000)), { kind: 'rest' }, 'старая сессия — не работа')
 })
 
+test('состояние по последнему инструменту: работа, тест, фон, молчание', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const task = createTask(db, {
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+    title: 'Шаг',
+  })
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(task.id)
+
+  const now = Date.now()
+  const base = { id: 'ses_1', agent: 'w1', title: 'т', updatedAt: now, lastAssistantAt: now - 5 * 60_000 }
+  const tool = (over: Partial<LiveTool>): LiveTool => ({
+    name: 'shell',
+    command: null,
+    status: 'completed',
+    at: now,
+    background: false,
+    ...over,
+  })
+  const stateWith = (session: LiveSession | null) =>
+    nowView(db, { sessions: session ? [session] : [] }).holders.find((holder) => holder.executor === 'w1')!
+      .state
+
+  assert.deepEqual(
+    stateWith({ ...base, busy: true, tool: null }),
+    { kind: 'work', taskId: task.id, title: 'Шаг' },
+    'сессия занята — работает',
+  )
+  assert.deepEqual(
+    stateWith({ ...base, busy: false, tool: tool({ command: 'node --test tests/core/views.test.ts' }) }),
+    { kind: 'test', taskId: task.id },
+    'простой и последний shell — тесты',
+  )
+  assert.deepEqual(
+    stateWith({ ...base, busy: false, tool: tool({ command: 'npm run dev', background: true }) }),
+    { kind: 'command', taskId: task.id },
+    'простой и команда в фоне',
+  )
+
+  const silent = stateWith({ ...base, busy: false, tool: tool({ name: 'write' }) })
+  assert.equal(silent.kind, 'silent', 'простой без тестов и фона — молчание')
+  if (silent.kind === 'silent') {
+    assert.equal(silent.taskId, task.id)
+    assert.ok(silent.silentMs >= 299_000, 'молчание считается от последнего сообщения ассистента')
+  }
+
+  assert.deepEqual(
+    stateWith(null),
+    { kind: 'work', taskId: task.id, title: 'Шаг' },
+    'без сессии верим задаче, а не выдумываем простой',
+  )
+})
+
+test('сданная на ревью задача видна у исполнителя', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const task = createTask(db, {
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+    title: 'Шаг',
+  })
+  db.prepare("update tasks set status = 'active', holder = 'w1', review = 'agent' where id = ?").run(task.id)
+  doneTask(db, { taskId: task.id, executor: 'w1', report: { summary: 'готово', checks: [] } })
+
+  const state = nowView(db).holders.find((holder) => holder.executor === 'w1')!.state
+  assert.deepEqual(state, { kind: 'review', taskId: task.id }, 'кто сдал — тот и на ревью')
+})
+
 test('задача на ревью — работа этапа, в очереди причина «на ревью»', () => {
   const db = openDb(':memory:')
   seed(db)
@@ -577,8 +653,18 @@ interface LiveRow {
   archivedAt?: number | null
 }
 
+interface LiveMessage {
+  sessionId: string
+  seq: number
+  at: number
+  data: string
+}
+
 /** Временная база OpenCode: только колонки, которые читает доска. */
-function liveDb(rows: LiveRow[]): string {
+function liveDb(
+  rows: LiveRow[],
+  options: { messages?: LiveMessage[]; withMessages?: boolean } = {},
+): string {
   const dir = mkdtempSync(join(tmpdir(), 'al-live-'))
   const path = join(dir, 'opencode.db')
   const db = new DatabaseSync(path)
@@ -596,6 +682,33 @@ function liveDb(rows: LiveRow[]): string {
         time_archived integer
       )
     `)
+    if (options.withMessages !== false) {
+      db.exec(`
+        create table session_message (
+          id text primary key,
+          session_id text not null,
+          type text not null,
+          seq integer not null,
+          time_created integer not null,
+          time_updated integer not null,
+          data text not null
+        )
+      `)
+      const insertMessage = db.prepare(
+        `insert into session_message (id, session_id, type, seq, time_created, time_updated, data)
+         values (?, ?, 'assistant', ?, ?, ?, ?)`,
+      )
+      for (const message of options.messages ?? []) {
+        insertMessage.run(
+          `${message.sessionId}-${message.seq}`,
+          message.sessionId,
+          message.seq,
+          message.at,
+          message.at,
+          message.data,
+        )
+      }
+    }
     const insert = db.prepare(
       `insert into session_v2 (id, parent_id, agent, title, directory, time_updated, time_busy, time_idle, time_archived)
        values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -666,6 +779,98 @@ test('живые субагенты: только дочерние и свежи
   assert.deepEqual(sessions.map((session) => session.id), ['busy', 'idle'])
   assert.equal(sessions[0]!.busy, true, 'занят: отметка «занят» новее')
   assert.equal(sessions[1]!.busy, false, 'простаивает: отметка «простаивает» новее')
+})
+
+test('последний инструмент читается из session_message', () => {
+  const now = Date.now()
+  const dbPath = liveDb(
+    [
+      { id: 'ses_1', parentId: 'root', agent: 'worker-1', updatedAt: now, busyAt: now - 1000, idleAt: now - 2000 },
+    ],
+    {
+      messages: [
+        {
+          sessionId: 'ses_1',
+          seq: 1,
+          at: now - 5000,
+          data: JSON.stringify({ content: [{ type: 'text', text: 'старое' }] }),
+        },
+        {
+          sessionId: 'ses_1',
+          seq: 2,
+          at: now - 1000,
+          data: JSON.stringify({
+            content: [
+              { type: 'text', text: 'гоняю тесты' },
+              {
+                type: 'tool',
+                name: 'shell',
+                state: { status: 'completed', input: { command: 'node --test tests/core/views.test.ts' } },
+                time: { created: now - 1200 },
+              },
+            ],
+          }),
+        },
+      ],
+    },
+  )
+
+  const [session] = readLiveSessions({ dbPath, now })
+  assert.equal(session!.lastAssistantAt, now - 1000, 'берём последнее сообщение ассистента')
+  assert.deepEqual(session!.tool, {
+    name: 'shell',
+    command: 'node --test tests/core/views.test.ts',
+    status: 'completed',
+    at: now - 1200,
+    background: false,
+  })
+})
+
+test('фон виден по выводу, а битый JSON и отсутствие таблицы — откат без падения', () => {
+  const now = Date.now()
+  const background = JSON.stringify({
+    content: [
+      {
+        type: 'tool',
+        name: 'shell',
+        state: {
+          status: 'running',
+          input: { command: 'npm run dev' },
+          content: [{ type: 'text', text: 'Command moved to the background (shell ID: sh_1)' }],
+        },
+        time: { created: now },
+      },
+    ],
+  })
+
+  const dbPath = liveDb(
+    [
+      { id: 'ses_bg', parentId: 'root', agent: 'worker-1', updatedAt: now },
+      { id: 'ses_bad', parentId: 'root', agent: 'worker-2', updatedAt: now },
+    ],
+    {
+      messages: [
+        { sessionId: 'ses_bg', seq: 1, at: now, data: background },
+        { sessionId: 'ses_bad', seq: 1, at: now, data: '{"content": [битый json' },
+      ],
+    },
+  )
+
+  const sessions = readLiveSessions({ dbPath, now })
+  const bg = sessions.find((session) => session.id === 'ses_bg')!
+  const bad = sessions.find((session) => session.id === 'ses_bad')!
+
+  assert.equal(bg.tool!.background, true, 'в выводе есть background')
+  assert.equal(bad.tool, null, 'битый JSON: инструмента нет, сессия жива')
+  assert.equal(bad.lastAssistantAt, now, 'время сообщения при этом известно')
+
+  // таблицы session_message нет вовсе: доска печатается, инструментов просто нет
+  const withoutMessages = liveDb([{ id: 'ses_1', parentId: 'root', agent: 'worker-1', updatedAt: now }], {
+    withMessages: false,
+  })
+  const [session] = readLiveSessions({ dbPath: withoutMessages, now })
+  assert.equal(session!.tool, null)
+  assert.equal(session!.lastAssistantAt, null)
 })
 
 test('нет базы OpenCode: живых субагентов просто нет', () => {

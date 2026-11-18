@@ -17,8 +17,18 @@ import { pendingRelease } from './git/release.ts'
  * с причиной и отдых. Заголовок сессии сюда не входит — он не обновляется.
  */
 export type ExecutorState =
-  /** taskId null — работа без задачи: у оркестратора идёт прогон. */
+  /** taskId null — работа без задачи: у оркестратора идёт прогон или занята сессия. */
   | { kind: 'work'; taskId: string | null; title: string | null }
+  /** Задача взята, но сессия простаивает: агент молчит уже silentMs. */
+  | { kind: 'silent'; taskId: string; title: string; silentMs: number }
+  /** Задача взята, последний shell — тесты: ждём результата. */
+  | { kind: 'test'; taskId: string }
+  /** Задача взята, последняя команда ушла в фон: ждём её. */
+  | { kind: 'command'; taskId: string }
+  /** Задача в руке, но ещё не взята. */
+  | { kind: 'reserved'; taskId: string }
+  /** Задача сдана и ждёт вердикта. */
+  | { kind: 'review'; taskId: string }
   | { kind: 'wait'; reason: string; until?: string }
   | { kind: 'rest' }
 
@@ -437,25 +447,46 @@ function holderState(
     hand: Task[]
     busy: { reason: string; until: string } | null
     running: boolean
-    /** Живая сессия агента: занятая и свежая — это работа, даже без задачи. */
+    /** Живая сессия агента: по ней видно, что он делает, а не только что держит. */
     session?: LiveSession | null
+    /** Задача, которую он сдал на ревью. */
+    review?: string | null
+    now: number
   },
 ): ExecutorState {
   const task = input.active[0]
-  if (task) return { kind: 'work', taskId: task.id, title: task.title }
+  if (task) {
+    // занятая сессия — агент работает прямо сейчас, подпись берём из задачи
+    if (!input.session || input.session.busy) {
+      return { kind: 'work', taskId: task.id, title: task.title }
+    }
+
+    // сессия простаивает: смотрим последний инструмент, а не гадаем
+    const tool = input.session.tool
+    if (tool && tool.name === 'shell' && tool.command !== null && tool.command.includes('--test')) {
+      return { kind: 'test', taskId: task.id }
+    }
+    if (tool && tool.background) return { kind: 'command', taskId: task.id }
+
+    const since = input.session.lastAssistantAt ?? input.session.updatedAt
+    return { kind: 'silent', taskId: task.id, title: task.title, silentMs: Math.max(0, input.now - since) }
+  }
 
   // занятость без задачи — это причина не брать работу, а не работа
   if (input.busy) return { kind: 'wait', reason: input.busy.reason, until: input.busy.until }
 
   // рука не пуста, но в работу ещё не пошла: называем первую причину, а если
-  // всё можно брать — говорим, что задача лежит в руке и её ещё не взяли
+  // всё можно брать — говорим, что работа зарезервирована за исполнителем
   if (input.hand.length > 0) {
     const waiting = input.hand
       .map((held) => ({ id: held.id, reason: handWaitReason(db, held) }))
       .find((item) => item.reason !== null)
     if (waiting) return { kind: 'wait', reason: waiting.reason! }
-    return { kind: 'wait', reason: `задача в руке (${input.hand[0]!.id})` }
+    return { kind: 'reserved', taskId: input.hand[0]!.id }
   }
+
+  // задача сдана: вердикта ждёт, а не простаивает
+  if (input.review) return { kind: 'review', taskId: input.review }
 
   // сессия занята и свежая: агент работает, даже если задача не за ним
   if (input.session && sessionIsWorthShowing(input.session)) {
@@ -520,6 +551,22 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
     .map((task) => ({ id: task.id, title: task.title }))
 
   const run = activeRun(db)
+  // кто сдал задачу на ревью: последний task.done по ней говорит, чья это работа
+  const reviewOf = new Map<string, string>()
+  const reviewTasks = listTasks(db, { status: 'in_review' as TaskStatus })
+  if (reviewTasks.length > 0) {
+    const done = db
+      .prepare("select subject, actor from events where type = 'task.done' order by id desc")
+      .all() as Array<{ subject: string; actor: string }>
+    const actorOf = new Map<string, string>()
+    for (const row of done) if (!actorOf.has(row.subject)) actorOf.set(row.subject, row.actor)
+    for (const task of reviewTasks) {
+      const actor = actorOf.get(task.id)
+      if (actor && !reviewOf.has(actor)) reviewOf.set(actor, task.id)
+    }
+  }
+
+  const now = Date.now()
   const holders = listExecutors(db).map((executor) => {
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
     const handTasks = getHand(db, executor.id)
@@ -540,7 +587,15 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
       hand,
       busy: busyState,
       working,
-      state: holderState(db, { active, hand: handTasks, busy: busyState, running, session }),
+      state: holderState(db, {
+        active,
+        hand: handTasks,
+        busy: busyState,
+        running,
+        session,
+        review: reviewOf.get(executor.id) ?? null,
+        now,
+      }),
     }
   })
 

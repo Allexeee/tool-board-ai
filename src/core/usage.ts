@@ -380,6 +380,19 @@ export function readUsage(options: UsageOptions = {}): UsageResult {
   }
 }
 
+/** Последний инструмент ассистента: по нему видно, что агент делает прямо сейчас. */
+export interface LiveTool {
+  name: string
+  /** Команда shell; null — инструмент не shell. */
+  command: string | null
+  /** running, completed, error: как есть из базы. */
+  status: string
+  /** Когда инструмент запущен, epoch ms; 0 — время не записано. */
+  at: number
+  /** Команда ушла в фон: в выводе есть «background». */
+  background: boolean
+}
+
 /** Живой субагент: дочерняя сессия OpenCode, которая работала в последнее окно. */
 export interface LiveSession {
   id: string
@@ -388,6 +401,10 @@ export interface LiveSession {
   /** Последняя отметка «занят» новее последней «простаивает». */
   busy: boolean
   updatedAt: number
+  /** Когда было последнее сообщение ассистента; null — сообщений нет. */
+  lastAssistantAt: number | null
+  /** Последний инструмент из этого сообщения; null — нет или не разобрали. */
+  tool: LiveTool | null
 }
 
 export interface LiveSessionOptions {
@@ -403,6 +420,96 @@ export interface LiveSessionOptions {
 }
 
 const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000
+
+/** Текст из куска вывода: строка, массив текстов или ничего. */
+function textOf(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return ''
+  return value
+    .map((item) =>
+      item && typeof item === 'object' && typeof (item as { text?: unknown }).text === 'string'
+        ? (item as { text: string }).text
+        : '',
+    )
+    .join(' ')
+}
+
+/**
+ * Последний инструмент из сообщения ассистента. Формат чужой и может измениться:
+ * не разобрали — возвращаем null, доска теряет детализацию, но не падает.
+ */
+function lastToolOf(message: unknown): LiveTool | null {
+  if (!message || typeof message !== 'object') return null
+  const content = (message as { content?: unknown }).content
+  if (!Array.isArray(content)) return null
+
+  for (let index = content.length - 1; index >= 0; index--) {
+    const item = content[index] as { type?: unknown; name?: unknown; state?: unknown; time?: unknown } | null
+    if (!item || typeof item !== 'object' || item.type !== 'tool') continue
+
+    const state = (item.state ?? {}) as {
+      status?: unknown
+      input?: { command?: unknown } | null
+      content?: unknown
+      output?: unknown
+      metadata?: { background?: unknown } | null
+    }
+    const name = typeof item.name === 'string' ? item.name : 'tool'
+    const command = typeof state.input?.command === 'string' ? state.input.command : null
+    const at = Number((item.time as { created?: unknown } | undefined)?.created ?? 0)
+    const output = [textOf(state.output), textOf(state.content), textOf(state.metadata)].join(' ')
+
+    return {
+      name,
+      command: name === 'shell' ? command : null,
+      status: typeof state.status === 'string' ? state.status : 'unknown',
+      at: Number.isFinite(at) ? at : 0,
+      // фон виден в выводе: «Command moved to the background» или metadata.background
+      background: /background/i.test(output) || state.metadata?.background === true,
+    }
+  }
+
+  return null
+}
+
+/** Последнее сообщение ассистента по каждой сессии: время и последний инструмент. */
+function lastAssistantTools(
+  db: DatabaseSync,
+  sessionIds: string[],
+): Map<string, { at: number; tool: LiveTool | null }> {
+  const found = new Map<string, { at: number; tool: LiveTool | null }>()
+  if (sessionIds.length === 0 || !hasTable(db, 'session_message')) return found
+
+  const placeholders = sessionIds.map(() => '?').join(', ')
+  let rows: Array<{ session_id: string; time_created: number; data: string }>
+  try {
+    rows = db
+      .prepare(
+        `select session_id, time_created, data from (
+           select session_id, time_created, data,
+                  row_number() over (partition by session_id order by seq desc) as rn
+             from session_message
+            where type = 'assistant' and session_id in (${placeholders})
+         ) where rn = 1`,
+      )
+      .all(...sessionIds) as unknown as Array<{ session_id: string; time_created: number; data: string }>
+  } catch {
+    return found
+  }
+
+  for (const row of rows) {
+    let tool: LiveTool | null = null
+    try {
+      tool = lastToolOf(JSON.parse(row.data))
+    } catch {
+      // JSON не разобрали: сессия остаётся, инструмента просто нет
+      tool = null
+    }
+    found.set(row.session_id, { at: row.time_created, tool })
+  }
+
+  return found
+}
 
 /**
  * Субагенты сессии — дочерние строки session_v2, обновлённые за последнее окно.
@@ -459,16 +566,27 @@ export function readLiveSessions(options: LiveSessionOptions = {}): LiveSession[
       idleAt: number | null
     }>
 
+    // последний инструмент ассистента: что агент делает, а не только «держит задачу»
+    const tools = lastAssistantTools(
+      db,
+      rows.map((row) => row.id),
+    )
+
     return rows
       .filter((row) => typeof row.updatedAt === 'number' && row.updatedAt >= now - within)
       .filter((row) => project === null || belongsToProject(row.directory, project))
-      .map((row) => ({
-        id: row.id,
-        agent: row.agent?.trim() || 'без агента',
-        title: (row.title ?? '').trim(),
-        busy: (row.busyAt ?? 0) > (row.idleAt ?? 0),
-        updatedAt: row.updatedAt as number,
-      }))
+      .map((row) => {
+        const assistant = tools.get(row.id) ?? null
+        return {
+          id: row.id,
+          agent: row.agent?.trim() || 'без агента',
+          title: (row.title ?? '').trim(),
+          busy: (row.busyAt ?? 0) > (row.idleAt ?? 0),
+          updatedAt: row.updatedAt as number,
+          lastAssistantAt: assistant?.at ?? null,
+          tool: assistant?.tool ?? null,
+        }
+      })
       .sort((a, b) => b.updatedAt - a.updatedAt)
   } catch {
     return []
