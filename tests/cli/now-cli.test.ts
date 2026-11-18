@@ -40,6 +40,7 @@ function liveSessions(
     busy: boolean
     updatedAt?: number
   }>,
+  messages: Array<{ sessionId: string; seq: number; at: number; data: string }> = [],
 ) {
   mkdirSync(join(dataHome, 'opencode'), { recursive: true })
   const db = new DatabaseSync(join(dataHome, 'opencode', 'opencode.db'))
@@ -56,6 +57,33 @@ function liveSessions(
       time_archived integer
     )
   `)
+  if (messages.length > 0) {
+    db.exec(`
+      create table session_message (
+        id text primary key,
+        session_id text not null,
+        type text not null,
+        seq integer not null,
+        time_created integer not null,
+        time_updated integer not null,
+        data text not null
+      )
+    `)
+    const insertMessage = db.prepare(
+      `insert into session_message (id, session_id, type, seq, time_created, time_updated, data)
+       values (?, ?, 'assistant', ?, ?, ?, ?)`,
+    )
+    for (const message of messages) {
+      insertMessage.run(
+        `${message.sessionId}-${message.seq}`,
+        message.sessionId,
+        message.seq,
+        message.at,
+        message.at,
+        message.data,
+      )
+    }
+  }
   const insert = db.prepare(
     'insert into session_v2 (id, parent_id, agent, title, directory, time_updated, time_busy, time_idle, time_archived) ' +
       'values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -335,7 +363,7 @@ test('задача в руке не дублируется в очереди', (
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /ждёт: задача в руке \(T1\)/, 'задача видна у исполнителя')
+  assert.match(view.out, /работа зарезервирована: T1/, 'задача видна у исполнителя')
   assert.doesNotMatch(view.out, /ОЧЕРЕДЬ/, 'свободных задач нет — блока нет')
 })
 
@@ -422,6 +450,94 @@ test('в очереди только свободные задачи: работ
   assert.doesNotMatch(view.out, /T1\s+В работе/, 'задача в работе в очередь не попадает')
 })
 
+test('простой при активной задаче: тест, фон и молчание', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['executor', 'add', 'w2', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Тесты', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'add', 'Правки', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'T1'").run()
+  db.prepare("update tasks set status = 'active', holder = 'w2' where id = 'T2'").run()
+  db.close()
+
+  const now = Date.now()
+  const message = (tool: unknown) => JSON.stringify({ content: [tool] })
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(
+    dataHome,
+    [
+      { id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: false, updatedAt: now },
+      { id: 'ses_2', agent: 'w2', title: 'шаг', directory: dir, busy: false, updatedAt: now },
+    ],
+    [
+      {
+        sessionId: 'ses_1',
+        seq: 1,
+        at: now,
+        data: message({
+          type: 'tool',
+          name: 'shell',
+          state: { status: 'running', input: { command: 'node --test tests/cli/now-cli.test.ts' } },
+        }),
+      },
+      {
+        sessionId: 'ses_2',
+        seq: 1,
+        at: now,
+        data: message({ type: 'tool', name: 'write', state: { status: 'completed', input: {} } }),
+      },
+    ],
+  )
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+ждёт результата теста: T1/, 'последний shell — тесты')
+  assert.match(view.out, /w2\s+работает над T2 · молчит \d+ мин/, 'инструмент не тест и не фон — молчание')
+})
+
+test('простой при активной задаче: команда в фоне', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Шаг', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'T1'").run()
+  db.close()
+
+  const now = Date.now()
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(
+    dataHome,
+    [{ id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: false, updatedAt: now }],
+    [
+      {
+        sessionId: 'ses_1',
+        seq: 1,
+        at: now,
+        data: JSON.stringify({
+          content: [
+            {
+              type: 'tool',
+              name: 'shell',
+              state: {
+                status: 'running',
+                input: { command: 'npm run dev' },
+                content: [{ type: 'text', text: 'Command moved to the background (shell ID: sh_1)' }],
+              },
+            },
+          ],
+        }),
+      },
+    ],
+  )
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+ждёт команды: T1/)
+})
+
 test('пустая очередь не печатает блок', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
@@ -458,7 +574,7 @@ test('у задачи в руке нет причины, и в очередь о
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /ждёт: задача в руке \(T1\)/)
+  assert.match(view.out, /работа зарезервирована: T1/)
   assert.doesNotMatch(view.out, /ОЧЕРЕДЬ/)
   assert.doesNotMatch(view.out, /ждёт раздачи/)
   assert.doesNotMatch(view.out, /НЕ РАЗДАНО/)
@@ -608,7 +724,7 @@ test('старая занятая сессия без исполнителя н�
   assert.doesNotMatch(view.out, /general/, 'старая сессия не печатается, даже если занята')
 })
 
-test('задача в руке без блокировки: ожидание называет её, а не упрекает', () => {
+test('задача в руке без блокировки: работа зарезервирована за исполнителем', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
@@ -616,7 +732,7 @@ test('задача в руке без блокировки: ожидание н�
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /w1\s+ждёт: задача в руке \(T1\)/)
+  assert.match(view.out, /w1\s+работа зарезервирована: T1/)
   assert.doesNotMatch(view.out, /не взял/)
 })
 
