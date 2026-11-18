@@ -45,6 +45,43 @@ const schema = (properties, required = []) => ({
   additionalProperties: false,
 })
 
+/**
+ * Исполнитель по умолчанию: первый живой из `now --json`.
+ * Фиктивного имени нет: живых нет — ошибка называет заведённых исполнителей.
+ */
+async function pickExecutor(ctx) {
+  const answer = await call(ctx, ['now'])
+  if (answer.isError) return { error: `не удалось узнать исполнителей: ${answer.content}` }
+
+  let view
+  try {
+    view = JSON.parse(answer.content)
+  } catch {
+    return { error: `не удалось разобрать now --json: ${String(answer.content).slice(0, 200)}` }
+  }
+
+  const holders = Array.isArray(view?.holders) ? view.holders : []
+  const live = holders.find(
+    (holder) => typeof holder?.executor === 'string' && holder.executor !== '' && holder?.state?.kind !== 'offline',
+  )
+  if (live) return { executor: live.executor }
+
+  const names = holders
+    .map((holder) => holder?.executor)
+    .filter((name) => typeof name === 'string' && name !== '')
+  const available = names.length > 0 ? names.join(', ') : 'никого'
+  return {
+    error: `executor не задан, а живых исполнителей нет. Доступные: ${available}. Укажите executor явно`,
+  }
+}
+
+/** Явный executor побеждает; иначе берём первого живого. */
+async function withExecutor(ctx, input, build) {
+  const picked = input.executor ? { executor: input.executor } : await pickExecutor(ctx)
+  if (!picked.executor) return { content: picked.error, isError: true }
+  return build(picked.executor)
+}
+
 export default Plugin.define({
   id: 'toolbox-al',
   async setup(ctx) {
@@ -77,7 +114,9 @@ export default Plugin.define({
         description: 'Взять задачу в работу; без id берёт следующую из руки',
         input: schema({ id: { type: 'string' }, executor: { type: 'string' } }),
         execute: (input) =>
-          call(ctx, ['take', ...(input.id ? [input.id] : []), '--as', input.executor ?? 'worker']),
+          withExecutor(ctx, input, (executor) =>
+            call(ctx, ['take', ...(input.id ? [input.id] : []), '--as', executor]),
+          ),
       })
 
       editor.add({
@@ -88,7 +127,9 @@ export default Plugin.define({
           ['id', 'summary'],
         ),
         execute: (input) =>
-          call(ctx, ['done', input.id, '--as', input.executor ?? 'worker', '--summary', input.summary]),
+          withExecutor(ctx, input, (executor) =>
+            call(ctx, ['done', input.id, '--as', executor, '--summary', input.summary]),
+          ),
       })
 
       editor.add({
@@ -99,16 +140,18 @@ export default Plugin.define({
           ['id', 'reason', 'note'],
         ),
         execute: (input) =>
-          call(ctx, [
-            'block',
-            input.id,
-            '--as',
-            input.executor ?? 'worker',
-            '--reason',
-            input.reason,
-            '--note',
-            input.note,
-          ]),
+          withExecutor(ctx, input, (executor) =>
+            call(ctx, [
+              'block',
+              input.id,
+              '--as',
+              executor,
+              '--reason',
+              input.reason,
+              '--note',
+              input.note,
+            ]),
+          ),
       })
 
       editor.add({
