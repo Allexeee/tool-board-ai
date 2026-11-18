@@ -21,8 +21,14 @@ const MARKER_SUFFIX = '.json'
 /** Лимит по умолчанию, если в конфиге не задан: 60 — та же цифра, что в заказе. */
 export const DEFAULT_BUDGET = 60
 
-/** Откуда взялась цена: cost из базы, тариф конфига или её нет вовсе. */
-export type PriceBasis = 'cost' | 'tariff' | 'none'
+/**
+ * Откуда взялась цена агента: cost из базы, тариф конфига или ничего (share —
+ * та же третья ступень, что в учёте токенов: денег нет, остаётся только доля).
+ */
+export type PriceBasis = 'cost' | 'tariff' | 'share'
+
+/** Источник цены по всему замеру: один на всех или смешанный. */
+export type ProfileBasis = PriceBasis | 'mixed'
 
 /** Исполнитель на момент старта: состав замера — снимок, а не текущий список. */
 export interface ProfileExecutor {
@@ -56,6 +62,8 @@ export interface AgentProfile {
   idleMs: number | null
   input: number
   output: number
+  /** Токены рассуждений: входят в tokens и в цену по тарифу, как в учёте токенов. */
+  reasoning: number
   cacheRead: number
   cacheWrite: number
   tokens: number
@@ -74,6 +82,7 @@ export interface ProfileTotals {
   idleMs: number | null
   input: number
   output: number
+  reasoning: number
   cacheRead: number
   cacheWrite: number
   tokens: number
@@ -87,8 +96,8 @@ export interface ProfileAvailable {
   dbPath: string
   /** Месячный лимит: из pricing.budget или DEFAULT_BUDGET. */
   budget: number
-  /** Чем посчитана цена: cost из базы, тарифом конфига или ничем. */
-  basis: PriceBasis
+  /** Чем посчитана цена: cost из базы, тарифом конфига, ничем или смесью. */
+  basis: ProfileBasis
   agents: AgentProfile[]
   totals: ProfileTotals
   /** Почему время работы, простой или цена не посчитаны; null — всё на месте. */
@@ -236,6 +245,7 @@ interface SessionRow {
   agent: string
   input: number
   output: number
+  reasoning: number
   cacheRead: number
   cacheWrite: number
   cost: number
@@ -257,10 +267,10 @@ function overlap(from: number, to: number, since: number, until: number): number
 /** Тариф задан, только если есть хотя бы одна положительная ставка: пустой блок — не тариф. */
 function hasRates(pricing: Pricing | null | undefined): pricing is Pricing {
   if (!pricing) return false
-  const rates = [pricing.input, pricing.output, pricing.cacheRead, pricing.cacheWrite]
+  const rates = [pricing.input, pricing.output, pricing.reasoning, pricing.cacheRead, pricing.cacheWrite]
   if (rates.some((rate) => typeof rate === 'number' && rate > 0)) return true
   return Object.values(pricing.agents ?? {}).some((tariff) =>
-    [tariff.input, tariff.output, tariff.cacheRead, tariff.cacheWrite].some(
+    [tariff.input, tariff.output, tariff.reasoning, tariff.cacheRead, tariff.cacheWrite].some(
       (rate) => typeof rate === 'number' && rate > 0,
     ),
   )
@@ -269,15 +279,16 @@ function hasRates(pricing: Pricing | null | undefined): pricing is Pricing {
 /**
  * Цена по тарифу: ставки заданы за миллион токенов, чтение и запись считаются
  * отдельно. Кеш берётся только если ставка задана — иначе он бесплатный, а не
- * посчитанный по чужой цене.
+ * посчитанный по чужой цене. Reasoning — отдельная ставка, как в учёте токенов.
  */
 function priceOf(
   tariff: Pricing,
-  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number },
+  tokens: { input: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number },
 ): number {
   const perMillion =
     tokens.input * (tariff.input ?? 0) +
     tokens.output * (tariff.output ?? 0) +
+    tokens.reasoning * (tariff.reasoning ?? 0) +
     tokens.cacheRead * (tariff.cacheRead ?? 0) +
     tokens.cacheWrite * (tariff.cacheWrite ?? 0)
   return perMillion / 1e6
@@ -358,6 +369,7 @@ function readWindow(
       `select ${agent} as agent, ` +
       `${value('tokens_input')} as input, ` +
       `${value('tokens_output')} as output, ` +
+      `${value('tokens_reasoning')} as reasoning, ` +
       `${value('tokens_cache_read')} as cacheRead, ` +
       `${value('tokens_cache_write')} as cacheWrite, ` +
       `${value('cost')} as cost, ` +
@@ -393,6 +405,7 @@ function readWindow(
       sawIdle: boolean
       input: number
       output: number
+      reasoning: number
       cacheRead: number
       cacheWrite: number
       cost: number
@@ -412,6 +425,7 @@ function readWindow(
           sawIdle: false,
           input: 0,
           output: 0,
+          reasoning: 0,
           cacheRead: 0,
           cacheWrite: 0,
           cost: 0,
@@ -420,6 +434,7 @@ function readWindow(
       acc.sessions += 1
       acc.input += row.input
       acc.output += row.output
+      acc.reasoning += row.reasoning
       acc.cacheRead += row.cacheRead
       acc.cacheWrite += row.cacheWrite
       acc.cost += row.cost
@@ -463,13 +478,15 @@ function readWindow(
           idleMs: acc.sawIdle ? acc.idleMs : null,
           input: acc.input,
           output: acc.output,
+          reasoning: acc.reasoning,
           cacheRead: acc.cacheRead,
           cacheWrite: acc.cacheWrite,
-          tokens: acc.input + acc.output + acc.cacheRead + acc.cacheWrite,
+          tokens: acc.input + acc.output + acc.reasoning + acc.cacheRead + acc.cacheWrite,
           cost: acc.cost,
           amount,
           percent: amount === null ? null : percentOf(amount, budget),
-          basis: fromBase !== null ? 'cost' : amount !== null ? 'tariff' : 'none',
+          // источник цены — у каждого агента свой: cost одного не подписывает тариф другого
+          basis: fromBase !== null ? 'cost' : amount !== null ? 'tariff' : 'share',
         }
       })
       .sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent))
@@ -486,6 +503,7 @@ function readWindow(
         idleMs: agent.idleMs === null ? sum.idleMs : (sum.idleMs ?? 0) + agent.idleMs,
         input: sum.input + agent.input,
         output: sum.output + agent.output,
+        reasoning: sum.reasoning + agent.reasoning,
         cacheRead: sum.cacheRead + agent.cacheRead,
         cacheWrite: sum.cacheWrite + agent.cacheWrite,
         tokens: sum.tokens + agent.tokens,
@@ -499,6 +517,7 @@ function readWindow(
         idleMs: null,
         input: 0,
         output: 0,
+        reasoning: 0,
         cacheRead: 0,
         cacheWrite: 0,
         tokens: 0,
@@ -510,12 +529,11 @@ function readWindow(
     totals.amount = amount
     totals.percent = amount === null ? null : percentOf(amount, budget)
 
-    // цена из базы сильнее тарифа: это настоящие деньги, а не оценка
-    const basis: PriceBasis = agents.some((agent) => agent.basis === 'tariff')
-      ? 'tariff'
-      : agents.some((agent) => agent.basis === 'cost')
-        ? 'cost'
-        : 'none'
+    // источник цены — не один на таблицу: у агента с cost и у агента по тарифу
+    // он разный, и подписывать всех одним нельзя
+    const sources = [...new Set(agents.map((agent) => agent.basis))]
+    const basis: ProfileBasis =
+      sources.length === 0 ? 'share' : sources.length === 1 ? sources[0]! : 'mixed'
 
     const notes: string[] = []
     if (!columns.has('time_busy') || !columns.has('time_idle')) {
@@ -524,9 +542,11 @@ function readWindow(
       notes.push('время работы и простой неизвестны: у сессий нет отметок занятости')
     }
 
-    if (basis === 'none' && agents.length > 0) {
+    // unpriced — агенты без денег вовсе; у кого cost из базы, тот посчитан
+    const unpriced = agents.filter((agent) => agent.basis === 'share').length
+    if (agents.length > 0 && unpriced === agents.length) {
       notes.push('тариф не задан: цена не посчитана')
-    } else if (agents.some((agent) => agent.basis === 'none')) {
+    } else if (unpriced > 0) {
       notes.push('у части агентов тариф не задан: их цена не посчитана')
     }
 
@@ -635,11 +655,22 @@ export function renderProfile(end: ProfileEnd): string {
 
   lines.push(render(header), ...rows.map(render))
 
-  // «тариф не задан» живёт в note: строка про basis молчала бы о цене
-  if (end.basis === 'cost') {
-    lines.push(`цена: cost из базы · процент от лимита ${moneyText(end.budget)}`)
-  } else if (end.basis === 'tariff') {
-    lines.push(`цена: тариф из конфига за 1 млн токенов · процент от лимита ${moneyText(end.budget)}`)
+  // подпись про цену строится по агентам: в смешанной таблице один источник
+  // для всех — враньё, поэтому называем каждый и говорим, что они смешаны
+  const byCost = end.agents.filter((agent) => agent.basis === 'cost').length
+  const byTariff = end.agents.filter((agent) => agent.basis === 'tariff').length
+  const sources: string[] = []
+  if (byCost > 0) sources.push(byCost > 1 ? `cost из базы (${byCost})` : 'cost из базы')
+  if (byTariff > 0) {
+    sources.push(
+      byTariff > 1
+        ? `тариф из конфига за 1 млн токенов (${byTariff})`
+        : 'тариф из конфига за 1 млн токенов',
+    )
+  }
+  if (sources.length > 0) {
+    const lead = sources.length === 1 ? 'цена: ' : 'цена: источники смешаны — '
+    lines.push(`${lead}${sources.join(' + ')} · процент от лимита ${moneyText(end.budget)}`)
   }
 
   lines.push('работа и простой — последний интервал занятости сессий в окне (time_busy/time_idle), не история')
