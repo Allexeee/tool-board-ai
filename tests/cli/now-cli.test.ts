@@ -285,6 +285,26 @@ test('фича без решений печатается как раньше', 
   assert.doesNotMatch(view.out, /→/)
 })
 
+test('задача на ревью: этап в работе, в очереди причина на ревью', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Платежи'])
+  run(dir, ['feature', 'add', 'Платежи', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'Каркас', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['task', 'add', 'F1.S1', 'Шаг', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'active' where id = 'F1.S1'").run()
+  db.prepare("update tasks set status = 'in_review', holder = null where id = 'F1.S1-1'").run()
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^\tF1\s+0\/1\s+wip\s+Платежи$/m, 'этап в работе, а не pending')
+  assert.match(view.out, /F1\.S1-1\s+свободна\s+Шаг · на ревью/)
+  assert.doesNotMatch(view.out, /не готова: in_review/)
+})
+
 test('пул-задача видна в ОЧЕРЕДИ, отдельного блока ПУЛ нет', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
@@ -471,7 +491,7 @@ test('ЖДЁТ MAIN нет, если не все этапы слиты', () => {
   assert.doesNotMatch(view.out, /ЖДЁТ MAIN/)
 })
 
-test('живая сессия не подписывает строку исполнителя заголовком', () => {
+test('живая занятая сессия даёт работает без задачи и без заголовка', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
@@ -481,10 +501,21 @@ test('живая сессия не подписывает строку испо�
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /СУБАГЕНТЫ/, 'отдельного блока субагентов больше нет')
   assert.doesNotMatch(view.out, /шаг по F86/, 'заголовок сессии в строку не попадает')
-  assert.match(view.out, /^\t {2}w1\s+отдыхает$/m, 'задачи нет — исполнитель отдыхает')
+  assert.match(view.out, /^\t {2}w1\s+работает$/m, 'сессия занята — исполнитель работает')
 
   const lines = view.out.split('\n').filter((line) => line.includes('w1'))
   assert.equal(lines.length, 1, 'сессия не заводит вторую строку')
+})
+
+test('простаивающая сессия исполнителя не делает его работающим', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(dataHome, [{ id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: false }])
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^\t {2}w1\s+отдыхает$/m, 'простаивающая сессия — не работа')
 })
 
 test('живая сессия без исполнителя видна, только пока занята', () => {
