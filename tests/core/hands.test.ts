@@ -1,5 +1,9 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { abandonFeature, addFeature, setFeatureBranch } from '../../src/core/features.ts'
@@ -9,8 +13,9 @@ import { refreshReady, addDep } from '../../src/core/deps.ts'
 import { advanceTime } from '../../src/core/clock.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { addExecutor } from '../../src/core/executors.ts'
-import { compareTasks, dispatchHands, fillHand, getHand, setHand } from '../../src/core/hands.ts'
-import { dispatchPlan } from '../../src/core/views.ts'
+import { clearHand, compareTasks, dispatchHands, fillHand, getHand, refillHands, setHand } from '../../src/core/hands.ts'
+import { countAssignments, dispatchPlan } from '../../src/core/views.ts'
+import { startRun } from '../../src/core/runs.ts'
 import { listEvents } from '../../src/core/events.ts'
 
 const plusMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
@@ -453,6 +458,160 @@ test('повторная выдача не удваивает событие: и
   // взятие без id идёт из уже выданной руки: новых выдач нет
   takeTask(db, { executor: 'w1' })
   assert.equal(assignedOf(db).length, 2)
+})
+
+test('вне прогона автодобор не наполняет руки', () => {
+  const db = openDb(':memory:')
+  seed(db)
+
+  const filled = refillHands(db)
+
+  assert.equal(filled, false, 'прогона нет — добирать не для кого')
+  assert.deepEqual(getHand(db, 'w1'), [])
+  assert.deepEqual(getHand(db, 'w2'), [])
+  assert.deepEqual(assignedOf(db), [], 'ни одной выдачи в журнале')
+})
+
+test('в прогоне автодобор наполняет руки', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  startRun(db, { mode: 'plan' })
+
+  const filled = refillHands(db)
+
+  assert.equal(filled, true)
+  assert.ok(getHand(db, 'w1').length + getHand(db, 'w2').length > 0, 'задачи разошлись по рукам')
+})
+
+test('hand clear освобождает руку целиком и пишет событие', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const [first, second] = [1, 2].map((n) => `${stageId}-${n}`)
+  setHand(db, 'w1', [first, second], 'owner')
+
+  const freed = clearHand(db, 'w1', 'owner')
+
+  assert.deepEqual(freed, [first, second])
+  assert.deepEqual(getHand(db, 'w1'), [])
+
+  const cleared = listEvents(db).filter((event) => event.type === 'hand.cleared')
+  assert.equal(cleared.length, 1, 'снятие руки видно в журнале')
+  assert.equal(cleared[0]!.subject, 'w1')
+  assert.deepEqual(JSON.parse(cleared[0]!.after!), { tasks: freed })
+
+  // снятая задача снова свободна: её можно выдать другой руке
+  assert.deepEqual(
+    setHand(db, 'w2', [first], 'owner').map((task) => task.id),
+    [first],
+  )
+})
+
+test('dispatch и взятие по id дают счётчики 1/0/1', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
+
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  setFeatureBranch(db, feature.id, 'feat/test', 'C:/tmp/test-worktree')
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  activateNextStage(db, feature.id)
+  createTask(db, {
+    stageId: stage.id,
+    title: 'Первый шаг',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  refreshReady(db)
+
+  // раздача выдала единственную задачу этапа
+  dispatchHands(db)
+  assert.deepEqual(countAssignments(db), { dispatch: 1, hand: 0, take: 0 })
+
+  // задачу, которой ни у кого не было, берут по id: это взятие, а не выдача руками
+  const pool = createTask(db, {
+    title: 'Поправить опечатку',
+    dod: ['опечатки нет'],
+    size: 'XS',
+    skill: 'backend',
+    class: 'quick',
+    scope: ['docs/**'],
+  })
+  refreshReady(db)
+  takeTask(db, { executor: 'w2', taskId: pool.id })
+
+  assert.deepEqual(countAssignments(db), { dispatch: 1, hand: 0, take: 1 })
+})
+
+const bin = resolve('bin/toolbox-al.ts')
+const taskFlags = ['--dod', 'шаг сделан', '--size', 'XS', '--skill', 'backend', '--scope', 'src/**']
+
+function spawnCli(dir: string, args: string[]) {
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
+}
+
+function gitIn(dir: string, args: string[], env?: NodeJS.ProcessEnv) {
+  execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env })
+}
+
+/** Проект на ветке dev, где done коммитит в корне: рука из T1 и T2, свободная T3. */
+function cliRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'al-hands-'))
+  gitIn(dir, ['init', '-q'])
+  gitIn(dir, ['config', 'user.email', 't@e.x'])
+  gitIn(dir, ['config', 'user.name', 'T'])
+  writeFileSync(join(dir, 'README.md'), 'x')
+  gitIn(dir, ['add', '.'])
+  gitIn(dir, ['commit', '-q', '-m', 'init'])
+  gitIn(dir, ['checkout', '-q', '-b', 'dev'])
+
+  spawnCli(dir, ['init'])
+  spawnCli(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  gitIn(dir, ['add', '.'])
+  // dev защищён хуком init: настройка проекта — не задача, разрешаем явно
+  gitIn(dir, ['commit', '-q', '-m', 'setup'], { ...process.env, AL_ALLOW: '1' })
+
+  for (const title of ['Первый шаг', 'Второй шаг', 'Третий шаг']) {
+    const added = spawnCli(dir, ['task', 'add', title, ...taskFlags])
+    assert.equal(added.code, 0, added.err)
+  }
+
+  const hand = spawnCli(dir, ['hand', 'set', 'T1', 'T2', '--as', 'w1'])
+  assert.equal(hand.code, 0, hand.err)
+  return dir
+}
+
+test('done вне прогона не добирает руку', () => {
+  const dir = cliRepo()
+
+  const taken = spawnCli(dir, ['take', 'T1', '--as', 'w1'])
+  assert.equal(taken.code, 0, taken.err)
+
+  mkdirSync(join(dir, 'src'), { recursive: true })
+  writeFileSync(join(dir, 'src/a.ts'), 'a')
+  const closed = spawnCli(dir, ['done', 'T1', '--as', 'w1', '--summary', 'шаг сделан'])
+  assert.equal(closed.code, 0, closed.err)
+
+  const shown = spawnCli(dir, ['hand', 'show', '--as', 'w1'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /T2/, 'оставшаяся задача руки на месте')
+  assert.doesNotMatch(shown.out, /T3/, 'вне прогона свободная задача в руку не попала')
+})
+
+test('hand clear освобождает руку исполнителя', () => {
+  const dir = cliRepo()
+
+  const cleared = spawnCli(dir, ['hand', 'clear', '--as', 'w1'])
+  assert.equal(cleared.code, 0, cleared.err)
+  assert.match(cleared.out, /рука освобождена: T1, T2/)
+
+  const shown = spawnCli(dir, ['hand', 'show', '--as', 'w1'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /рука пуста/)
 })
 
 

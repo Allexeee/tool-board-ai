@@ -119,6 +119,24 @@ test('с --force-outside промах области пишется в журн�
   assert.equal(misses[0].actor, 'w1')
 })
 
+test('вне прогона done не добирает руки', () => {
+  const dir = repo()
+  run(dir, ['executor', 'add', 'w2', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Вторая', '--dod', 'a', '--skill', 'backend', '--scope', 'docs/**'])
+
+  const out = run(dir, ['done', 'T1', '--as', 'w1', '--summary', 'готово'])
+  assert.match(out, /закрыт/)
+
+  const db = openDb(join(dir, '.toolbox-al/tracker.db'))
+  const hand = (
+    db.prepare('select executor_id, task_id from hand').all() as Array<{
+      executor_id: string
+      task_id: string
+    }>
+  ).map((row) => ({ ...row }))
+  assert.deepEqual(hand, [], 'прогон не идёт — руки остаются пустыми')
+})
+
 test('done добирает руки свободным исполнителям, не ломая ручной порядок', () => {
   const dir = repo()
   run(dir, ['executor', 'add', 'w2', '--skills', 'backend'])
@@ -127,6 +145,8 @@ test('done добирает руки свободным исполнителям
   run(dir, ['task', 'add', 'Четвёртая', '--dod', 'a', '--skill', 'backend', '--scope', 'tools/**'])
   // ручная выдача для w2: dispatch не должен ни отобрать её, ни переставить
   run(dir, ['hand', 'set', '--as', 'w2', 'T4'])
+  // добор идёт только в прогоне: без него руки не наполняются
+  run(dir, ['run', 'start', '--mode', 'all'])
 
   const out = run(dir, ['done', 'T1', '--as', 'w1', '--summary', 'готово'])
   assert.match(out, /закрыт/)
@@ -159,6 +179,8 @@ test('done по задаче этапа добирает руки так же, �
   run(dir, ['task', 'add', 'F1.S1', 'Шаг', '--dod', 'а', '--skill', 'backend', '--scope', 'src/**'])
   run(dir, ['feature', 'start', 'F1'])
   run(dir, ['task', 'add', 'Добор', '--dod', 'б', '--skill', 'backend', '--scope', 'docs/**'])
+  // добор идёт только в прогоне
+  run(dir, ['run', 'start', '--mode', 'all'])
 
   const db = openDb(join(dir, '.toolbox-al/tracker.db'))
   const { worktree } = db.prepare("select worktree from features where id = 'F1'").get() as { worktree: string }
@@ -199,6 +221,8 @@ test('stage merge добирает руки свободным исполнит�
   // merge смотрит только на статус задачи: закрываем её без git-отчёта
   db.prepare("update tasks set status = 'done' where id = 'F1.S1-1'").run()
   db.close()
+  // добор идёт только в прогоне
+  run(dir, ['run', 'start', '--mode', 'all'])
 
   const merged = run(dir, ['stage', 'merge', 'F1.S1'])
   assert.match(merged, /слит/)

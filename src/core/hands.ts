@@ -6,6 +6,7 @@ import { depsOf, isSatisfied } from './deps.ts'
 import { getExecutor, listExecutors, type Executor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 import { isReady } from './deps.ts'
+import { activeRun } from './runs.ts'
 
 const CLASS_ORDER: Record<string, number> = {
   expedite: 0,
@@ -297,6 +298,17 @@ export function dispatchHands(db: DatabaseSync): void {
   })
 }
 
+/**
+ * Автодобор после события (задача закрыта, этап слит): только пока прогон идёт.
+ * Вне прогона руки никто не разбирает, а резерв молча исключает задачи из очереди —
+ * поэтому за пределами прогона не наполняем.
+ */
+export function refillHands(db: DatabaseSync): boolean {
+  if (!activeRun(db)) return false
+  dispatchHands(db)
+  return true
+}
+
 /** Задачи руки в её порядке: готовые к работе и следующие шаги, ждущие своей очереди. */
 export function getHand(db: DatabaseSync, executorId: string): Task[] {
   const rows = db
@@ -378,6 +390,33 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
     }
 
     return getHand(db, executorId)
+  })
+}
+
+/**
+ * Освободить руку целиком: строки руки удаляются, задача снова свободна для раздачи.
+ * Событие хранит, что именно сняли: иначе бронь исчезает бесследно.
+ */
+export function clearHand(db: DatabaseSync, executorId: string, actor: string): string[] {
+  return tx(db, () => {
+    const executor = getExecutor(db, executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${executorId} не найден`)
+
+    const tasks = (
+      db
+        .prepare('select task_id from hand where executor_id = ? order by position, task_id')
+        .all(executorId) as Array<{ task_id: string }>
+    ).map((row) => row.task_id)
+
+    db.prepare('delete from hand where executor_id = ?').run(executorId)
+    appendEvent(db, {
+      type: 'hand.cleared',
+      actor,
+      subject: executorId,
+      after: { tasks },
+    })
+
+    return tasks
   })
 }
 

@@ -1,6 +1,6 @@
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { getHand, setHand } from '../../core/hands.ts'
+import { clearHand, getHand, setHand } from '../../core/hands.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -12,7 +12,7 @@ export default async function command(args: ParsedArgs) {
   const db = openDb(project.dbPath)
 
   const executor = stringFlag(args, 'as') ?? args.positionals[0]
-  if (!executor) throw new UserError(3, 'использование: hand show --as w1')
+  if (!executor) throw new UserError(3, 'использование: hand show|set|add|clear <id> --as w1')
 
   if (args.sub === 'set') {
     const tasks = stringFlag(args, 'as') ? args.positionals : args.positionals.slice(1)
@@ -32,6 +32,13 @@ export default async function command(args: ParsedArgs) {
     const repeated = [...new Set(already)]
     const note = repeated.length > 0 ? `\nуже в руке, повтор не добавлен: ${repeated.join(', ')}` : ''
     ok(hand, list + note)
+    return 0
+  }
+
+  // снять руку целиком: бронь без исполнителя иначе не снять, а задачи из очереди пропадают
+  if (args.sub === 'clear') {
+    const freed = clearHand(db, executor, 'orchestrator')
+    ok(freed, freed.length ? `рука освобождена: ${freed.join(', ')}` : 'рука уже пуста')
     return 0
   }
 
