@@ -277,12 +277,12 @@ test('фича без решений печатается как раньше', 
   assert.doesNotMatch(view.out, /→/)
 })
 
-test('now показывает свободного исполнителя и пустую руку', () => {
+test('now показывает отдыхающего исполнителя и пустую руку', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
 
   const view = run(dir, ['now'])
-  assert.match(view.out, /w1\s+свободен/)
+  assert.match(view.out, /w1\s+отдыхает/)
 })
 
 test('now показывает очередь руки исполнителя', () => {
@@ -296,7 +296,7 @@ test('now показывает очередь руки исполнителя', 
   assert.match(view.out, /T1\s+w1\s+Пул/)
 })
 
-test('now показывает занятость исполнителя: причину и срок', () => {
+test('now показывает занятость исполнителя как ожидание с причиной и сроком', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
 
@@ -306,11 +306,11 @@ test('now показывает занятость исполнителя: при
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /w1\s+занят: разбор F41 \(до \d{2}:\d{2}\)/)
-  assert.doesNotMatch(view.out, /w1\s+свободен/)
+  assert.match(view.out, /w1\s+ждёт: разбор F41 \(до \d{2}:\d{2}\)/)
+  assert.doesNotMatch(view.out, /w1\s+отдыхает/)
 })
 
-test('now различает занятого и свободного исполнителя', () => {
+test('now различает занятого и отдыхающего исполнителя', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   run(dir, ['executor', 'add', 'w2', '--skills', 'backend'])
@@ -318,8 +318,8 @@ test('now различает занятого и свободного испол
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /w1\s+занят: проверка чужой работы/)
-  assert.match(view.out, /w2\s+свободен/)
+  assert.match(view.out, /w1\s+ждёт: проверка чужой работы/)
+  assert.match(view.out, /w2\s+отдыхает/)
 })
 
 test('now в пайпе печатает чистый текст без escape-последовательностей', () => {
@@ -339,7 +339,7 @@ test('now в пайпе печатает чистый текст без escape-�
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /\u001b\[/)
   assert.match(view.out, /^\tF1\s+0\/1\s+wip\s+Платежи$/m)
-  assert.match(view.out, /w1\s+держит F1\.S1-1/)
+  assert.match(view.out, /w1\s+работает над F1\.S1-1 · Шаг/)
 })
 
 test('now --json не добавляет цветовых кодов', () => {
@@ -449,7 +449,7 @@ test('ЖДЁТ MAIN нет, если не все этапы слиты', () => {
   assert.doesNotMatch(view.out, /ЖДЁТ MAIN/)
 })
 
-test('живая сессия исполнителя встаёт в его строку, блока СУБАГЕНТЫ нет', () => {
+test('живая сессия не подписывает строку исполнителя заголовком', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
@@ -458,13 +458,14 @@ test('живая сессия исполнителя встаёт в его ст
   const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /СУБАГЕНТЫ/, 'отдельного блока субагентов больше нет')
-  assert.match(view.out, /^\t {2}w1\s+занят · шаг по F86$/m, 'сессия стоит в строке своего исполнителя')
+  assert.doesNotMatch(view.out, /шаг по F86/, 'заголовок сессии в строку не попадает')
+  assert.match(view.out, /^\t {2}w1\s+отдыхает$/m, 'задачи нет — исполнитель отдыхает')
 
   const lines = view.out.split('\n').filter((line) => line.includes('w1'))
   assert.equal(lines.length, 1, 'сессия не заводит вторую строку')
 })
 
-test('живая сессия без исполнителя — своя строка в ИСПОЛНИТЕЛЯХ', () => {
+test('живая сессия без исполнителя — своя строка в ИСПОЛНИТЕЛЯХ, без заголовка', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
@@ -476,7 +477,8 @@ test('живая сессия без исполнителя — своя стр�
   const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /СУБАГЕНТЫ/)
-  assert.match(view.out, /^\t {2}general\s+простаивает · Ревью$/m, 'сессия без исполнителя — своя строка')
+  assert.match(view.out, /^\t {2}general\s+отдыхает$/m, 'сессия без исполнителя — своя строка')
+  assert.doesNotMatch(view.out, /Ревью/, 'заголовок сессии не печатается')
 
   const header = view.out.indexOf('ИСПОЛНИТЕЛИ')
   const session = view.out.indexOf('general')
