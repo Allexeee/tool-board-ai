@@ -132,7 +132,8 @@ test('приёмка двигает работу: следующий этап с
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /ждёт вас: 1/)
+  // доска видит итог приёмки: фича готова к слиянию
+  assert.match(view.out, /F1\s+1\/1\s+merge/)
 })
 
 test('now без этапов показывает фичу с нулевым счётчиком', () => {
