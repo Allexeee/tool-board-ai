@@ -150,6 +150,11 @@ export interface RunRecord {
   startedAt: string
   endedAt: string | null
   endReason: RunEndReason | null
+  /**
+   * Номер сегмента: прогон один, сессий несколько. Первый сегмент — тот, в
+   * котором прогон начат; каждый handoff открывает следующий.
+   */
+  segment: number
   /** Остановка владельцем ревью не требует; всё остальное — требует. */
   reviewRequired: boolean
 }
@@ -164,6 +169,7 @@ interface RunRow {
   started_at: string
   ended_at: string | null
   end_reason: string | null
+  segment: number
 }
 
 const RUN_MODES: readonly string[] = ['plan', 'all']
@@ -204,6 +210,8 @@ const toRunRecord = (row: RunRow): RunRecord => ({
   startedAt: row.started_at,
   endedAt: row.ended_at,
   endReason: row.end_reason as RunEndReason | null,
+  // база, пришедшая из схемы 12, знает только первый сегмент
+  segment: row.segment ?? 1,
   reviewRequired: row.ended_at !== null && row.end_reason !== 'owner',
 })
 
@@ -246,6 +254,20 @@ export function lastClosedRun(db: DatabaseSync): RunRecord | null {
 export function getRunRecord(db: DatabaseSync, id: string): RunRecord | null {
   const row = db.prepare('select * from runs where id = ?').get(id) as RunRow | undefined
   return row ? toRunRecord(row) : null
+}
+
+/**
+ * Следующий сегмент прогона: передача эстафеты закрывает текущий и открывает
+ * новый. Растёт в базе, а не в файле: файл перезаписывается, а история
+ * сегментов остаётся в записи прогона.
+ */
+export function bumpRunSegment(db: DatabaseSync, id: string): number {
+  const run = getRunRecord(db, id)
+  if (!run) throw new UserError(3, `прогон ${id} не найден`)
+
+  const segment = run.segment + 1
+  db.prepare('update runs set segment = ? where id = ?').run(segment, id)
+  return segment
 }
 
 export interface StartRunInput {
@@ -300,12 +322,13 @@ export function startRun(db: DatabaseSync, input: StartRunInput): RunRecord {
       startedAt: (input.now ?? new Date()).toISOString(),
       endedAt: null,
       endReason: null,
+      segment: 1,
       reviewRequired: false,
     }
 
     db.prepare(
-      'insert into runs (id, mode, requests, nearest, approve, power, started_at, ended_at, end_reason) ' +
-        'values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'insert into runs (id, mode, requests, nearest, approve, power, started_at, ended_at, end_reason, segment) ' +
+        'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       run.id,
       run.mode,
@@ -316,6 +339,7 @@ export function startRun(db: DatabaseSync, input: StartRunInput): RunRecord {
       run.startedAt,
       null,
       null,
+      run.segment,
     )
 
     appendEvent(db, {

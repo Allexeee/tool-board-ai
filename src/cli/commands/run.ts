@@ -27,6 +27,7 @@ import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { isJsonMode, ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 import { renderRunReport, writeRunReport } from '../../core/run-report.ts'
+import { renderHandoffSummary, writeHandoff } from '../../core/handoff.ts'
 import { appendPowerLog } from '../../core/power.ts'
 import { readUsage, type Pricing, type UsageReport } from '../../core/usage.ts'
 import type { Config } from '../../core/config.ts'
@@ -50,7 +51,7 @@ const USAGE =
   'использование: run start --mode plan|all [--request R1 …] [--nearest] [--approve] ' +
   '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision ' +
   '[--power hibernate|shutdown] · run review <id> --verdict ok|found [--note "…"] · ' +
-  'run report <id> · run power <id> [--power hibernate|shutdown] · run usage [бюджет] · run show'
+  'run handoff [<id>] · run report <id> · run power <id> [--power hibernate|shutdown] · run usage [бюджет] · run show'
 
 /** Настоящие системные команды: только из CLI, в тестах runner подменяется. */
 const systemRunner: CommandRunner = (command, args) => {
@@ -274,6 +275,27 @@ export default async function command(args: ParsedArgs) {
     ok(
       { ...report, path: shown },
       `${renderRunReport(report)}\nотчёт: ${shown}`,
+    )
+    return 0
+  }
+
+  if (args.sub === 'handoff') {
+    // по умолчанию — идущий прогон: эстафета нужна ровно тогда, когда он идёт
+    const id = args.positionals[0] ?? activeRun(db)?.id
+    if (!id) {
+      throw new UserError(1, 'открытого прогона нет: эстафета пишется по идущему прогону, сначала run start')
+    }
+
+    const handoff = writeHandoff(db, id, {
+      root: project.root,
+      actor: stringFlag(args, 'as') ?? 'orchestrator',
+    })
+    const json = relative(process.cwd(), handoff.jsonPath).replace(/\\/g, '/')
+    const md = relative(process.cwd(), handoff.mdPath).replace(/\\/g, '/')
+
+    ok(
+      { ...handoff, jsonPath: json, mdPath: md },
+      `${renderHandoffSummary(handoff)}\nфайлы: ${md} · ${json}`,
     )
     return 0
   }
