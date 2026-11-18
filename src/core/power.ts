@@ -9,8 +9,9 @@ import { getRunRecord, runPowerOf, type RunPower, type RunRecord } from './runs.
 //
 // Ночной прогон освобождает машину сам, но только если владелец попросил об
 // этом явно (run start/end --power …) и только после отчёта на диске: сначала
-// бумаги, потом выключение. Гибернация не вырубает питание сразу — даёт 90
-// секунд на «ой, я ещё тут» с отменой по Ctrl+C.
+// бумаги, потом выключение. Питание не вырубает машину сразу — даёт 90 секунд
+// на «ой, я ещё тут» с отменой по Ctrl+C; отсчёт одинаковый для гибернации и
+// для выключения.
 
 export const HIBERNATE_COUNTDOWN_SECONDS = 90
 
@@ -31,15 +32,50 @@ export interface CommandResult {
 /** Любой исполнитель команд: настоящий spawnSync в CLI, шпион в тестах. */
 export type CommandRunner = (command: string, args: string[]) => CommandResult
 
+/** Проверка «файл на месте»: настоящий диск в CLI, заглушка в тестах. */
+export type FileExists = (path: string) => boolean
+
 /**
- * Есть ли гибернация: `powercfg /a` перечисляет состояния сна, и слово
- * «hibernate» (на русской системе «гибернация») в выводе — достаточный признак.
- * Если признак обманет, `shutdown /h` просто не сработает: машина останется
- * включённой, а отчёт уже на диске — данные не теряются.
+ * Системный диск: `hiberfil.sys` лежит в его корне, и это не всегда C:.
+ * Путь берём из окружения, чтобы не гадать о букве диска.
  */
-export function hibernateSupported(output: string): boolean {
-  const text = output.toLowerCase()
-  return text.includes('hibernate') || text.includes('гибернация')
+export function systemDrive(env: Record<string, string | undefined> = process.env): string {
+  const raw = env.SystemDrive ?? env.SYSTEMDRIVE ?? 'C:'
+  return raw.replace(/[\\/]+$/, '')
+}
+
+/** Файл гибернации на системном диске: единственный честный признак, что она есть. */
+export function hibernateFile(env: Record<string, string | undefined> = process.env): string {
+  return join(`${systemDrive(env)}\\`, 'hiberfil.sys')
+}
+
+/**
+ * Гибернация доступна ровно тогда, когда Windows держит `hiberfil.sys`.
+ *
+ * `powercfg /a` для этого не годится: он перечисляет и недоступные состояния,
+ * поэтому слово «гибернация» в выводе есть и тогда, когда её нет. На живой
+ * машине из-за этого решали «гибернация есть», `shutdown /h` молча ничего не
+ * делал, а отчёт рапортовал успех.
+ *
+ * Проверка инжектируется: тесты не трогают настоящий диск.
+ */
+export function hibernateInstalled(
+  hasFile: FileExists = existsSync,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return hasFile(hibernateFile(env))
+}
+
+/**
+ * Прежнее имя проверки: его зовёт `run power` из run.ts. Текст `powercfg /a`
+ * больше не читается — он врёт (см. hibernateInstalled). Аргумент оставлен
+ * ради совместимости вызова; убрать саму пробу powercfg — дело задачи по run.ts.
+ */
+export function hibernateSupported(
+  _powercfgOutput = '',
+  hasFile: FileExists = existsSync,
+): boolean {
+  return hibernateInstalled(hasFile)
 }
 
 /** Гибернации нет — значит выключение: молча остаться с ноутбуком на ночь хуже. */
@@ -163,7 +199,7 @@ export function planRunPower(
     note:
       action === requested
         ? null
-        : 'гибернация недоступна на этой машине: после отчёта выключаюсь',
+        : `гибернация недоступна: нет ${hibernateFile()} — после отчёта выключаюсь`,
   }
 }
 
@@ -240,27 +276,27 @@ export interface SchedulePowerInput {
   action: PowerAction
   /** Настоящая команда в CLI, шпион в тестах: реальные shutdown не зовём никогда в тестах. */
   runner: CommandRunner
-  /** Сколько секунд отсчитывать перед гибернацией; выключение не ждёт. */
+  /** Сколько секунд отсчитывать; выключение тоже ждёт — чтобы было что отменить. */
   seconds?: number
-  onTick?: (secondsLeft: number) => void
+  onTick?: (secondsLeft: number, action: 'hibernate' | 'shutdown') => void
   signal?: AbortSignal
 }
 
 /**
- * Выполнить питание. Гибернация сначала отсчитывает seconds (по умолчанию 90)
- * и уважает отмену; выключение не ждёт и не отменяется.
+ * Выполнить питание. И гибернация, и выключение сначала отсчитывают seconds
+ * (по умолчанию 90) и уважают отмену: «ой, я ещё тут» работает для обоих
+ * исходов, а не только для того, о котором просили. Отменённое питание не
+ * зовёт shutdown вовсе.
  */
 export async function schedulePower(input: SchedulePowerInput): Promise<PowerOutcome> {
   if (input.action === 'none') return 'none'
 
-  if (input.action === 'hibernate') {
-    const seconds = Math.max(0, Math.trunc(input.seconds ?? HIBERNATE_COUNTDOWN_SECONDS))
+  const seconds = Math.max(0, Math.trunc(input.seconds ?? HIBERNATE_COUNTDOWN_SECONDS))
 
-    for (let left = seconds; left > 0; left--) {
-      input.onTick?.(left)
-      const ticked = await wait(1000, input.signal)
-      if (!ticked) return 'cancelled'
-    }
+  for (let left = seconds; left > 0; left--) {
+    input.onTick?.(left, input.action)
+    const ticked = await wait(1000, input.signal)
+    if (!ticked) return 'cancelled'
   }
 
   const command = POWER_COMMANDS[input.action]
