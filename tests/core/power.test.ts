@@ -335,7 +335,7 @@ test('run power --power открытому прогону отказывает',
 const bin = resolve('bin/toolbox-al.ts')
 
 function runCli(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', windowsHide: true })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 

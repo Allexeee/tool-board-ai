@@ -216,6 +216,7 @@ test('занятый каталог остаётся и объясняет, чт
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], {
     cwd: plain,
     stdio: 'ignore',
+    windowsHide: true,
   })
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400)
 

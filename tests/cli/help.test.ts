@@ -11,6 +11,7 @@ function run(args: string[]) {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: mkdtempSync(join(tmpdir(), 'al-help-')),
     encoding: 'utf8',
+    windowsHide: true,
   })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }

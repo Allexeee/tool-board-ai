@@ -15,6 +15,7 @@ function run(dir: string, args: string[], env: Record<string, string> = {}) {
     cwd: dir,
     encoding: 'utf8',
     env: { ...process.env, ...env },
+    windowsHide: true,
   })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
