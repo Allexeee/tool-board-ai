@@ -177,3 +177,13 @@ test('run next отдаёт следующую задачу и остаток', 
   const show = run(dir, ['run', 'show'])
   assert.match(show.out, /дальше: F1\.S1-1/)
 })
+
+test('run end принимает причину контекст', () => {
+  const dir = project()
+  run(dir, ['run', 'start', '--mode', 'plan'])
+  const ended = run(dir, ['run', 'end', 'RUN1', '--reason', 'context'])
+  assert.equal(ended.code, 0, ended.err)
+
+  const show = run(dir, ['run', 'show'])
+  assert.match(show.out, /предел контекста/)
+})

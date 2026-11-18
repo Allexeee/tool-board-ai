@@ -50,7 +50,7 @@ const REVIEW_LABEL: Record<RunReviewState, string | null> = {
 
 const USAGE =
   'использование: run start --mode plan|all [--request R1 …] [--nearest] [--approve] ' +
-  '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision ' +
+  '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision|context ' +
   '[--power hibernate|shutdown] · run review <id> --verdict ok|found [--note "…"] · ' +
   'run handoff [<id>] · run resume · run report <id> · run power <id> [--power hibernate|shutdown] · run usage [бюджет] · run show'
 

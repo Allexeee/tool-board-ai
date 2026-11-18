@@ -118,6 +118,7 @@ test('эстафета снимает сделанное и работу в ру
   assert.equal(json.queue.length, 0)
   assert.equal(json.owner.length, 0)
   assert.match(json.nextStep, new RegExp(active.id.replace('.', '\\.')))
+  assert.match(json.nextStep, /осталось \d+ из \d+/)
 
   const text = readFileSync(handoff.mdPath, 'utf8')
   assert.match(text, /^# Эстафета прогона RUN1 · сегмент 1/m)
