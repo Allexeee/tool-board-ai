@@ -9,7 +9,7 @@ import { getHand, dispatchHands, nextTask, stageOwner, type AssignSource } from 
 import { activeRun, lastClosedRun } from './runs.ts'
 import { ownerHand } from './questions.ts'
 import { listDecisions } from './decisions.ts'
-import { listRequests } from './requests.ts'
+import { openRequests } from './requests.ts'
 import { pendingRelease } from './git/release.ts'
 
 export interface QueueRow {
@@ -407,9 +407,8 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     }
   })
 
-  const requests = listRequests(db)
-    .filter((request) => request.status === 'inbox')
-    .map((request) => ({ id: request.id, title: request.title }))
+  // тот же источник, что у `request open`: запрос, закрытый по фичам, открытым не считается
+  const requests = openRequests(db).map((request) => ({ id: request.id, title: request.title }))
 
   const plans = db
     .prepare(

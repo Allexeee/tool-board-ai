@@ -1,7 +1,7 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
-import { addRequest } from '../../src/core/requests.ts'
+import { addRequest, openRequests } from '../../src/core/requests.ts'
 import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
@@ -43,6 +43,32 @@ test('now показывает фичи, этапы и счётчики по с�
   const view = nowView(db)
   const counts = view.features[0].stage.counts
   assert.equal(Object.values(counts).reduce((sum, value) => sum + value, 0), 3)
+})
+
+test('единственный запрос с закрытой фичей не считается открытым', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  db.prepare("update features set status = 'done' where id = ?").run(feature.id)
+
+  assert.deepEqual(nowView(db).requests, [], 'в now запрос закрыт по фиче')
+  assert.deepEqual(openRequests(db), [], 'в request open тот же ответ')
+})
+
+test('now и request open считают открытые запросы одинаково', () => {
+  const db = openDb(':memory:')
+  const closed = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: closed.id, name: 'A', rank: 1 })
+  db.prepare("update features set status = 'done' where id = ?").run(feature.id)
+  const open = addRequest(db, { title: 'Доставка', body: '...', author: 'owner' })
+
+  const view = nowView(db)
+  assert.deepEqual(view.requests, [{ id: open.id, title: 'Доставка' }])
+  assert.deepEqual(
+    openRequests(db).map((request) => request.id),
+    [open.id],
+  )
+  assert.equal(view.requests.length, openRequests(db).length, 'счётчики совпадают')
 })
 
 test('dispatch отдаёт только готовые задачи и порядок совпадает у двух вызовов', () => {

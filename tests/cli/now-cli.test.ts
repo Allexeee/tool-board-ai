@@ -115,6 +115,24 @@ test('now на пустом проекте говорит, что работы �
   assert.match(view.out, /фич в работе нет/)
 })
 
+test('запрос с закрытой фичей не открыт ни в now, ни в request open', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update features set status = 'done' where id = 'F1'").run()
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /^\tОткрытых запросов: 0$/m, 'now не считает запрос открытым')
+
+  const open = run(dir, ['request', 'open'])
+  assert.equal(open.code, 0, open.err)
+  assert.match(open.out, /открытых запросов нет/, 'request open говорит то же')
+})
+
 test('now идёт после пустой строки и с табуляцией в каждой строке', () => {
   const dir = project()
   run(dir, ['request', 'add', 'Первый'])
