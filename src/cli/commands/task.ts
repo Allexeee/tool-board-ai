@@ -47,6 +47,7 @@ export default async function command(args: ParsedArgs) {
       severity: stringFlag(args, 'severity') as 'S1' | 'S2' | 'S3' | 'S4' | undefined,
       review: (stringFlag(args, 'review') as 'none' | 'agent' | 'owner') ?? 'none',
       checkCmd: stringFlag(args, 'check'),
+      note: stringFlag(args, 'note'),
     })
 
     ok(task, `${task.id}  ${task.size}  ${task.skill}  ${task.title}`)
@@ -59,7 +60,7 @@ export default async function command(args: ParsedArgs) {
       throw new UserError(3, 'использование: task edit F1.S1-1 --dod "…" --scope "src/**"')
     }
 
-    const editable = ['title', 'dod', 'scope', 'size', 'size-reason', 'skill', 'class', 'kind', 'severity', 'check']
+    const editable = ['title', 'dod', 'scope', 'size', 'size-reason', 'skill', 'class', 'kind', 'severity', 'check', 'note']
     const service = ['json', 'as', 'help', 'project']
     const given = Object.keys(args.flags).filter((name) => !service.includes(name))
     const unknown = given.filter((name) => !editable.includes(name))
@@ -87,6 +88,7 @@ export default async function command(args: ParsedArgs) {
     if (given.includes('kind')) patch.kind = stringFlag(args, 'kind') as 'task' | 'defect' | 'incident'
     if (given.includes('severity')) patch.severity = stringFlag(args, 'severity') as 'S1' | 'S2' | 'S3' | 'S4'
     if (given.includes('check')) patch.checkCmd = stringFlag(args, 'check')
+    if (given.includes('note')) patch.note = stringFlag(args, 'note') ?? null
 
     const actor = stringFlag(args, 'as') ?? 'owner'
     const task = editTask(db, { id, actor, patch })
@@ -182,6 +184,7 @@ export default async function command(args: ParsedArgs) {
           ? [`область: ${task.scope.join(', ')}`]
           : []),
       ...(deps.length > 0 ? [`зависит от: ${deps.join(', ')}`] : []),
+      ...(task.note ? [`заметка: ${task.note}`] : []),
       `дальше: node bin/toolbox-al.ts task context ${task.id}`,
     ]
 
@@ -196,6 +199,7 @@ export default async function command(args: ParsedArgs) {
         dod: task.dod,
         scope: task.scope,
         deps,
+        note: task.note,
       },
       lines.join('\n'),
     )
@@ -308,6 +312,8 @@ export default async function command(args: ParsedArgs) {
     ]
 
     if (spec) lines.push(`спека: ${spec}`)
+    // заметка — причина и подводные камни: пустую не печатаем
+    if (task.note) lines.push(`заметка: ${task.note}`)
 
     if (task.attempts > 0) lines.push(`попыток: ${task.attempts}`)
     if (task.reason) lines.push(`причина: ${task.reason}`)

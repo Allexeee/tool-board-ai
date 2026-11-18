@@ -118,6 +118,27 @@ test('task brief без зависимостей и пустых полей не
   }
 })
 
+test('task brief печатает заметку задачи', () => {
+  const dir = project()
+  run(dir, ['task', 'add', 'Бриф', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**', '--note', 'ключ в .env'])
+
+  const brief = run(dir, ['task', 'brief', 'T1', '--as', 'w1'])
+  assert.equal(brief.code, 0, brief.err)
+  assert.match(brief.out, /^заметка: ключ в \.env$/m)
+
+  // заметка стоит до «дальше»: сначала данные задачи, потом команда
+  assert.ok(brief.out.indexOf('заметка:') < brief.out.indexOf('дальше:'), brief.out)
+})
+
+test('task brief без заметки не печатает пустую строку', () => {
+  const dir = project()
+  run(dir, ['task', 'add', 'Бриф', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+
+  const brief = run(dir, ['task', 'brief', 'T1'])
+  assert.equal(brief.code, 0, brief.err)
+  assert.doesNotMatch(brief.out, /заметка:/)
+})
+
 test('task brief без id объясняет использование', () => {
   const dir = project()
 

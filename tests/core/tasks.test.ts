@@ -67,8 +67,32 @@ test('созданная задача получает статус open и id �
   assert.equal(task.id, 'F1.S1-1')
 })
 
-test('createTask отказывает со списком ошибок', () => {
+test('заметка пишется при создании и правится', () => {
   const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  const task = createTask(db, { ...base, stageId, note: 'ключ в .env, без него тесты падают' })
+  assert.equal(task.note, 'ключ в .env, без него тесты падают')
+  assert.equal(getTask(db, task.id)!.note, 'ключ в .env, без него тесты падают', 'заметка переживает чтение')
+
+  const edited = editTask(db, { id: task.id, actor: 'orchestrator', patch: { note: 'ключ берётся из sandbox' } })
+  assert.equal(edited.note, 'ключ берётся из sandbox')
+  assert.equal(getTask(db, task.id)!.note, 'ключ берётся из sandbox', 'правка заметки сохраняется')
+})
+
+test('пустая заметка не хранится и стирает прежнюю', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+
+  const task = createTask(db, { ...base, stageId, note: '   ' })
+  assert.equal(task.note, null, 'пробелы — это отсутствие заметки')
+
+  editTask(db, { id: task.id, actor: 'orchestrator', patch: { note: 'важно' } })
+  const cleared = editTask(db, { id: task.id, actor: 'orchestrator', patch: { note: '' } })
+  assert.equal(cleared.note, null, 'пустая заметка стирает прежнюю')
+})
+
+test('createTask отказывает со списком ошибок', () => {  const db = openDb(':memory:')
   const stageId = seed(db)
   assert.throws(() => createTask(db, { ...base, stageId, dod: [] }), /DoD/)
 })
@@ -247,6 +271,19 @@ test('миграция 9 добавляет сессию и не теряет з
   assert.equal(migrate(db), SCHEMA_VERSION)
   assert.equal(getTask(db, id)!.id, id, 'задача на месте')
   assert.equal(getTask(db, id)!.session, null, 'колонка появилась пустой')
+})
+
+test('миграция 14 добавляет заметку и не теряет задач', () => {
+  const db = openDb(':memory:')
+  const id = seedTask(db)
+
+  // откатываемся к схеме 13: колонки ещё нет
+  db.exec('alter table tasks drop column note')
+  db.prepare("update meta set value = '13' where key = 'schemaVersion'").run()
+
+  assert.equal(migrate(db), SCHEMA_VERSION)
+  assert.equal(getTask(db, id)!.id, id, 'задача на месте')
+  assert.equal(getTask(db, id)!.note, null, 'колонка появилась пустой')
 })
 
 test('слияние этапа стирает сессии его задач', () => {

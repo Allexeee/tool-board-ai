@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 13
+export const SCHEMA_VERSION = 14
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -269,6 +269,15 @@ export function migrate(db: DatabaseSync): number {
         .prepare("select 1 as found from pragma_table_info('runs') where name = 'segment'")
         .get()
       if (!hasSegment) db.exec('alter table runs add column segment integer not null default 1')
+    }
+    if (from < 14) {
+      // причина и подводные камни задачи живут в базе, а не в чате оркестратора:
+      // заметка переживает сессию и видна в карточке и брифе.
+      // колонку проверяем отдельно: метка версии могла отстать от фактической схемы
+      const hasNote = db
+        .prepare("select 1 as found from pragma_table_info('tasks') where name = 'note'")
+        .get()
+      if (!hasNote) db.exec('alter table tasks add column note text')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +

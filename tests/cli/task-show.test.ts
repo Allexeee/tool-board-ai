@@ -76,6 +76,35 @@ test('у задачи без решений секции нет', () => {
   assert.doesNotMatch(shown.out, /## Решения/)
 })
 
+test('карточка печатает заметку задачи, а без заметки строки нет', () => {
+  const dir = stageTask()
+  const noted = run(dir, ['task', 'add', 'F1.S1', 'Вторая', ...flags, '--note', 'ключ в .env: без него тесты падают'])
+  assert.equal(noted.code, 0, noted.err)
+
+  const shown = run(dir, ['task', 'show', 'F1.S1-2'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /^заметка: ключ в \.env: без него тесты падают$/m)
+
+  const plain = run(dir, ['task', 'show', 'F1.S1-1'])
+  assert.doesNotMatch(plain.out, /заметка:/)
+})
+
+test('task edit --note правит заметку в карточке', () => {
+  const dir = stageTask()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['take', 'F1.S1-1', '--as', 'w1'])
+
+  const edited = run(dir, ['task', 'edit', 'F1.S1-1', '--note', 'сначала прогнать миграцию', '--as', 'w1'])
+  assert.equal(edited.code, 0, edited.err)
+
+  const shown = run(dir, ['task', 'show', 'F1.S1-1'])
+  assert.match(shown.out, /^заметка: сначала прогнать миграцию$/m)
+
+  const cleared = run(dir, ['task', 'edit', 'F1.S1-1', '--note', '', '--as', 'w1'])
+  assert.equal(cleared.code, 0, cleared.err)
+  assert.doesNotMatch(run(dir, ['task', 'show', 'F1.S1-1']).out, /заметка:/)
+})
+
 test('карточка печатает отчёт, коммит и ревью', () => {
   const dir = stageTask()
   const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))

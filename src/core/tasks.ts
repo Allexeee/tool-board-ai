@@ -40,6 +40,8 @@ export interface Task {
   reason: string | null
   review: 'none' | 'agent' | 'owner'
   session: string | null
+  /** Причина и подводные камни: живут в базе, а не в чате оркестратора. */
+  note: string | null
   createdAt: string
 }
 
@@ -63,6 +65,7 @@ interface Row {
   reason: string | null
   review: 'none' | 'agent' | 'owner'
   session: string | null
+  note: string | null
   created_at: string
 }
 
@@ -86,8 +89,15 @@ const toTask = (row: Row): Task => ({
   reason: row.reason,
   review: (row.review as 'none' | 'agent' | 'owner') ?? 'agent',
   session: row.session ?? null,
+  note: row.note ?? null,
   createdAt: row.created_at,
 })
+
+/** Заметка без текста — это отсутствие заметки: пустая строка в базе не нужна. */
+const noteOf = (value: string | null | undefined): string | null => {
+  const text = value?.trim()
+  return text ? text : null
+}
 
 // отложенная задача не открыта: её ждёт владелец, а не исполнитель
 export function openTasks(db: DatabaseSync): Task[] {
@@ -96,7 +106,7 @@ export function openTasks(db: DatabaseSync): Task[] {
   )
 }
 
-export function createTask(db: DatabaseSync, input: NewTask): Task {
+export function createTask(db: DatabaseSync, input: NewTask & { note?: string }): Task {
   input = { ...input, scope: normalizeScope(input.scope) }
   const { errors, warnings } = validateTaskInput(input)
   if (errors.length > 0) {
@@ -141,12 +151,13 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     reason: null,
     review: input.review ?? 'none',
     session: null,
+    note: noteOf(input.note),
     createdAt: new Date().toISOString(),
   }
 
   db.prepare(
-    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, review, session, created_at) ' +
-      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'insert into tasks (id, stage_id, title, kind, severity, dod, check_cmd, size, size_reason, skill, class, scope, status, holder, lease_until, attempts, reason, review, session, note, created_at) ' +
+      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     task.id,
     task.stageId,
@@ -167,6 +178,7 @@ export function createTask(db: DatabaseSync, input: NewTask): Task {
     null,
     task.review,
     null,
+    task.note,
     task.createdAt,
   )
 
@@ -225,6 +237,7 @@ export type EditableTask = Partial<{
   skill: string
   class: TaskClass
   scope: TaskScope
+  note: string | null
 }>
 
 export function editTask(
@@ -259,6 +272,9 @@ export function editTask(
       class: input.patch.class ?? current.class,
       scope: normalizeScope(input.patch.scope ?? current.scope),
     }
+    // заметку не проверяем вместе с DoD и областью: это свободный текст,
+    // но пустая заметка означает «заметки нет», а не пустую строку в базе
+    const note = input.patch.note === undefined ? current.note : noteOf(input.patch.note)
 
     const { errors } = validateTaskInput(merged)
     if (errors.length > 0) {
@@ -268,12 +284,13 @@ export function editTask(
     const keys = (Object.keys(input.patch) as Array<keyof EditableTask>).filter((key) => {
       const patch = input.patch[key]
       if (patch === undefined) return false
-      return JSON.stringify(patch) !== JSON.stringify((current as unknown as Record<string, unknown>)[key])
+      const next = key === 'note' ? note : patch
+      return JSON.stringify(next) !== JSON.stringify((current as unknown as Record<string, unknown>)[key])
     })
     if (keys.length === 0) return current
 
     db.prepare(
-      'update tasks set title = ?, kind = ?, severity = ?, dod = ?, check_cmd = ?, size = ?, size_reason = ?, skill = ?, class = ?, scope = ? where id = ?',
+      'update tasks set title = ?, kind = ?, severity = ?, dod = ?, check_cmd = ?, size = ?, size_reason = ?, skill = ?, class = ?, scope = ?, note = ? where id = ?',
     ).run(
       merged.title,
       merged.kind,
@@ -285,6 +302,7 @@ export function editTask(
       merged.skill,
       merged.class,
       merged.scope === 'exclusive' ? 'exclusive' : JSON.stringify(merged.scope),
+      note,
       current.id,
     )
 
