@@ -734,3 +734,35 @@ test('рука, выставленная сейчас, не снимается �
   assert.deepEqual(getHand(db, 'w1').map((item) => item.id), [task.id])
 })
 
+
+test('автораздача не оживляет офлайн-исполнителя', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const request = addRequest(db, { title: 'Запрос', body: '', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'Фича', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '1 день' })
+  activateNextStage(db, feature.id)
+  setFeatureBranch(db, feature.id, 'feat/f1', '/tmp/f1')
+  createTask(db, {
+    stageId: stage.id,
+    title: 'Шаг',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  refreshReady(db)
+
+  const old = new Date(Date.now() - 3 * 3_600_000).toISOString()
+  db.prepare('update executors set last_seen = ? where id = ?').run(old, 'w1')
+
+  dispatchHands(db)
+  assert.equal(getHand(db, 'w1').length, 1, 'раздача выдала задачу')
+  const seen = db.prepare('select last_seen from executors where id = ?').get('w1') as { last_seen: string }
+  assert.equal(seen.last_seen, old, 'автораздача не трогает last_seen')
+
+  const advanced = advanceTime(db)
+  assert.deepEqual(advanced.releasedHands, ['w1'], 'рука офлайн-агента снимается')
+  assert.deepEqual(getHand(db, 'w1'), [])
+})

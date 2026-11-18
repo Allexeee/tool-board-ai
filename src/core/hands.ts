@@ -104,8 +104,6 @@ export function fillHand(db: DatabaseSync, executorId: string, limit?: number): 
     const ordered = candidateOrder(db, executor)
 
     const base = getHand(db, executorId).length
-    // выдача — знак жизни: иначе старая last_seen снимает руку на ближайшем advanceTime
-    db.prepare('update executors set last_seen = ? where id = ?').run(new Date().toISOString(), executorId)
     ordered.slice(0, free).forEach((task, index) => {
       const result = db
         .prepare(
@@ -248,8 +246,7 @@ function chainOf(db: DatabaseSync, executor: Executor, baseId: string, taken: Se
 function reserve(db: DatabaseSync, executorId: string, ids: string[], base: number): string[] {
   const at = new Date().toISOString()
   const inserted: string[] = []
-  // выдача — знак жизни: иначе старая last_seen снимает руку на ближайшем advanceTime
-  db.prepare('update executors set last_seen = ? where id = ?').run(at, executorId)
+  // автораздача не оживляет исполнителя: иначе рука мёртвого агента не снимается никогда
   ids.forEach((id, index) => {
     const result = db
       .prepare('insert or ignore into hand (executor_id, position, task_id, reserved_at) values (?, ?, ?, ?)')

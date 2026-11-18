@@ -266,6 +266,7 @@ test('блок AGENTS.md знает про ревью и dev', () => {
   writeOpenCodeFiles(root)
   const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
 
-  assert.match(agents, /Ревью задач не проводим/)
+  assert.match(agents, /Ревью не обходится/)
+  assert.match(agents, /in_review/)
   assert.match(agents, /ветке фичи или dev/)
 })
