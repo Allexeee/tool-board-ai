@@ -246,8 +246,9 @@ function hasRates(pricing: Pricing | null): pricing is Pricing {
  */
 export function readUsage(options: UsageOptions = {}): UsageResult {
   const dbPath = options.dbPath ?? opencodeDbPath(options.env)
+  // бюджет — отдельно от ставок: тариф может быть не задан, а лимит задан
+  const requestedBudget = options.budget ?? options.pricing?.budget ?? null
   const pricing = hasRates(options.pricing ?? null) ? options.pricing ?? null : null
-  const requestedBudget = options.budget ?? pricing?.budget ?? null
   const budget =
     requestedBudget !== null && Number.isFinite(requestedBudget) && requestedBudget > 0 ? requestedBudget : null
 
@@ -321,12 +322,16 @@ export function readUsage(options: UsageOptions = {}): UsageResult {
     let basis: UsageBasis
     let note: string | null = null
 
-    if (budget !== null && totals.cost > 0) {
-      basis = 'cost'
-      for (const agent of agents) agent.percent = share(agent.cost, budget)
-    } else if (budget !== null && pricing !== null) {
-      basis = 'tariff'
+    if (budget !== null) {
+      // moneyUsed (amount) уже выбирает: настоящий cost, иначе оценка по тарифу.
+      // Считать процент от cost нельзя: при подписке он нулевой у всех.
+      basis = totals.cost > 0 ? 'cost' : 'tariff'
       for (const agent of agents) agent.percent = share(agent.amount, budget)
+      if (basis === 'tariff' && pricing === null) {
+        basis = 'share'
+        note = 'тариф не задан: процент — доля агента от общего расхода токенов'
+        for (const agent of agents) agent.percent = share(agent.tokens, totals.tokens)
+      }
     } else if (totals.cost > 0) {
       basis = 'cost'
       note = 'бюджет не задан: процент — доля агента от общего cost'

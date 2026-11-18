@@ -190,7 +190,7 @@ test('в окне замера — только сессии с time_updated п�
   const worker1 = end.agents[0]!
   assert.equal(worker1.sessions, 1)
   assert.equal(worker1.busyMs, 180_000, 'занят с time_busy до time_idle')
-  assert.equal(worker1.idleMs, 360_000, 'простой с time_idle до конца окна')
+  assert.equal(worker1.idleMs, 60_000, 'простой от time_idle до последнего обновления сессии, не до конца окна')
   assert.equal(worker1.input, 100)
   assert.equal(worker1.output, 20)
   assert.equal(worker1.cacheRead, 1_000)
@@ -205,7 +205,7 @@ test('в окне замера — только сессии с time_updated п�
 
   assert.equal(end.totals.sessions, 2)
   assert.equal(end.totals.busyMs, 300_000)
-  assert.equal(end.totals.idleMs, 360_000)
+  assert.equal(end.totals.idleMs, 60_000)
   assert.equal(end.totals.tokens, 1_185)
   assert.equal(end.totals.cost, 0.5)
 

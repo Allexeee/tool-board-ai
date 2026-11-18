@@ -419,7 +419,9 @@ function readWindow(
         acc.sawBusy = true
       }
       if (idle !== null && !stillBusy) {
-        acc.idleMs += overlap(idle, window.until, window.since, window.until)
+        // простой длится до конца сессии, а не до конца замера: иначе закрытая
+        // сессия даёт часы простоя в трёхчасовом окне
+        acc.idleMs += overlap(idle, Math.min(updated, window.until), window.since, window.until)
         acc.sawIdle = true
       }
 
