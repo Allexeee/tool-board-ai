@@ -24,7 +24,7 @@ function resolve(ctx, args) {
 async function call(ctx, args) {
   const { file, args: full } = resolve(ctx, [...args, '--json'])
   try {
-    const { stdout } = await run(file, full, { cwd: ctx.location.directory, windowsHide: true })
+    const { stdout } = await run(file, full, { cwd: ctx.location.directory, windowsHide: true, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 })
     return { content: stdout.trim() || '{}' }
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -80,6 +80,23 @@ async function withExecutor(ctx, input, build) {
   const picked = input.executor ? { executor: input.executor } : await pickExecutor(ctx)
   if (!picked.executor) return { content: picked.error, isError: true }
   return build(picked.executor)
+}
+
+
+/** Версия CLI должна совпадать с плагином: иначе инструменты зовут чужие команды. */
+async function checkVersion(ctx) {
+  const answer = await call(ctx, ['version'])
+  if (answer.isError) return
+  try {
+    const info = JSON.parse(answer.content)
+    if (info?.tool && info.tool !== PLUGIN_VERSION) {
+      console.error(
+        `[toolbox-al] плагин ${PLUGIN_VERSION}, CLI ${info.tool}: обновите проект — toolbox-al upgrade --yes`,
+      )
+    }
+  } catch {
+    // старый CLI без --json: молчим, инструменты работают
+  }
 }
 
 export default Plugin.define({

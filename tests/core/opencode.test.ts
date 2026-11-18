@@ -334,3 +334,21 @@ test('плагин не подставляет фиктивного исполн
   assert.match(plugin, /pickExecutor/)
   assert.doesNotMatch(plugin, /\?\? 'worker'/)
 })
+
+test('вызов CLI ограничен по времени и буферу', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
+
+  assert.match(plugin, /timeout: 120_000/)
+  assert.match(plugin, /maxBuffer: 8 \* 1024 \* 1024/)
+})
+
+test('плагин сверяет версию CLI', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
+
+  assert.match(plugin, /checkVersion/)
+  assert.match(plugin, /PLUGIN_VERSION/)
+})
