@@ -7,7 +7,7 @@ import { basename, join } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
 import { addExecutor } from '../../src/core/executors.ts'
 import { startRun } from '../../src/core/runs.ts'
-import { endProfile, listProfiles, renderProfile, startProfile } from '../../src/core/profiler.ts'
+import { endProfile, listProfiles, markProfile, renderProfile, startProfile } from '../../src/core/profiler.ts'
 
 /**
  * Настоящую базу OpenCode тест не трогает: путь всегда подменяется временной
@@ -546,4 +546,69 @@ test('чужие проекты в замер не попадают', () => {
   assert.deepEqual(end.agents.map((agent) => agent.agent), ['worker-1'])
   assert.equal(end.totals.input, 150, 'только свои сессии: 100 + 50')
   assert.equal(end.totals.sessions, 2)
+})
+
+test('метки идут по порядку, фазы считаются приростом по сессиям', () => {
+  const root = makeRoot()
+  const db = projectDb()
+  startProfile(db, { root, label: 'R91', now: new Date(START) })
+
+  const dbPath = makeOpencodeDb([
+    { agent: 'worker-1', input: 100, created: START, updated: START + 1_000 },
+  ])
+
+  const first = markProfile({ root, label: 'создание', dbPath, now: new Date(START + 10 * 60_000) })
+  assert.equal(first.marker.marks.length, 1)
+  assert.deepEqual(first.mark.sessions, [{ id: 'ses_0', tokens: 100, amount: null }])
+
+  // та же сессия растёт, и появляется новая: прирост должен лечь в свою фазу
+  const writer = new DatabaseSync(dbPath)
+  writer.prepare("update session_v2 set tokens_input = 300 where id = 'ses_0'").run()
+  writer
+    .prepare(
+      "insert into session_v2 (id, agent, tokens_input, time_created, time_updated) values ('ses_1', 'worker-2', 50, ?, ?)",
+    )
+    .run(START + 20 * 60_000, START + 20 * 60_000)
+  writer.close()
+
+  const second = markProfile({ root, label: 'работа', dbPath, now: new Date(START + 30 * 60_000) })
+  assert.deepEqual(
+    listProfiles(root)[0]!.marks.map((mark) => mark.label),
+    ['создание', 'работа'],
+    'метки лежат в порядке появления',
+  )
+  assert.equal(second.mark.sessions.length, 2)
+
+  const last = new DatabaseSync(dbPath)
+  last.prepare("update session_v2 set tokens_input = 400 where id = 'ses_0'").run()
+  last.close()
+
+  const end = endProfile({ root, dbPath, now: new Date(START + 40 * 60_000) })
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  assert.deepEqual(end.phases.map((phase) => phase.label), ['создание', 'работа', 'хвост'])
+  assert.deepEqual(end.phases.map((phase) => phase.minutes), [10, 20, 10])
+  assert.deepEqual(
+    end.phases.map((phase) => phase.tokens),
+    [100, 250, 100],
+    'своя сессия — прирост, новая — целиком',
+  )
+})
+
+test('без меток отчёт прежний: фаз нет', () => {
+  const end = oneSession(
+    makeRoot(),
+    [{ agent: 'worker-1', input: 1_000, created: START, updated: START + 1_000 }],
+    { input: 1 },
+  )
+
+  assert.deepEqual(end.phases, [])
+  assert.doesNotMatch(renderProfile(end), /фазы:/)
+})
+
+test('метка без активного замера — ошибка', () => {
+  const root = makeRoot()
+
+  assert.throws(() => markProfile({ root, label: 'создание' }), /замеров нет: сначала profiler start/)
 })
