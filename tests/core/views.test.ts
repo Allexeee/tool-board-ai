@@ -309,7 +309,7 @@ test('строка исполнителя: работает над задаче�
   assert.deepEqual(by('w3').state, { kind: 'rest' }, 'ничего нет — отдыхает')
 })
 
-test('задача в руке без блокировки — ожидание, а не выдуманная работа', () => {
+test('задача в руке без блокировки — резерв со всеми задачами, а не выдуманная работа', () => {
   const db = openDb(':memory:')
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
   const base = {
@@ -327,8 +327,49 @@ test('задача в руке без блокировки — ожидание,
   setHand(db, 'w1', [first.id, second.id], 'owner')
 
   const state = nowView(db).holders.find((holder) => holder.executor === 'w1')!.state
-  assert.equal(state.kind, 'wait')
-  if (state.kind === 'wait') assert.match(state.reason, new RegExp(first.id.replace('.', '\\.')))
+  assert.equal(state.kind, 'reserved')
+  if (state.kind === 'reserved') {
+    assert.deepEqual(state.taskIds, [first.id, second.id], 'видны все задачи руки, а не первая')
+    assert.match(state.reason ?? '', new RegExp(first.id.replace('.', '\\.')), 'причина называет блокера')
+  }
+})
+
+test('исполнитель без связи — «нет связи», а не отдых', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const state = (sessions: LiveSession[] = []) =>
+    nowView(db, { sessions }).holders.find((holder) => holder.executor === 'w1')!.state
+  const setSeen = (agoMs: number) =>
+    db
+      .prepare('update executors set last_seen = ? where id = ?')
+      .run(new Date(Date.now() - agoMs).toISOString(), 'w1')
+
+  setSeen(5 * 60 * 60_000)
+  const offline = state()
+  assert.equal(offline.kind, 'offline', 'пять часов без связи — не отдых')
+  if (offline.kind === 'offline') {
+    assert.ok(offline.sinceMs >= 5 * 3_600_000 - 2000, 'нет связи считается от last_seen')
+  }
+
+  setSeen(30 * 60_000)
+  assert.deepEqual(state(), { kind: 'rest' }, 'полчаса без связи — ещё живой')
+
+  // свежая сессия — тоже связь, даже если last_seen старый
+  setSeen(5 * 60 * 60_000)
+  const session: LiveSession = {
+    id: 'ses_1',
+    agent: 'w1',
+    title: 'т',
+    busy: false,
+    updatedAt: Date.now() - 60_000,
+    lastAssistantAt: null,
+    tool: null,
+  }
+  assert.deepEqual(state([session]), { kind: 'rest' }, 'свежая сессия снимает офлайн')
+
+  // без last_seen данных нет — не выдумываем ни офлайн, ни работу
+  db.prepare('update executors set last_seen = null where id = ?').run('w1')
+  assert.deepEqual(state(), { kind: 'rest' }, 'нет отметки связи — отдых, а не догадка')
 })
 
 test('занятая свежая сессия исполнителя — работа, даже без задачи', () => {

@@ -393,6 +393,66 @@ test('now различает занятого и отдыхающего испо
   assert.match(view.out, /w2\s+отдыхает/)
 })
 
+test('занятость и рука видны в одной строке', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Первая', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'add', 'Вторая', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['hand', 'set', 'T1', 'T2', '--as', 'w1'])
+  run(dir, ['executor', 'busy', 'w1', '--note', 'разбор F41', '--for', '30m'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(
+    view.out,
+    /w1\s+ждёт: разбор F41 \(до \d{2}:\d{2}\) · рука: T1, T2/,
+    'занятость и вся рука стоят рядом, а не вместо друг друга',
+  )
+})
+
+test('рука из двух задач видна целиком', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Первая', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'add', 'Вторая', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['hand', 'set', 'T1', 'T2', '--as', 'w1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+работа зарезервирована: T1, T2/, 'видны обе задачи руки')
+})
+
+test('исполнитель без связи показан как «нет связи», а не «отдыхает»', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update executors set last_seen = ? where id = 'w1'").run(
+    new Date(Date.now() - 5 * 60 * 60_000).toISOString(),
+  )
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+нет связи 5 ч/, 'пять часов без связи — часы')
+  assert.doesNotMatch(view.out, /w1\s+отдыхает/, 'мёртвый агент не считается свободным')
+})
+
+test('нет связи дольше двух суток считается в днях', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update executors set last_seen = ? where id = 'w1'").run(
+    new Date(Date.now() - 50 * 60 * 60_000).toISOString(),
+  )
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+нет связи 2 дн/)
+})
+
 test('now в пайпе печатает чистый текст без escape-последовательностей', () => {
   const dir = project()
   run(dir, ['request', 'add', 'Платежи'])

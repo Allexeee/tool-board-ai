@@ -13,8 +13,9 @@ import type { LiveSession } from './usage.ts'
 import { pendingRelease } from './git/release.ts'
 
 /**
- * Что делает исполнитель. Три состояния и ничего больше: работа, ожидание
- * с причиной и отдых. Заголовок сессии сюда не входит — он не обновляется.
+ * Что делает исполнитель. Заголовок сессии сюда не входит — он не обновляется.
+ * Состояние отвечает на «что сейчас», а не на «кто он»: рука и занятость
+ * показываются рядом с ним, а не вместо него.
  */
 export type ExecutorState =
   /** taskId null — работа без задачи: у оркестратора идёт прогон или занята сессия. */
@@ -25,15 +26,20 @@ export type ExecutorState =
   | { kind: 'test'; taskId: string }
   /** Задача взята, последняя команда ещё идёт в фоне: ждём её. */
   | { kind: 'command'; taskId: string }
-  /** Задача в руке, но ещё не взята. */
-  | { kind: 'reserved'; taskId: string }
+  /** Задача в руке, но ещё не взята: показываем все задачи руки. */
+  | { kind: 'reserved'; taskIds: string[]; reason: string | null }
   /** Задача сдана и ждёт вердикта. */
   | { kind: 'review'; taskId: string }
   | { kind: 'wait'; reason: string; until?: string }
+  /** Связи нет дольше OFFLINE_AFTER_MS: мёртвый агент не считается свободным. */
+  | { kind: 'offline'; sinceMs: number }
   | { kind: 'rest' }
 
 /** Сколько сессия без исполнителя считается свежей: дальше это уже история. */
 export const LIVE_SESSION_TTL_MS = 15 * 60 * 1000
+
+/** Сколько без связи исполнитель считается живым: дальше он мёртв, а не свободен. */
+export const OFFLINE_AFTER_MS = 120 * 60 * 1000
 
 /**
  * Сессия без исполнителя говорит владельцу только о живой работе: занята и
@@ -451,6 +457,8 @@ function holderState(
     session?: LiveSession | null
     /** Задача, которую он сдал на ревью. */
     review?: string | null
+    /** Когда исполнитель последний раз подавал голос; null — не записано. */
+    lastSeen?: string | null
     now: number
   },
 ): ExecutorState {
@@ -480,14 +488,14 @@ function holderState(
   // занятость без задачи — это причина не брать работу, а не работа
   if (input.busy) return { kind: 'wait', reason: input.busy.reason, until: input.busy.until }
 
-  // рука не пуста, но в работу ещё не пошла: называем первую причину, а если
-  // всё можно брать — говорим, что работа зарезервирована за исполнителем
+  // рука не пуста, но в работу ещё не пошла: показываем все задачи руки,
+  // а причину — если что-то мешает их взять. Занятость при этом не теряется:
+  // её печатают рядом, а не вместо.
   if (input.hand.length > 0) {
     const waiting = input.hand
       .map((held) => ({ id: held.id, reason: handWaitReason(db, held) }))
       .find((item) => item.reason !== null)
-    if (waiting) return { kind: 'wait', reason: waiting.reason! }
-    return { kind: 'reserved', taskId: input.hand[0]!.id }
+    return { kind: 'reserved', taskIds: input.hand.map((held) => held.id), reason: waiting?.reason ?? null }
   }
 
   // задача сдана: вердикта ждёт, а не простаивает
@@ -500,6 +508,16 @@ function holderState(
 
   // у оркестратора работа бывает без задачи: пока идёт прогон, он работает
   if (input.running) return { kind: 'work', taskId: null, title: null }
+
+  // связи нет: мёртвый агент не свободен. Свежая сессия — тоже связь
+  const seen = input.lastSeen ? Date.parse(input.lastSeen) : Number.NaN
+  const freshSession =
+    input.session !== undefined &&
+    input.session !== null &&
+    input.now - input.session.updatedAt <= LIVE_SESSION_TTL_MS
+  if (Number.isFinite(seen) && !freshSession && input.now - seen > OFFLINE_AFTER_MS) {
+    return { kind: 'offline', sinceMs: input.now - seen }
+  }
 
   return { kind: 'rest' }
 }
@@ -599,6 +617,7 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
         running,
         session,
         review: reviewOf.get(executor.id) ?? null,
+        lastSeen: executor.lastSeen,
         now,
       }),
     }
