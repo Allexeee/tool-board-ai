@@ -15,7 +15,8 @@ import {
 } from '../../core/runs.ts'
 import {
   HIBERNATE_COUNTDOWN_SECONDS,
-  hibernateSupported,
+  SHUTDOWN_CANCEL,
+  hibernateInstalled,
   orderRunPower,
   planRunPower,
   schedulePower,
@@ -281,7 +282,7 @@ export default async function command(args: ParsedArgs) {
     const id = args.positionals[0]
     if (!id) throw new UserError(3, 'использование: run power RUN1 [--power hibernate|shutdown]')
     if (process.platform !== 'win32') {
-      throw new UserError(1, 'питание после прогона сделано для Windows: powercfg /a и shutdown')
+      throw new UserError(1, 'питание после прогона сделано для Windows: hiberfil.sys и shutdown')
     }
 
     // заказ можно поставить и на уже закрытом прогоне: подсказка run power --power не тупик
@@ -294,20 +295,27 @@ export default async function command(args: ParsedArgs) {
       })
     }
 
-    // гибернации может не быть: тогда честно выключаемся, а не ждём ночь впустую
-    const probe = systemRunner('powercfg', ['/a'])
+    // гибернации может не быть: тогда честно выключаемся, а не ждём ночь впустую.
+    // Признак один — hiberfil.sys; текст powercfg /a врёт и больше не читается.
     const plan = planRunPower(db, project.root, id, {
-      hibernateAvailable: probe.status === 0 && hibernateSupported(probe.output),
+      hibernateAvailable: hibernateInstalled(),
     })
 
     const shown = relative(process.cwd(), plan.reportPath).replace(/\\/g, '/')
     const lines = [`${plan.run.id}  ${POWER_LABEL[plan.requested]} после отчёта`, `отчёт: ${shown}`]
     if (plan.note) lines.push(plan.note)
 
-    // отмена по Ctrl+C: 90 секунд существуют ровно для этого
+    // Ctrl+C успевает отменить только отсчёт гибернации: `shutdown /h` не умеет
+    // таймер. У выключения отсчёт живёт в Windows, и отмена у него своя —
+    // `shutdown /a`, поэтому ждать в процессе нечего.
     const controller = new AbortController()
     const onSigint = () => controller.abort()
-    process.once('SIGINT', onSigint)
+    if (plan.action === 'hibernate') process.once('SIGINT', onSigint)
+    else if (!isJsonMode()) {
+      process.stdout.write(
+        `выключение через ${HIBERNATE_COUNTDOWN_SECONDS} с — таймер Windows, отмена: ${SHUTDOWN_CANCEL}\n`,
+      )
+    }
 
     // каждый вызов и его код — в журнал: иначе неудачный shutdown выглядит как успех
     let failed = 0
@@ -329,17 +337,17 @@ export default async function command(args: ParsedArgs) {
         runner: loggedRunner,
         seconds: HIBERNATE_COUNTDOWN_SECONDS,
         signal: controller.signal,
-        onTick: (left, action) => {
+        onTick: (left) => {
           if (isJsonMode()) return
-          const what = action === 'hibernate' ? 'гибернация' : 'выключение'
-          process.stdout.write(`\r${what} через ${left} с, Ctrl+C отменяет   `)
+          process.stdout.write(`\rгибернация через ${left} с, Ctrl+C отменяет   `)
         },
       })
     } finally {
       process.off('SIGINT', onSigint)
     }
 
-    if (!isJsonMode()) process.stdout.write('\n')
+    // отсчёт гибернации печатался в одну строку через \r — закрываем её
+    if (!isJsonMode() && plan.action === 'hibernate') process.stdout.write('\n')
 
     appendPowerLog(project.root, `итог: ${outcome}, действие ${plan.action}, отчет ${shown}`)
 
@@ -349,11 +357,20 @@ export default async function command(args: ParsedArgs) {
         ? 'питание отменено: машина остаётся включённой'
         : failed > 0
           ? `питание: ${performed} не подтверждена — код возврата записан в журнал`
-          : `питание: ${performed} выполнена`,
+          : outcome === 'shutdown'
+            ? `питание: выключение запланировано через ${HIBERNATE_COUNTDOWN_SECONDS} с, отмена: ${SHUTDOWN_CANCEL}`
+            : `питание: ${performed} выполнена`,
     )
 
     ok(
-      { run: plan.run, requested: plan.requested, action: plan.action, reportPath: shown, outcome },
+      {
+        run: plan.run,
+        requested: plan.requested,
+        action: plan.action,
+        reportPath: shown,
+        outcome,
+        cancel: plan.action === 'shutdown' ? SHUTDOWN_CANCEL : null,
+      },
       lines.join('\n'),
     )
     return 0

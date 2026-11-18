@@ -10,19 +10,34 @@ import { getRunRecord, runPowerOf, type RunPower, type RunRecord } from './runs.
 // Ночной прогон освобождает машину сам, но только если владелец попросил об
 // этом явно (run start/end --power …) и только после отчёта на диске: сначала
 // бумаги, потом выключение. Питание не вырубает машину сразу — даёт 90 секунд
-// на «ой, я ещё тут» с отменой по Ctrl+C; отсчёт одинаковый для гибернации и
-// для выключения.
+// на «ой, я ещё тут».
+//
+// Таймер у этих 90 секунд разный: `shutdown /h` не умеет `--timeout`, поэтому
+// гибернация отсчитывает время в процессе и отменяется по Ctrl+C; выключение
+// ставит таймер Windows (`shutdown /s /t 90`) и сразу выходит — если процесс
+// умрёт, машина всё равно выключится, а не останется работать до утра.
 
 export const HIBERNATE_COUNTDOWN_SECONDS = 90
 
-/** Что печатается и выполняется: одна точка правды для команды и для тестов. */
-export const POWER_COMMANDS = {
-  hibernate: { command: 'shutdown', args: ['/h'] },
-  shutdown: { command: 'shutdown', args: ['/s', '/t', '0'] },
-} as const
+/** Как снять уже поставленный таймер выключения: подсказка идёт в консоль. */
+export const SHUTDOWN_CANCEL = 'shutdown /a'
 
 export type PowerAction = 'hibernate' | 'shutdown' | 'none'
 export type PowerOutcome = 'hibernate' | 'shutdown' | 'none' | 'cancelled'
+
+/**
+ * Что именно зовётся: одна точка правды для команды, консоли и тестов.
+ * У выключения срок живёт в самой команде, у гибернации срока нет вовсе.
+ */
+export function powerCommand(
+  action: 'hibernate' | 'shutdown',
+  seconds = HIBERNATE_COUNTDOWN_SECONDS,
+): { command: string; args: string[] } {
+  if (action === 'hibernate') return { command: 'shutdown', args: ['/h'] }
+
+  const timer = Math.max(0, Math.trunc(seconds))
+  return { command: 'shutdown', args: ['/s', '/t', String(timer)] }
+}
 
 export interface CommandResult {
   status: number | null
@@ -67,7 +82,8 @@ export function hibernateFile(env: Record<string, string | undefined> = process.
  * `powercfg /a` для этого не годится: он перечисляет и недоступные состояния,
  * поэтому слово «гибернация» в выводе есть и тогда, когда её нет. На живой
  * машине из-за этого решали «гибернация есть», `shutdown /h` молча ничего не
- * делал, а отчёт рапортовал успех.
+ * делал, а отчёт рапортовал успех. Текста команды у проверки поэтому нет
+ * вовсе: спрашивать `powercfg` больше не о чем.
  *
  * Проверка инжектируется: тесты не трогают настоящий диск.
  */
@@ -76,18 +92,6 @@ export function hibernateInstalled(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
   return hasFile(hibernateFile(env))
-}
-
-/**
- * Прежнее имя проверки: его зовёт `run power` из run.ts. Текст `powercfg /a`
- * больше не читается — он врёт (см. hibernateInstalled). Аргумент оставлен
- * ради совместимости вызова; убрать саму пробу powercfg — дело задачи по run.ts.
- */
-export function hibernateSupported(
-  _powercfgOutput = '',
-  hasFile: FileExists = existsSync,
-): boolean {
-  return hibernateInstalled(hasFile)
 }
 
 /** Гибернации нет — значит выключение: молча остаться с ноутбуком на ночь хуже. */
@@ -288,30 +292,43 @@ export interface SchedulePowerInput {
   action: PowerAction
   /** Настоящая команда в CLI, шпион в тестах: реальные shutdown не зовём никогда в тестах. */
   runner: CommandRunner
-  /** Сколько секунд отсчитывать; выключение тоже ждёт — чтобы было что отменить. */
+  /** Срок: отсчёт гибернации и таймер Windows для выключения. */
   seconds?: number
-  onTick?: (secondsLeft: number, action: 'hibernate' | 'shutdown') => void
+  /** Зовётся только у гибернации: у выключения отсчёт живёт в Windows. */
+  onTick?: (secondsLeft: number, action: 'hibernate') => void
   signal?: AbortSignal
 }
 
 /**
- * Выполнить питание. И гибернация, и выключение сначала отсчитывают seconds
- * (по умолчанию 90) и уважают отмену: «ой, я ещё тут» работает для обоих
- * исходов, а не только для того, о котором просили. Отменённое питание не
- * зовёт shutdown вовсе.
+ * Выполнить питание.
+ *
+ * Гибернация отсчитывает seconds (по умолчанию 90) в процессе: `shutdown /h`
+ * не принимает таймер, а Ctrl+C должен успевать отменить затею.
+ *
+ * Выключение не ждёт в процессе: `shutdown /s /t seconds` ставит таймер
+ * Windows и сразу возвращает управление. Раньше процесс спал 90 секунд и
+ * только потом звал `shutdown` — если его убивали, машина не выключалась.
+ * Отмена запланированного выключения — `shutdown /a`, а не Ctrl+C.
  */
 export async function schedulePower(input: SchedulePowerInput): Promise<PowerOutcome> {
   if (input.action === 'none') return 'none'
+  if (input.signal?.aborted) return 'cancelled'
 
   const seconds = Math.max(0, Math.trunc(input.seconds ?? HIBERNATE_COUNTDOWN_SECONDS))
 
+  if (input.action === 'shutdown') {
+    const command = powerCommand('shutdown', seconds)
+    input.runner(command.command, [...command.args])
+    return 'shutdown'
+  }
+
   for (let left = seconds; left > 0; left--) {
-    input.onTick?.(left, input.action)
+    input.onTick?.(left, 'hibernate')
     const ticked = await wait(1000, input.signal)
     if (!ticked) return 'cancelled'
   }
 
-  const command = POWER_COMMANDS[input.action]
+  const command = powerCommand('hibernate', seconds)
   input.runner(command.command, [...command.args])
-  return input.action
+  return 'hibernate'
 }
