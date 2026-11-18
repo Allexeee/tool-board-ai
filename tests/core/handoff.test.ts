@@ -311,6 +311,32 @@ test('закрытую задачу resume не воскрешает', () => {
   assert.match(renderResumeBrief(brief), /закрыта/)
 })
 
+test('задача на ревью — это работа, а не безделье: заметки «не в работе» нет', () => {
+  const db = openDb(':memory:')
+  const { run, active } = halfway(db)
+  const dir = root()
+
+  // работу сдали: в файле эстафеты она честно стоит в разделе «В работе»
+  db.prepare("update tasks set status = 'in_review', holder = null, lease_until = null where id = ?").run(
+    active.id,
+  )
+  const handoff = writeHandoff(db, run.id, { root: dir, now: new Date('2026-11-18T13:00:00.000Z') })
+  // в файле задача стоит в разделе «В работе» — значит и в брифе она работа
+  const md = readFileSync(handoff.mdPath, 'utf8')
+  const workSection = md.split('## В работе')[1]?.split('## ')[0] ?? ''
+  assert.match(workSection, new RegExp(active.id.replace('.', '\\.')), 'задача в разделе «В работе»')
+
+  const brief = resumeRun(db, { root: dir, now: new Date('2026-11-18T13:30:00.000Z') })
+
+  assert.equal(getTask(db, active.id)!.status, 'in_review', 'вердикт ждёт, а не очередь')
+  assert.ok(
+    brief.inWork.some((row) => row.id === active.id),
+    'в брифе задача осталась в работе',
+  )
+  assert.deepEqual(brief.released, [])
+  assert.doesNotMatch(renderResumeBrief(brief), /не в работе/)
+})
+
 test('resume без handoff-файла — честный отказ с подсказкой', () => {
   const db = openDb(':memory:')
   const dir = root()
