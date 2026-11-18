@@ -8,6 +8,7 @@ import { assumptionsForFeature } from '../../core/plans.ts'
 import { taskContext } from '../../core/context.ts'
 import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
+import { depsOf } from '../../core/deps.ts'
 import { agentRelativePath } from '../../core/agents.ts'
 import { unblockTask } from '../../core/block.ts'
 import { createTask, deferTask, editTask, getTask, listTasks, openTasks, setTaskSession, undeferTask, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
@@ -159,11 +160,12 @@ export default async function command(args: ParsedArgs) {
     const feature = stage ? getFeature(db, stage.featureId) : null
     const root = feature?.worktree ?? project.root
 
-    // Бриф — конверт задачи. Личность исполнителя живёт в .opencode/agents/<id>.md,
-    // поэтому навыки и правила здесь не пересказываются.
+    // Бриф — конверт задачи: всё, что нужно для работы, приходит из базы, а не из чата.
+    // Личность исполнителя живёт в .opencode/agents/<id>.md, поэтому правила там, а здесь — задача.
     const agent = stringFlag(args, 'as') ?? task.holder
     const executor = agent ? getExecutor(db, agent) : null
     const agentFile = agent && executor?.kind === 'agent' ? agentRelativePath(agent) : null
+    const deps = depsOf(db, task.id)
 
     const lines = [
       `id: ${task.id}`,
@@ -171,11 +173,32 @@ export default async function command(args: ParsedArgs) {
       ...(agentFile ? [`файл агента: ${agentFile}`] : []),
       ...(task.session ? [`сессия: ${task.session}`] : []),
       `каталог: ${root}`,
-      `дальше: node bin/toolbox-al.ts task show ${task.id}`,
-      `        node bin/toolbox-al.ts task context ${task.id}`,
+      // пустые поля не печатаем: строка без значения ничего не сообщает
+      ...(task.skill ? [`навык: ${task.skill}`] : []),
+      ...(task.dod.length > 0 ? [`DoD: ${task.dod.join('; ')}`] : []),
+      ...(task.scope === 'exclusive'
+        ? ['область: эксклюзивно']
+        : task.scope.length > 0
+          ? [`область: ${task.scope.join(', ')}`]
+          : []),
+      ...(deps.length > 0 ? [`зависит от: ${deps.join(', ')}`] : []),
+      `дальше: node bin/toolbox-al.ts task context ${task.id}`,
     ]
 
-    ok({ id: task.id, agent, root, agentFile, session: task.session }, lines.join('\n'))
+    ok(
+      {
+        id: task.id,
+        agent,
+        root,
+        agentFile,
+        session: task.session,
+        skill: task.skill,
+        dod: task.dod,
+        scope: task.scope,
+        deps,
+      },
+      lines.join('\n'),
+    )
     return 0
   }
 
