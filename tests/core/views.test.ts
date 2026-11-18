@@ -1,7 +1,11 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { openDb, type DatabaseSync } from '../../src/core/db.ts'
-import { addRequest } from '../../src/core/requests.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { openDb } from '../../src/core/db.ts'
+import { addRequest, openRequests } from '../../src/core/requests.ts'
 import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage, activateNextStage } from '../../src/core/stages.ts'
 import { createTask } from '../../src/core/tasks.ts'
@@ -12,7 +16,8 @@ import { addDep } from '../../src/core/deps.ts'
 import { takeTask } from '../../src/core/lease.ts'
 import { endRun, startRun } from '../../src/core/runs.ts'
 import { collectRunReport, renderRunReport } from '../../src/core/run-report.ts'
-import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats } from '../../src/core/views.ts'
+import { readLiveSessions } from '../../src/core/usage.ts'
+import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats, liveSessionLine } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
@@ -43,6 +48,32 @@ test('now показывает фичи, этапы и счётчики по с�
   const view = nowView(db)
   const counts = view.features[0].stage.counts
   assert.equal(Object.values(counts).reduce((sum, value) => sum + value, 0), 3)
+})
+
+test('единственный запрос с закрытой фичей не считается открытым', () => {
+  const db = openDb(':memory:')
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  db.prepare("update features set status = 'done' where id = ?").run(feature.id)
+
+  assert.deepEqual(nowView(db).requests, [], 'в now запрос закрыт по фиче')
+  assert.deepEqual(openRequests(db), [], 'в request open тот же ответ')
+})
+
+test('now и request open считают открытые запросы одинаково', () => {
+  const db = openDb(':memory:')
+  const closed = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: closed.id, name: 'A', rank: 1 })
+  db.prepare("update features set status = 'done' where id = ?").run(feature.id)
+  const open = addRequest(db, { title: 'Доставка', body: '...', author: 'owner' })
+
+  const view = nowView(db)
+  assert.deepEqual(view.requests, [{ id: open.id, title: 'Доставка' }])
+  assert.deepEqual(
+    openRequests(db).map((request) => request.id),
+    [open.id],
+  )
+  assert.equal(view.requests.length, openRequests(db).length, 'счётчики совпадают')
 })
 
 test('dispatch отдаёт только готовые задачи и порядок совпадает у двух вызовов', () => {
@@ -442,6 +473,136 @@ test('счётчики раздачи различают источник и п�
     renderRunReport(data),
     /- раздача: dispatch 1 · руками 0 · без выдачи 1/,
     'в шапке отчёта те же числа',
+  )
+})
+
+interface LiveRow {
+  id: string
+  parentId?: string | null
+  agent?: string | null
+  title?: string | null
+  directory?: string | null
+  updatedAt?: number
+  busyAt?: number | null
+  idleAt?: number | null
+  archivedAt?: number | null
+}
+
+/** Временная база OpenCode: только колонки, которые читает доска. */
+function liveDb(rows: LiveRow[]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'al-live-'))
+  const path = join(dir, 'opencode.db')
+  const db = new DatabaseSync(path)
+  try {
+    db.exec(`
+      create table session_v2 (
+        id text primary key,
+        parent_id text,
+        agent text,
+        title text,
+        directory text,
+        time_updated integer,
+        time_busy integer,
+        time_idle integer,
+        time_archived integer
+      )
+    `)
+    const insert = db.prepare(
+      `insert into session_v2 (id, parent_id, agent, title, directory, time_updated, time_busy, time_idle, time_archived)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    for (const row of rows) {
+      insert.run(
+        row.id,
+        row.parentId ?? null,
+        row.agent ?? null,
+        row.title ?? null,
+        row.directory ?? null,
+        row.updatedAt ?? 0,
+        row.busyAt ?? null,
+        row.idleAt ?? null,
+        row.archivedAt ?? null,
+      )
+    }
+  } finally {
+    db.close()
+  }
+  return path
+}
+
+test('worker-0 работает, пока идёт прогон, даже без задач', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'worker-0', kind: 'agent', skills: [] })
+  const worker = () => nowView(db).holders.find((holder) => holder.executor === 'worker-0')!
+
+  assert.equal(worker().working, false, 'без прогона и задач работы нет')
+  startRun(db, { mode: 'plan' })
+  assert.equal(worker().working, true, 'прогон идёт — оркестратор занят')
+})
+
+test('живые субагенты: только дочерние и свежие', () => {
+  const now = 10_000_000
+  const dbPath = liveDb([
+    { id: 'root', agent: 'build', title: 'Главная сессия', updatedAt: now },
+    {
+      id: 'busy',
+      parentId: 'root',
+      agent: 'worker-1',
+      title: 'worker-1: шаг',
+      updatedAt: now - 1000,
+      busyAt: now - 500,
+      idleAt: now - 9000,
+    },
+    {
+      id: 'idle',
+      parentId: 'root',
+      agent: 'general',
+      title: 'Ревью',
+      updatedAt: now - 2000,
+      busyAt: now - 9000,
+      idleAt: now - 1000,
+    },
+    { id: 'old', parentId: 'root', agent: 'worker-2', title: 'Старая', updatedAt: now - 3 * 60 * 60 * 1000 },
+    {
+      id: 'archived',
+      parentId: 'root',
+      agent: 'worker-2',
+      title: 'Архив',
+      updatedAt: now - 1000,
+      archivedAt: now - 500,
+    },
+  ])
+
+  const sessions = readLiveSessions({ dbPath, now })
+  assert.deepEqual(sessions.map((session) => session.id), ['busy', 'idle'])
+  assert.equal(sessions[0]!.busy, true, 'занят: отметка «занят» новее')
+  assert.equal(sessions[1]!.busy, false, 'простаивает: отметка «простаивает» новее')
+})
+
+test('нет базы OpenCode: живых субагентов просто нет', () => {
+  const dbPath = join(tmpdir(), `al-live-missing-${process.pid}-${Date.now()}`, 'opencode.db')
+
+  assert.deepEqual(readLiveSessions({ dbPath, now: Date.now() }), [])
+})
+
+test('строка субагента: агент, занятость и заголовок до 40 символов', () => {
+  const line = liveSessionLine({
+    id: 's',
+    agent: 'worker-2',
+    title: 'x'.repeat(60),
+    busy: true,
+    updatedAt: 0,
+  })
+
+  const [agent, state, title] = line.split(' · ')
+  assert.equal(agent, 'worker-2')
+  assert.equal(state, 'занят')
+  assert.equal(title!.length, 40)
+  assert.match(title!, /…$/)
+
+  assert.equal(
+    liveSessionLine({ id: 's', agent: 'general', title: 'Ревью', busy: false, updatedAt: 0 }),
+    'general · простаивает · Ревью',
   )
 })
 

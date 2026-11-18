@@ -1,8 +1,9 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, taskQueue, queueFreeReason, type AssignCounts, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
+import { nowView, ownerView, taskQueue, queueFreeReason, liveSessionLine, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
 import { pendingRelease } from '../../core/git/release.ts'
+import { readLiveSessions } from '../../core/usage.ts'
 import { listTasks } from '../../core/tasks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
 import { ok, paint, setColorMode, type ColorName } from '../output.ts'
@@ -35,7 +36,9 @@ export default async function command(args: ParsedArgs) {
   if (boolFlag(args, 'no-color')) setColorMode(false)
 
   const all = boolFlag(args, 'all')
-  const view = nowView(db, { all })
+  // живые субагенты — из базы OpenCode; без неё список пуст, доска печатается как раньше
+  const sessions = readLiveSessions({ projectDir: project.root })
+  const view = nowView(db, { all, sessions })
   const owner = ownerView(db, { all })
 
   // ownerView уже отдаёт по строке на каждую фичу, включая фичу без этапов
@@ -85,21 +88,6 @@ export default async function command(args: ParsedArgs) {
     return `  ${row.taskId.padEnd(queueIdWidth)}  ${paint(assign.padEnd(assignWidth), queueColor(row))}  ${row.title}${note}`
   })
 
-  // сводка внизу: сколько задач стоит на каждой причине. Цифра важнее отдельной строки.
-  const reasons = new Map<string, number>()
-  for (const row of queue) {
-    if (row.reason === null) continue
-    reasons.set(row.reason, (reasons.get(row.reason) ?? 0) + 1)
-  }
-  const reasonWidth = Math.max(0, ...[...reasons.keys()].map((reason) => reason.length))
-  const unassigned = reasons.size
-    ? '\n\nНЕ РАЗДАНО\n' +
-      [...reasons.entries()]
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([reason, count]) => `  ${reason.padEnd(reasonWidth)}  ${count}`)
-        .join('\n')
-    : ''
-
   const holders = view.holders.map((holder) => {
     // занятость без задачи видна так же ясно, как выданная задача: причина и срок.
     const state: string[] = []
@@ -107,40 +95,34 @@ export default async function command(args: ParsedArgs) {
     if (holder.busy) {
       state.push(paint(`занят: ${holder.busy.reason} (до ${shortTime(holder.busy.until)})`, 'cyan'))
     }
-    if (state.length === 0) state.push(paint('свободен', 'gray'))
+    // worker-0 может работать без задачи: пока идёт прогон, он занят
+    if (state.length === 0) state.push(holder.working ? paint('работает', 'cyan') : paint('свободен', 'gray'))
 
     return `  ${holder.executor.padEnd(12)} ${state.join(' · ')}`
   })
 
-  // раздача: сколько задач пришло раздачей, сколько выдано руками, сколько взято без выдачи.
-  // за прогон — главный срез: он про последнюю работу, за всё время — для сравнения.
-  const assignText = (counts: AssignCounts) =>
-    `dispatch ${counts.dispatch} · руками ${counts.hand} · без выдачи ${counts.take}`
-  const assignLines = [
-    ...(view.assignment.run ? [['за прогон', view.assignment.run] as const] : []),
-    ['за всё время', view.assignment.total] as const,
-  ].map(([label, counts]) => `  ${label.padEnd(11)} ${assignText(counts)}`)
-  const distribution = '\n\nРАЗДАЧА\n' + assignLines.join('\n')
+  const sessionLines = view.sessions.map((session) => `    ${liveSessionLine(session)}`)
 
   const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
 
-  // два счётчика ожидания стоят рядом: сколько просит работы и сколько ждёт решения владельца.
+  // фичи, слитые в dev, но ещё не выпущенные: владельцу видно, что просит релиза
+  const waitingMain = view.waitingMain.map((feature) => `  ${feature.id}  ${feature.name}`)
+
   // пустая строка сверху и табуляция в начале каждой строки: вывод читается как блок, а не как эхо команды.
   const text =
-    `Открытых запросов: ${view.requests.length}\n` +
-    `ждёт вас: ${view.waitingOwner}\n\n` +
+    `Открытых запросов: ${view.requests.length}\n\n` +
     (features.length
       ? features.join('\n')
       : all
         ? 'фич нет'
         : 'фич в работе нет') +
     (view.plans.length ? '\n\nПЛАНЫ НА УТВЕРЖДЕНИЕ\n' + plans.join('\n') : '') +
+    (waitingMain.length ? '\n\nЖДЁТ MAIN\n' + waitingMain.join('\n') : '') +
     (queue.length ? `\n\nОЧЕРЕДЬ\n` + queueLines.join('\n') : '') +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
     (holders.length ? holders.join('\n') : '  нет') +
-    distribution +
-    unassigned
+    (sessionLines.length ? '\n\n  СУБАГЕНТЫ\n' + sessionLines.join('\n') : '')
 
   ok(view, '\n' + indent(text))
   return 0
