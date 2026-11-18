@@ -4,7 +4,7 @@ import { UserError } from './errors.ts'
 const COMMANDS_WITH_SUB = new Set([
   'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
   'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan', 'pool', 'release',
-  'run',
+  'run', 'profiler',
 ])
 
 const TEXT_FILE_COMMANDS = new Set(['idea', 'request'])
@@ -21,6 +21,8 @@ const KNOWN_FLAGS = new Set([
   'write', 'brief', 'no-color', 'model', 'steps', 'allow', 'deny', 'clear',
   // прогон (RUN): режим, добор ближайших, утверждение начального плана, питание
   'mode', 'nearest', 'approve', 'power',
+  // профайлер прогона: метка замера («2 агента»)
+  'label',
 ])
 
 const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all', 'branch', 'pin', 'force-outside', 'write', 'brief', 'no-color', 'clear', 'nearest', 'approve'])
