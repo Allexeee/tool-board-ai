@@ -378,7 +378,11 @@ export default async function command(args: ParsedArgs) {
 
   if (args.sub === 'usage') {
     const pricing = (project.config as Config & { pricing?: Pricing }).pricing ?? null
-    const result = readUsage({ pricing, budget: budgetOf(args) })
+    // чужой расход не считаем: только сессии этого проекта и, если прогон идёт, его окно
+    const active = activeRun(db)
+    const startedAt = active ? Date.parse(active.startedAt) : Number.NaN
+    const window = Number.isFinite(startedAt) ? { from: startedAt } : null
+    const result = readUsage({ pricing, budget: budgetOf(args), projectDir: project.root, window })
 
     if (!result.available) {
       ok(result, result.reason)

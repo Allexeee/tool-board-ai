@@ -54,7 +54,8 @@ function windowWork(db: DatabaseSync, featureId: string, since: string): WindowW
     .prepare(
       `select t.id, t.status, t.class as taskClass,
               sum(case when e.type = 'task.reopened' then 1 else 0 end) as reopens,
-              sum(case when e.type = 'task.blocked' then 1 else 0 end) as blocks
+              sum(case when e.type = 'task.blocked' then 1 else 0 end) as blocks,
+              sum(case when e.type = 'task.done' then 1 else 0 end) as closed
          from tasks t
          join stages s on s.id = t.stage_id
          join events e on e.subject = t.id
@@ -67,6 +68,7 @@ function windowWork(db: DatabaseSync, featureId: string, since: string): WindowW
     taskClass: string
     reopens: number
     blocks: number
+    closed: number
   }>
 
   const sum = (pick: (row: (typeof rows)[number]) => number) =>
@@ -74,7 +76,9 @@ function windowWork(db: DatabaseSync, featureId: string, since: string): WindowW
 
   return {
     tasks: rows.length,
-    done: rows.filter((row) => row.status === 'done').length,
+    // закрытие считаем по событию в окне: задача, закрытая месяц назад и правленная на этой неделе,
+    // не должна выглядеть закрытой на этой неделе
+    done: rows.filter((row) => row.closed > 0).length,
     urgent: rows.filter((row) => row.taskClass === 'expedite').length,
     reopens: sum((row) => row.reopens),
     blocks: sum((row) => row.blocks),

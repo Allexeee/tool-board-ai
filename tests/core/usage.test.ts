@@ -1,15 +1,28 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { opencodeDbPath, readUsage } from '../../src/core/usage.ts'
 
 /**
  * Настоящую базу OpenCode тест не трогает: путь всегда подменяется временной SQLite,
  * у которой есть только колонки, нужные учёту.
  */
+
+const bin = resolve('bin/toolbox-al.ts')
+
+function runCli(dir: string, args: string[], env: NodeJS.ProcessEnv = {}) {
+  const result = spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    windowsHide: true,
+  })
+  return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
+}
 
 interface SessionRow {
   agent: string | null
@@ -19,11 +32,17 @@ interface SessionRow {
   cacheRead?: number
   cacheWrite?: number
   cost?: number
+  /** Каталог проекта, в котором шла сессия. */
+  directory?: string | null
+  createdAt?: number
+  updatedAt?: number
 }
 
 const SCHEMA = `
   create table session_v2 (
     id text primary key,
+    project_id text,
+    directory text,
     agent text,
     model text,
     tokens_input integer,
@@ -34,6 +53,7 @@ const SCHEMA = `
     cost real,
     parent_id text,
     title text,
+    time_created integer,
     time_updated integer
   )
 `
@@ -47,12 +67,15 @@ function makeDb(rows: SessionRow[], options: { schema?: string } = {}): string {
     if (!options.schema) {
       const insert = db.prepare(
         `insert into session_v2
-           (id, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost)
-         values (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, project_id, directory, agent, tokens_input, tokens_output, tokens_reasoning,
+            tokens_cache_read, tokens_cache_write, cost, time_created, time_updated)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       rows.forEach((row, index) => {
         insert.run(
           `ses_${index}`,
+          `prj_${index}`,
+          row.directory ?? null,
           row.agent,
           row.input ?? 0,
           row.output ?? 0,
@@ -60,6 +83,8 @@ function makeDb(rows: SessionRow[], options: { schema?: string } = {}): string {
           row.cacheRead ?? 0,
           row.cacheWrite ?? 0,
           row.cost ?? 0,
+          row.createdAt ?? 0,
+          row.updatedAt ?? 0,
         )
       })
     }
@@ -213,6 +238,69 @@ test('база есть, а таблицы session_v2 нет: тоже «учё�
   if (usage.available) return
 
   assert.match(usage.reason, /нет таблицы session_v2/)
+})
+
+test('сессии чужих проектов не попадают в расход', () => {
+  const dbPath = makeDb([
+    { agent: 'worker-1', input: 100, directory: 'D:/work/alpha' },
+    { agent: 'worker-1', input: 900, directory: 'D:/work/beta' },
+    { agent: 'worker-2', input: 50, directory: 'D:/work/alpha/.worktrees/f1' },
+    { agent: 'worker-2', input: 70, directory: null },
+  ])
+
+  const usage = readUsage({ dbPath, projectDir: 'D:\\work\\alpha' })
+  assert.equal(usage.available, true)
+  if (!usage.available) return
+
+  assert.equal(usage.totals.sessions, 2, 'сессии соседей и строки без каталога не считаются')
+  assert.equal(usage.totals.input, 150)
+  assert.deepEqual(usage.agents.map((agent) => agent.agent).sort(), ['worker-1', 'worker-2'])
+})
+
+test('при активном прогоне в расход идёт только его окно', () => {
+  const dbPath = makeDb([
+    // прошлый прогон: закрыта до начала окна
+    { agent: 'worker-1', input: 1000, directory: 'D:/work/alpha', createdAt: 1_000, updatedAt: 2_000 },
+    // живёт в окне: начата раньше, обновлена внутри
+    { agent: 'worker-1', input: 10, directory: 'D:/work/alpha', createdAt: 1_000, updatedAt: 3_500 },
+    // создана уже после закрытого окна
+    { agent: 'worker-2', input: 500, directory: 'D:/work/alpha', createdAt: 4_500, updatedAt: 4_500 },
+  ])
+
+  const usage = readUsage({ dbPath, projectDir: 'D:/work/alpha', window: { from: 3_000, until: 4_000 } })
+  assert.equal(usage.available, true)
+  if (!usage.available) return
+
+  assert.equal(usage.totals.sessions, 1)
+  assert.equal(usage.totals.input, 10)
+})
+
+test('битый файл базы: «учёт недоступен», а не исключение', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tbal-usage-broken-'))
+  const dbPath = join(dir, 'opencode.db')
+  writeFileSync(dbPath, 'это не sqlite, а мусор')
+
+  const usage = readUsage({ dbPath })
+  assert.equal(usage.available, false)
+  if (usage.available) return
+
+  assert.match(usage.reason, /учёт недоступен/)
+  assert.match(usage.reason, /не открылась|не читается/)
+  assert.equal('agents' in usage, false)
+})
+
+test('run usage на битой базе выходит с кодом 1', () => {
+  const project = mkdtempSync(join(tmpdir(), 'tbal-usage-cli-'))
+  const init = runCli(project, ['init'])
+  assert.equal(init.code, 0, init.err)
+
+  const data = mkdtempSync(join(tmpdir(), 'tbal-usage-data-'))
+  mkdirSync(join(data, 'opencode'), { recursive: true })
+  writeFileSync(join(data, 'opencode', 'opencode.db'), 'не база')
+
+  const shown = runCli(project, ['run', 'usage'], { XDG_DATA_HOME: data })
+  assert.equal(shown.code, 1, shown.err || shown.out)
+  assert.match(`${shown.out}${shown.err}`, /учёт недоступен/)
 })
 
 test('чтение не меняет чужую базу', () => {
