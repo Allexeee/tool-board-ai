@@ -42,3 +42,16 @@ test('saveConfig сохраняет BOM, если он был', () => {
   assert.equal(raw.startsWith('\uFEFF'), true)
   assert.match(raw, /2\.0\.0/)
 })
+
+test('субагенты выключены по умолчанию и включаются только true', () => {
+  const dir = tmp()
+  const path = join(dir, 'config.json')
+  writeFileSync(path, JSON.stringify(sample), 'utf8')
+  assert.equal(readConfig(path).subagents, false)
+
+  writeFileSync(path, JSON.stringify({ ...sample, subagents: 'yes' }), 'utf8')
+  assert.equal(readConfig(path).subagents, false, 'строка не включает субагентов')
+
+  writeFileSync(path, JSON.stringify({ ...sample, subagents: true }), 'utf8')
+  assert.equal(readConfig(path).subagents, true)
+})

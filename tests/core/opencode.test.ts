@@ -294,3 +294,22 @@ test('блок AGENTS.md знает про ревью и dev', () => {
   assert.match(agents, /in_review/)
   assert.match(agents, /ветке фичи или dev/)
 })
+
+test('скилл говорит про выключенных субагентов', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+
+  assert.match(skill, /Субагенты\./)
+  assert.match(skill, /subagents: true/)
+  assert.match(skill, /только в ране, где несколько фич/)
+})
+
+test('полное ревью отдаётся отдельному агенту', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+
+  assert.match(skill, /Полное ревью/)
+  assert.match(skill, /даже вне рана/)
+})

@@ -14,6 +14,8 @@ export interface Config {
   wipLimit: number
   /** Сколько рабочих каталогов держать в пуле; 0 — свой каталог на каждую фичу. */
   worktreePool: number
+  /** Субагенты: выключены по умолчанию, включаются только настройкой и только в ране. */
+  subagents: boolean
   branches: { main: string; dev: string }
   locale: string
 }
@@ -29,6 +31,7 @@ export const DEFAULT_CONFIG: Config = {
   branchRetentionDays: 30,
   wipLimit: 1,
   worktreePool: 2,
+  subagents: false,
   branches: { main: 'main', dev: 'dev' },
   locale: 'ru',
 }
@@ -53,6 +56,7 @@ export function readConfig(path: string): Config {
     ...DEFAULT_CONFIG,
     ...parsed,
     worktreePool: worktreePoolOf(parsed.worktreePool),
+    subagents: parsed.subagents === true,
     branches: { ...DEFAULT_CONFIG.branches, ...(parsed.branches ?? {}) },
   }
 }
