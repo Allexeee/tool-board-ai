@@ -127,7 +127,7 @@ export function getRun(db: DatabaseSync, id: string): RoutineRun | null {
 
 export type RunMode = 'plan' | 'all'
 export type RunPower = 'none' | 'hibernate' | 'shutdown'
-export type RunEndReason = 'owner' | 'tasks' | 'decision'
+export type RunEndReason = 'owner' | 'tasks' | 'decision' | 'context'
 export type RunVerdict = 'ok' | 'found'
 
 /** Почему прогон закончился: остановил владелец, кончились задачи, нужно решение. */
@@ -174,7 +174,7 @@ interface RunRow {
 
 const RUN_MODES: readonly string[] = ['plan', 'all']
 const RUN_POWERS: readonly string[] = ['none', 'hibernate', 'shutdown']
-const RUN_END_REASONS: readonly string[] = ['owner', 'tasks', 'decision']
+const RUN_END_REASONS: readonly string[] = ['owner', 'tasks', 'decision', 'context']
 const RUN_VERDICTS: readonly string[] = ['ok', 'found']
 
 /**
@@ -254,6 +254,50 @@ export function lastClosedRun(db: DatabaseSync): RunRecord | null {
 export function getRunRecord(db: DatabaseSync, id: string): RunRecord | null {
   const row = db.prepare('select * from runs where id = ?').get(id) as RunRow | undefined
   return row ? toRunRecord(row) : null
+}
+
+export interface RunCursorStep {
+  id: string
+  title: string
+}
+
+export interface RunCursor {
+  /** Следующая готовая задача прогона; null — готовых нет. */
+  next: RunCursorStep | null
+  /** Сколько задач прогона не закрыто. */
+  remaining: number
+  /** Сколько задач прогона всего. */
+  total: number
+}
+
+/**
+ * Курсор прогона: что следующее и сколько осталось. Считается по задачам
+ * запросов прогона, поэтому оркестратору не нужно помнить план в контексте.
+ */
+export function runCursor(db: DatabaseSync, id: string): RunCursor | null {
+  const run = getRunRecord(db, id)
+  if (!run) return null
+  if (run.requests.length === 0) return { next: null, remaining: 0, total: 0 }
+
+  const placeholders = run.requests.map(() => '?').join(', ')
+  const rows = db
+    .prepare(
+      'select t.id as id, t.title as title, t.status as status from tasks t ' +
+        'join stages st on st.id = t.stage_id ' +
+        'join features f on f.id = st.feature_id ' +
+        `where f.request_id in (${placeholders}) and t.status != 'cancelled' ` +
+        'order by f.rank, st.seq, t.id',
+    )
+    .all(...run.requests) as Array<{ id: string; title: string; status: string }>
+
+  const remaining = rows.filter((row) => row.status !== 'done')
+  const next = remaining.find((row) => row.status === 'ready' || row.status === 'open')
+
+  return {
+    next: next ? { id: next.id, title: next.title } : null,
+    remaining: remaining.length,
+    total: rows.length,
+  }
 }
 
 /**

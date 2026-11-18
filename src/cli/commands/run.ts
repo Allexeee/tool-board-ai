@@ -7,6 +7,7 @@ import {
   reviewOf,
   reviewRun,
   reviewState,
+  runCursor,
   startRun,
   type RunEndReason,
   type RunPower,
@@ -36,7 +37,7 @@ import { spawnSync } from 'node:child_process'
 
 const MODE_LABEL = { plan: 'по плану', all: 'доталово' } as const
 const POWER_LABEL = { none: 'не трогать', hibernate: 'гибернация', shutdown: 'выключение' } as const
-const REASON_LABEL = { owner: 'владелец', tasks: 'задачи', decision: 'решение' } as const
+const REASON_LABEL = { owner: 'владелец', tasks: 'задачи', decision: 'решение', context: 'предел контекста' } as const
 
 // «ревью не было» и «готов к релизу» — не украшение, а разное право на релиз
 const REVIEW_LABEL: Record<RunReviewState, string | null> = {
@@ -439,6 +440,19 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  if (args.sub === 'next') {
+    const id = args.positionals[0] ?? activeRun(db)?.id
+    if (!id) throw new UserError(1, 'прогонов нет: сначала run start')
+    const cursor = runCursor(db, id)
+    if (!cursor) throw new UserError(3, `прогон ${id} не найден`)
+
+    const lines = cursor.next
+      ? [`${cursor.next.id}  ${cursor.next.title}`, `осталось: ${cursor.remaining} из ${cursor.total}`]
+      : ['готовых задач нет', `осталось: ${cursor.remaining} из ${cursor.total}`]
+    ok(cursor, lines.join('\n'))
+    return 0
+  }
+
   if (args.sub === 'show' || args.sub === null) {
     const active = activeRun(db)
     const lastClosed = lastClosedRun(db)
@@ -446,7 +460,15 @@ export default async function command(args: ParsedArgs) {
     const state = lastClosed ? reviewState(lastClosed, review) : null
 
     const lines: string[] = []
-    if (active) lines.push(`${active.id}  идёт с ${stamp(active.startedAt)}  ${describe(active)}`)
+    if (active) {
+      const cursor = runCursor(db, active.id)
+      const tail = cursor
+        ? cursor.next
+          ? ` · дальше: ${cursor.next.id}  ${cursor.next.title} · осталось ${cursor.remaining} из ${cursor.total}`
+          : ` · дальше: готовых задач нет · осталось ${cursor.remaining} из ${cursor.total}`
+        : ''
+      lines.push(`${active.id}  идёт с ${stamp(active.startedAt)}  ${describe(active)}${tail}`)
+    }
     if (lastClosed) {
       const verdict = state ? REVIEW_LABEL[state] : null
       const tail = [lastClosed.endReason ? `причина: ${reasonText(lastClosed)}` : null, verdict]
