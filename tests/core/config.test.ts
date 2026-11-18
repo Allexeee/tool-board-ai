@@ -55,3 +55,13 @@ test('субагенты выключены по умолчанию и вклю�
   writeFileSync(path, JSON.stringify({ ...sample, subagents: true }), 'utf8')
   assert.equal(readConfig(path).subagents, true)
 })
+
+test('параллельные тесты выключены по умолчанию и включаются только true', () => {
+  const dir = tmp()
+  const path = join(dir, 'config.json')
+  writeFileSync(path, JSON.stringify(sample), 'utf8')
+  assert.equal(readConfig(path).parallelTests, false)
+
+  writeFileSync(path, JSON.stringify({ ...sample, parallelTests: true }), 'utf8')
+  assert.equal(readConfig(path).parallelTests, true)
+})

@@ -352,3 +352,12 @@ test('плагин сверяет версию CLI', () => {
   assert.match(plugin, /checkVersion/)
   assert.match(plugin, /PLUGIN_VERSION/)
 })
+
+test('скилл знает настройку параллельных тестов', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+
+  assert.match(skill, /parallelTests: true/)
+  assert.match(skill, /--experimental-test-isolation=none/)
+})
