@@ -330,6 +330,46 @@ test('задача в руке без блокировки — ожидание,
   if (state.kind === 'wait') assert.match(state.reason, new RegExp(first.id.replace('.', '\\.')))
 })
 
+test('занятая свежая сессия исполнителя — работа, даже без задачи', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
+
+  const session = (busy: boolean, agoMs: number) => ({
+    id: 'ses_1',
+    agent: 'w2',
+    title: 'F86 исполнители',
+    busy,
+    updatedAt: Date.now() - agoMs,
+  })
+  const state = (item: ReturnType<typeof session>) =>
+    nowView(db, { sessions: [item] }).holders.find((holder) => holder.executor === 'w2')!.state
+
+  assert.deepEqual(state(session(true, 60_000)), { kind: 'work', taskId: null, title: null })
+  assert.deepEqual(state(session(false, 60_000)), { kind: 'rest' }, 'простаивающая сессия — не работа')
+  assert.deepEqual(state(session(true, 20 * 60_000)), { kind: 'rest' }, 'старая сессия — не работа')
+})
+
+test('задача на ревью — работа этапа, в очереди причина «на ревью»', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  const first = db.prepare('select id from tasks order by id limit 1').get() as { id: string }
+
+  // как у активной: та же строка этапа и тот же счёт
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(first.id)
+  const active = ownerView(db).stages[0]!
+
+  db.prepare("update tasks set status = 'in_review', holder = null where id = ?").run(first.id)
+  const review = ownerView(db).stages[0]!
+
+  assert.equal(review.status, 'wip', 'на ревью — это работа, а не pending')
+  assert.equal(review.status, active.status)
+  assert.deepEqual(review.progress, active.progress, 'счёт этапа как у активной')
+
+  const row = taskQueue(db).find((item) => item.taskId === first.id)!
+  assert.equal(row.reason, 'на ревью')
+})
+
 test('снятая занятость исчезает из now', () => {
   const db = openDb(':memory:')
   seed(db)

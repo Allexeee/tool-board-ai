@@ -68,22 +68,18 @@ export default async function command(args: ParsedArgs) {
     return [line, ...decisions.map((decision) => `   · ${decision.question} → ${decision.choice}`)].join('\n')
   })
 
-  // очередь вместо рук: владельцу нужен порядок задач, а не то, как они разложены по исполнителям
-  const queue = taskQueue(db)
+  // очередь отвечает на вопрос «что можно взять»: задачи в работе и в руке видны
+  // в строках исполнителей, второй раз их печатать незачем
+  const queue = taskQueue(db).filter((row) => row.holder === null && row.hand === null)
   const queueIdWidth = Math.max(0, ...queue.map((row) => row.taskId.length))
-  const assignWidth = Math.max(
-    8,
-    ...queue.map((row) => (row.holder ?? row.hand ?? 'свободна').length),
-  )
   const queueLines = queue.map((row) => {
-    const assign = row.holder ?? row.hand ?? 'свободна'
     // у свободной задачи причина стоит на месте пустоты: владелец сразу видит, чего она ждёт.
     const note = row.reason
       ? ` · ${row.reason}`
       : row.waitsFor.length > 0
         ? ` · ждёт ${row.waitsFor.join(', ')}`
         : ''
-    return `  ${row.taskId.padEnd(queueIdWidth)}  ${paint(assign.padEnd(assignWidth), queueColor(row))}  ${row.title}${note}`
+    return `  ${paint(row.taskId.padEnd(queueIdWidth), queueColor(row))}  ${row.title}${note}`
   })
 
   // исполнители и живые субагенты — один список: субагент и есть исполнитель.

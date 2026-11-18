@@ -308,6 +308,8 @@ function reasonOf(input: {
   if (waitsFor.length > 0) return `ждёт ${waitsFor.join(', ')}`
 
   if (task.status !== 'ready') {
+    // ревью — это работа, а не простой: задача сдана и ждёт вердикта
+    if (task.status === 'in_review') return 'на ревью'
     // refreshReady превращает задачи неактивного этапа в planned:
     // владельцу важна причина «этап не активен», а не название статуса.
     if (task.status === 'planned' && task.stageId !== null && place?.status !== 'active') {
@@ -435,6 +437,8 @@ function holderState(
     hand: Task[]
     busy: { reason: string; until: string } | null
     running: boolean
+    /** Живая сессия агента: занятая и свежая — это работа, даже без задачи. */
+    session?: LiveSession | null
   },
 ): ExecutorState {
   const task = input.active[0]
@@ -451,6 +455,11 @@ function holderState(
       .find((item) => item.reason !== null)
     if (waiting) return { kind: 'wait', reason: waiting.reason! }
     return { kind: 'wait', reason: `задача в руке (${input.hand[0]!.id})` }
+  }
+
+  // сессия занята и свежая: агент работает, даже если задача не за ним
+  if (input.session && sessionIsWorthShowing(input.session)) {
+    return { kind: 'work', taskId: null, title: null }
   }
 
   // у оркестратора работа бывает без задачи: пока идёт прогон, он работает
@@ -521,6 +530,8 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
     // субагенты считаются чужой работой: пока они живы, worker-0 сам не работает.
     const running = executor.id === 'worker-0' && run !== null
     const working = active.length > 0 || hand.length > 0 || running
+    // живая сессия агента: у одного их может быть несколько, берём свежую — она первая
+    const session = (options.sessions ?? []).find((item) => item.agent === executor.id) ?? null
     return {
       executor: executor.id,
       session: executor.session,
@@ -529,7 +540,7 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
       hand,
       busy: busyState,
       working,
-      state: holderState(db, { active, hand: handTasks, busy: busyState, running }),
+      state: holderState(db, { active, hand: handTasks, busy: busyState, running, session }),
     }
   })
 
@@ -606,10 +617,12 @@ const stageProgress = (
   return { current: Math.min(total, completed + 1), total }
 }
 
-/** Этап начат, если по нему была работа: задача взята, закрыта или этап ушёл на приёмку. */
+/** Этап начат, если по нему была работа: задача взята, закрыта, на ревью или этап ушёл на приёмку. */
 const stageStarted = (db: DatabaseSync, stageId: string, stage: StageStatus): boolean => {
   if (stage === 'in_review' || stage === 'accepted' || stage === 'merged') return true
-  return listTasks(db, { stageId }).some((task) => task.status === 'done' || task.status === 'active')
+  return listTasks(db, { stageId }).some(
+    (task) => task.status === 'done' || task.status === 'active' || task.status === 'in_review',
+  )
 }
 
 export function ownerView(db: DatabaseSync, options: { all?: boolean } = {}): OwnerView {
