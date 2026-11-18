@@ -313,3 +313,13 @@ test('полное ревью отдаётся отдельному агенту
   assert.match(skill, /Полное ревью/)
   assert.match(skill, /даже вне рана/)
 })
+
+test('скилл требует спеку до плана', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+
+  assert.match(skill, /Спека до плана/)
+  assert.match(skill, /docs\/specs/)
+  assert.match(skill, /брейншторм/)
+})
