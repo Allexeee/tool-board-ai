@@ -704,3 +704,33 @@ test('hand clear освобождает руку исполнителя', () => 
 
 
 
+
+test('рука, выставленная сейчас, не снимается как офлайн', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const request = addRequest(db, { title: 'Запрос', body: '', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'Фича', rank: 1 })
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '1 день' })
+  activateNextStage(db, feature.id)
+  setFeatureBranch(db, feature.id, 'feat/f1', '/tmp/f1')
+  const task = createTask(db, {
+    stageId: stage.id,
+    title: 'Шаг',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  refreshReady(db)
+
+  // исполнитель давно молчал: без отметки выдачи рука снимется на ближайшем advanceTime
+  db.prepare('update executors set last_seen = ? where id = ?').run(
+    new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    'w1',
+  )
+  setHand(db, 'w1', [task.id], 'orchestrator')
+  advanceTime(db)
+  assert.deepEqual(getHand(db, 'w1').map((item) => item.id), [task.id])
+})
+
