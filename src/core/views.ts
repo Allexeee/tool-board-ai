@@ -7,7 +7,6 @@ import { listTasks, type TaskStatus } from './tasks.ts'
 import { depsOf, isSatisfied } from './deps.ts'
 import { getHand, dispatchHands, nextTask, stageOwner, type AssignSource } from './hands.ts'
 import { activeRun, lastClosedRun } from './runs.ts'
-import { ownerHand } from './questions.ts'
 import { listDecisions } from './decisions.ts'
 import { openRequests } from './requests.ts'
 import { pendingRelease } from './git/release.ts'
@@ -335,12 +334,45 @@ export interface NowView {
     /** занятость без задачи: причина и срок; null — свободен */
     busy: { reason: string; until: string } | null
   }>
-  waitingOwner: number
   requests: Array<{ id: string; title: string }>
   plans: Array<{ id: string; requestId: string; title: string }>
+  /** Фичи, у которых все этапы слиты в dev и ещё не выпущены: они ждут main. */
+  waitingMain: Array<{ id: string; name: string }>
   unreleased: number
   /** Как выдавались задачи: раздачей, руками, взятием без выдачи. */
   assignment: AssignStats
+}
+
+/**
+ * Фичи, которые ждут main: все этапы слиты в dev, но ни один не попал в релиз.
+ * Свежие сверху — по времени последнего слияния этапа.
+ */
+function waitingMainFeatures(db: DatabaseSync): Array<{ id: string; name: string }> {
+  const pending = pendingRelease(db)
+  if (pending.length === 0) return []
+
+  const totals = new Map(
+    (
+      db.prepare('select feature_id as id, count(*) as total from stages group by feature_id').all() as Array<{
+        id: string
+        total: number
+      }>
+    ).map((row) => [row.id, row.total]),
+  )
+
+  const byFeature = new Map<string, { name: string; stages: number; fresh: string }>()
+  for (const stage of pending) {
+    const entry = byFeature.get(stage.featureId) ?? { name: stage.featureName, stages: 0, fresh: '' }
+    entry.stages += 1
+    const mergedAt = stage.mergedAt ?? ''
+    if (mergedAt > entry.fresh) entry.fresh = mergedAt
+    byFeature.set(stage.featureId, entry)
+  }
+
+  return [...byFeature.entries()]
+    .filter(([id, entry]) => entry.stages === totals.get(id))
+    .sort((a, b) => b[1].fresh.localeCompare(a[1].fresh) || a[0].localeCompare(b[0]))
+    .map(([id, entry]) => ({ id, name: entry.name }))
 }
 
 export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowView {
@@ -427,9 +459,9 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     features,
     pool,
     holders,
-    waitingOwner: ownerHand(db).length,
     requests,
     plans,
+    waitingMain: waitingMainFeatures(db),
     unreleased: pendingRelease(db).length,
     assignment: assignmentStats(db),
   }

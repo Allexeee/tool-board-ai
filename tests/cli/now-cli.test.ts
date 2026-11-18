@@ -144,7 +144,7 @@ test('now идёт после пустой строки и с табуляцие
   const lines = view.out.split('\n')
   assert.equal(lines[0], '', 'первая строка пустая')
   assert.equal(lines[1], '\tОткрытых запросов: 2')
-  assert.match(lines[2], /^\tждёт вас: \d+$/)
+  assert.doesNotMatch(view.out, /ждёт вас/, 'счётчика ожидания владельца больше нет')
 
   const content = lines.filter((line) => line.trim() !== '')
   for (const line of content) {
@@ -318,7 +318,7 @@ test('now с NO_COLOR печатает чистый текст', () => {
   assert.match(view.out, /Оплата/)
 })
 
-test('now показывает причину свободной задачи и сводку НЕ РАЗДАНО', () => {
+test('now показывает причину свободной задачи в строке очереди', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
@@ -331,10 +331,8 @@ test('now показывает причину свободной задачи и
   assert.match(view.out, /T1\s+свободна\s+Пул · ждёт раздачи/)
   assert.match(view.out, /T2\s+свободна\s+Звук · нет исполнителя: audio/)
 
-  // внизу — сводка: сколько задач на каждую причину
-  assert.match(view.out, /^\tНЕ РАЗДАНО$/m)
-  assert.match(view.out, /^\t {2}ждёт раздачи\s+1$/m)
-  assert.match(view.out, /^\t {2}нет исполнителя: audio\s+1$/m)
+  // сводки причин внизу больше нет
+  assert.doesNotMatch(view.out, /НЕ РАЗДАНО/)
 })
 
 test('у назначенной задачи причины нет, и сводка её не считает', () => {
@@ -350,7 +348,7 @@ test('у назначенной задачи причины нет, и свод�
   assert.doesNotMatch(view.out, /НЕ РАЗДАНО/)
 })
 
-test('now показывает раздачу: dispatch, руками и без выдачи', () => {
+test('now не печатает раздачу и счётчик ожидания владельца', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
@@ -358,22 +356,53 @@ test('now показывает раздачу: dispatch, руками и без 
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /^\tРАЗДАЧА$/m)
-  assert.match(view.out, /^\t {2}за всё время\s+dispatch 0 · руками 1 · без выдачи 0$/m)
-  assert.doesNotMatch(view.out, /за прогон/, 'прогонов не было — строку про прогон не печатаем')
+  assert.doesNotMatch(view.out, /РАЗДАЧА/)
+  assert.doesNotMatch(view.out, /dispatch/)
+  assert.doesNotMatch(view.out, /ждёт вас/)
 })
 
-test('now показывает раздачу за прогон', () => {
+test('ЖДЁТ MAIN: свежие фичи сверху', () => {
   const dir = project()
-  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
-  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
-  run(dir, ['run', 'start', '--mode', 'plan'])
-  run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
+  run(dir, ['feature', 'add', 'Старая'])
+  run(dir, ['feature', 'add', 'Новая'])
+  run(dir, ['stage', 'add', 'F1', 'Слитый', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['stage', 'add', 'F2', 'Слитый', '--goal', 'g', '--appetite', '1 день'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'merged', merged_at = ? where id = 'F1.S1'").run(
+    '2026-11-18T07:00:00.000Z',
+  )
+  db.prepare("update stages set status = 'merged', merged_at = ? where id = 'F2.S1'").run(
+    '2026-11-18T08:00:00.000Z',
+  )
+  db.close()
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /^\t {2}за прогон\s+dispatch 0 · руками 1 · без выдачи 0$/m)
-  assert.match(view.out, /^\t {2}за всё время\s+dispatch 0 · руками 1 · без выдачи 0$/m)
+  assert.match(view.out, /^\tЖДЁТ MAIN$/m)
+  assert.match(view.out, /^\t {2}F2  Новая$/m)
+  assert.match(view.out, /^\t {2}F1  Старая$/m)
+
+  const fresh = view.out.indexOf('F2  Новая')
+  const old = view.out.indexOf('F1  Старая')
+  assert.ok(fresh !== -1 && old !== -1 && fresh < old, 'свежая фича выше')
+})
+
+test('ЖДЁТ MAIN нет, если не все этапы слиты', () => {
+  const dir = project()
+  run(dir, ['feature', 'add', 'Оплата'])
+  run(dir, ['stage', 'add', 'F1', 'Слитый', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['stage', 'add', 'F1', 'В работе', '--goal', 'g', '--appetite', '1 день'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update stages set status = 'merged', merged_at = ? where id = 'F1.S1'").run(
+    new Date().toISOString(),
+  )
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /ЖДЁТ MAIN/)
 })
 
 test('цвет очереди: зелёный — брать, жёлтый — в руке, циан — в работе, серый — ждёт', () => {
