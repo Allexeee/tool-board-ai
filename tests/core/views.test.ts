@@ -369,7 +369,7 @@ test('состояние по последнему инструменту: ра�
   const tool = (over: Partial<LiveTool>): LiveTool => ({
     name: 'shell',
     command: null,
-    status: 'completed',
+    status: 'running',
     at: now,
     background: false,
     ...over,
@@ -386,13 +386,39 @@ test('состояние по последнему инструменту: ра�
   assert.deepEqual(
     stateWith({ ...base, busy: false, tool: tool({ command: 'node --test tests/core/views.test.ts' }) }),
     { kind: 'test', taskId: task.id },
-    'простой и последний shell — тесты',
+    'простой и идущие тесты — ждём результата',
   )
   assert.deepEqual(
     stateWith({ ...base, busy: false, tool: tool({ command: 'npm run dev', background: true }) }),
     { kind: 'command', taskId: task.id },
-    'простой и команда в фоне',
+    'простой и команда идёт в фоне',
   )
+
+  // завершённый инструмент — прошедшее время: доска не выдаёт его за ожидание
+  const completed = stateWith({
+    ...base,
+    busy: false,
+    tool: tool({ command: 'node --test tests/core/views.test.ts', status: 'completed' }),
+  })
+  assert.equal(completed.kind, 'silent', 'завершённый тест — молчание')
+
+  const completedBackground = stateWith({
+    ...base,
+    busy: false,
+    tool: tool({ command: 'npm run dev', background: true, status: 'completed' }),
+  })
+  assert.equal(completedBackground.kind, 'silent', 'завершённая фоновая команда — молчание')
+
+  // сессия сорок минут назад: инструмент «running» в базе уже не ожидание
+  const stale = stateWith({
+    ...base,
+    busy: false,
+    updatedAt: now - 40 * 60_000,
+    lastAssistantAt: now - 40 * 60_000,
+    tool: tool({ command: 'node --test tests/core/views.test.ts' }),
+  })
+  assert.equal(stale.kind, 'silent', 'старая сессия — молчание, даже если инструмент running')
+  if (stale.kind === 'silent') assert.ok(stale.silentMs >= 39 * 60_000, 'молчание считается от последнего сообщения')
 
   const silent = stateWith({ ...base, busy: false, tool: tool({ name: 'write' }) })
   assert.equal(silent.kind, 'silent', 'простой без тестов и фона — молчание')
@@ -400,6 +426,10 @@ test('состояние по последнему инструменту: ра�
     assert.equal(silent.taskId, task.id)
     assert.ok(silent.silentMs >= 299_000, 'молчание считается от последнего сообщения ассистента')
   }
+
+  // откат без данных остаётся: инструмента нет — молчание, а не выдуманное ожидание
+  const noData = stateWith({ ...base, busy: false, tool: null })
+  assert.equal(noData.kind, 'silent', 'нет данных об инструменте — молчание')
 
   assert.deepEqual(
     stateWith(null),
@@ -826,8 +856,36 @@ test('последний инструмент читается из session_mess
   })
 })
 
-test('фон виден по выводу, а битый JSON и отсутствие таблицы — откат без падения', () => {
+test('статус инструмента берётся из metadata, если в state его нет', () => {
   const now = Date.now()
+  const dbPath = liveDb([{ id: 'ses_meta', parentId: 'root', agent: 'worker-1', updatedAt: now }], {
+    messages: [
+      {
+        sessionId: 'ses_meta',
+        seq: 1,
+        at: now,
+        data: JSON.stringify({
+          content: [
+            {
+              type: 'tool',
+              name: 'shell',
+              state: {
+                input: { command: 'node --test tests/core/views.test.ts' },
+                metadata: { status: 'running' },
+              },
+              time: { created: now },
+            },
+          ],
+        }),
+      },
+    ],
+  })
+
+  const [session] = readLiveSessions({ dbPath, now })
+  assert.equal(session!.tool!.status, 'running', 'metadata.status — запасной источник статуса')
+})
+
+test('фон виден по выводу, а битый JSON и отсутствие таблицы — откат без падения', () => {  const now = Date.now()
   const background = JSON.stringify({
     content: [
       {

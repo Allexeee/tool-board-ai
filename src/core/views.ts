@@ -21,9 +21,9 @@ export type ExecutorState =
   | { kind: 'work'; taskId: string | null; title: string | null }
   /** Задача взята, но сессия простаивает: агент молчит уже silentMs. */
   | { kind: 'silent'; taskId: string; title: string; silentMs: number }
-  /** Задача взята, последний shell — тесты: ждём результата. */
+  /** Задача взята, последний shell ещё идёт и это тесты: ждём результата. */
   | { kind: 'test'; taskId: string }
-  /** Задача взята, последняя команда ушла в фон: ждём её. */
+  /** Задача взята, последняя команда ещё идёт в фоне: ждём её. */
   | { kind: 'command'; taskId: string }
   /** Задача в руке, но ещё не взята. */
   | { kind: 'reserved'; taskId: string }
@@ -461,12 +461,17 @@ function holderState(
       return { kind: 'work', taskId: task.id, title: task.title }
     }
 
-    // сессия простаивает: смотрим последний инструмент, а не гадаем
+    // сессия простаивает: смотрим последний инструмент, а не гадаем.
+    // ждём только живой инструмент в свежей сессии: завершённый тест — прошедшее
+    // время, и доска не должна выдавать его за ожидание. Ушёл агент — «молчит N мин».
     const tool = input.session.tool
-    if (tool && tool.name === 'shell' && tool.command !== null && tool.command.includes('--test')) {
-      return { kind: 'test', taskId: task.id }
+    const fresh = input.now - input.session.updatedAt <= LIVE_SESSION_TTL_MS
+    if (fresh && tool?.status === 'running') {
+      if (tool.name === 'shell' && tool.command !== null && tool.command.includes('--test')) {
+        return { kind: 'test', taskId: task.id }
+      }
+      if (tool.background) return { kind: 'command', taskId: task.id }
     }
-    if (tool && tool.background) return { kind: 'command', taskId: task.id }
 
     const since = input.session.lastAssistantAt ?? input.session.updatedAt
     return { kind: 'silent', taskId: task.id, title: task.title, silentMs: Math.max(0, input.now - since) }

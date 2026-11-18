@@ -385,7 +385,7 @@ export interface LiveTool {
   name: string
   /** Команда shell; null — инструмент не shell. */
   command: string | null
-  /** running, completed, error: как есть из базы. */
+  /** running, completed, error: как есть из базы; metadata.status — запасной источник. */
   status: string
   /** Когда инструмент запущен, epoch ms; 0 — время не записано. */
   at: number
@@ -452,17 +452,24 @@ function lastToolOf(message: unknown): LiveTool | null {
       input?: { command?: unknown } | null
       content?: unknown
       output?: unknown
-      metadata?: { background?: unknown } | null
+      metadata?: { background?: unknown; status?: unknown } | null
     }
     const name = typeof item.name === 'string' ? item.name : 'tool'
     const command = typeof state.input?.command === 'string' ? state.input.command : null
     const at = Number((item.time as { created?: unknown } | undefined)?.created ?? 0)
     const output = [textOf(state.output), textOf(state.content), textOf(state.metadata)].join(' ')
+    // статус бывает и в metadata: без него живой инструмент выглядел бы завершённым
+    const status =
+      typeof state.status === 'string'
+        ? state.status
+        : typeof state.metadata?.status === 'string'
+          ? state.metadata.status
+          : 'unknown'
 
     return {
       name,
       command: name === 'shell' ? command : null,
-      status: typeof state.status === 'string' ? state.status : 'unknown',
+      status,
       at: Number.isFinite(at) ? at : 0,
       // фон виден в выводе: «Command moved to the background» или metadata.background
       background: /background/i.test(output) || state.metadata?.background === true,

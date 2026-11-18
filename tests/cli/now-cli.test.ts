@@ -538,6 +538,85 @@ test('простой при активной задаче: команда в ф�
   assert.match(view.out, /w1\s+ждёт команды: T1/)
 })
 
+test('завершённый тест не считается ожиданием', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Тесты', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'T1'").run()
+  db.close()
+
+  const now = Date.now()
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(
+    dataHome,
+    [{ id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: false, updatedAt: now }],
+    [
+      {
+        sessionId: 'ses_1',
+        seq: 1,
+        at: now,
+        data: JSON.stringify({
+          content: [
+            {
+              type: 'tool',
+              name: 'shell',
+              state: { status: 'completed', input: { command: 'node --test tests/cli/now-cli.test.ts' } },
+              time: { created: now },
+            },
+          ],
+        }),
+      },
+    ],
+  )
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /ждёт результата теста/, 'тест уже закончился — это не ожидание')
+  assert.match(view.out, /w1\s+работает над T1 · молчит \d+ мин/, 'завершённый тест — молчание')
+})
+
+test('старая сессия не держит ожидание, даже если инструмент running', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Тесты', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'T1'").run()
+  db.close()
+
+  const now = Date.now()
+  const fortyMinutesAgo = now - 40 * 60_000
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(
+    dataHome,
+    [{ id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: false, updatedAt: fortyMinutesAgo }],
+    [
+      {
+        sessionId: 'ses_1',
+        seq: 1,
+        at: fortyMinutesAgo,
+        data: JSON.stringify({
+          content: [
+            {
+              type: 'tool',
+              name: 'shell',
+              state: { status: 'running', input: { command: 'node --test tests/cli/now-cli.test.ts' } },
+              time: { created: fortyMinutesAgo },
+            },
+          ],
+        }),
+      },
+    ],
+  )
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /ждёт результата теста/, 'сорок минут тишины — уже не ожидание')
+  assert.match(view.out, /w1\s+работает над T1 · молчит (40|41) мин/, 'старая сессия — молчание')
+})
+
 test('пустая очередь не печатает блок', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
