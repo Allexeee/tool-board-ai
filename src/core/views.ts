@@ -268,6 +268,10 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
 /**
  * Порядок проверок — от того, что можно исправить, к тому, что просто ждёт:
  * зависимость, статус, этап, каталог, навык, занятость. Всё остальное — недораздача.
+ *
+ * Этап, у которого есть владелец, решается по нему, а не глухим «этап у X»:
+ * владелец без навыка — это тупик «нет исполнителя», свободный владелец —
+ * «ждёт раздачи», и только занятый даёт «этап у X».
  */
 function reasonOf(input: {
   task: { status: TaskStatus; stageId: string | null; skill: string }
@@ -294,8 +298,15 @@ function reasonOf(input: {
   if (task.stageId !== null) {
     if (!place || place.status !== 'active') return 'этап не активен'
     if (!feature || feature.worktree === null) return 'нет каталога фичи'
-    // этап живёт в одном каталоге: пока его держит другая рука, раздача сюда не пойдёт
-    if (input.stageOwner) return `этап у ${input.stageOwner}`
+    // этап живёт в одном каталоге: пока его держит другая рука, раздача сюда не пойдёт.
+    // Но «этап у X» — не всегда настоящая помеха: у X может не быть навыка задачи
+    // (тогда тупик — «нет исполнителя»), а может быть и свободная рука (тогда ждёт раздачи).
+    if (input.stageOwner) {
+      const owner = executors.find((executor) => executor.id === input.stageOwner)
+      if (!owner || !owner.skills.includes(task.skill)) return `нет исполнителя: ${task.skill}`
+      if (isBusy(owner.id, owner.handSize)) return `этап у ${input.stageOwner}`
+      return queueFreeReason
+    }
   }
 
   const skilled = executors.filter((executor) => executor.skills.includes(task.skill))

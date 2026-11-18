@@ -106,10 +106,10 @@ test('источник версий из каталога и закреплён�
 test('версия проекта не подменяет версию инструмента', () => {
   const { dir, db, configPath } = project()
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'app', version: '0.0.1' }))
-  execFileSync('git', ['init', '-q'], { cwd: dir })
-  execFileSync('git', ['add', '.'], { cwd: dir })
-  execFileSync('git', ['-c', 'user.email=t@e.x', '-c', 'user.name=T', 'commit', '-q', '-m', 'init'], { cwd: dir })
-  execFileSync('git', ['-c', 'user.email=t@e.x', '-c', 'user.name=T', 'tag', 'v5.0.0'], { cwd: dir })
+  execFileSync('git', ['init', '-q'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['add', '.'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['-c', 'user.email=t@e.x', '-c', 'user.name=T', 'commit', '-q', '-m', 'init'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['-c', 'user.email=t@e.x', '-c', 'user.name=T', 'tag', 'v5.0.0'], { cwd: dir, windowsHide: true })
 
   const plan = planUpgrade(db, { toolRoot: toolRootPath, configPath })
 

@@ -195,14 +195,16 @@ export default async function command(args: ParsedArgs) {
       : requests
           .map((r) => {
             const parts: string[] = []
+            // статус в базе может отставать: запрос закрыт, когда закрыты все его фичи
+            const land = landState(db, r.id)
+            const status = r.status !== 'closed' && land !== null ? 'closed' : r.status
             const kind = r.status === 'closed' ? closeKind(db, r.id) : null
             if (kind) parts.push(kind === 'merged' ? 'объединён' : kind)
-            const land = landState(db, r.id)
             if (land) parts.push(land)
 
             const suffix = parts.length > 0 ? `  (${parts.join(' · ')})` : ''
             const review = r.reviewAt ? ` · до ${r.reviewAt}` : ''
-            return `${r.id.padEnd(5)} ${r.status.padEnd(8)} ${r.title}${suffix}${review}`
+            return `${r.id.padEnd(5)} ${status.padEnd(8)} ${r.title}${suffix}${review}`
           })
           .join('\n'),
   )

@@ -307,6 +307,34 @@ test('причина свободной задачи: этап держит др
   assert.equal(reasonOf(db, `${stageId}-2`), 'этап у w1')
 })
 
+test('владелец этапа без навыка задачи — тупик «нет исполнителя», а не «этап у X»', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(`${stageId}-1`)
+  createTask(db, {
+    stageId,
+    title: 'Записать выстрелы',
+    dod: ['a'],
+    size: 'S',
+    skill: 'audio',
+    class: 'standard',
+    scope: ['assets/**'],
+  })
+  refreshReady(db)
+
+  // w1 держит этап, но у него только backend: настоящая помеха — навык
+  assert.equal(reasonOf(db, `${stageId}-4`), 'нет исполнителя: audio')
+})
+
+test('владелец этапа свободен и с навыком — задача просто ждёт раздачи', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  // этап закреплён за w1, но руки свободны: он ещё не взял активную задачу
+  setHand(db, 'w1', [`${stageId}-2`], 'owner')
+
+  assert.equal(reasonOf(db, `${stageId}-3`), queueFreeReason)
+})
+
 test('причина свободной задачи: ждёт зависимость', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)

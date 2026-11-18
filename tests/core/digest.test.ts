@@ -121,6 +121,7 @@ test('команда review digest печатает тот же отчёт', () 
   const shown = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'review', 'digest'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
 
   assert.equal(shown.status, 0, shown.stderr)

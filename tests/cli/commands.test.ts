@@ -12,7 +12,7 @@ const bin = resolve('bin/toolbox-al.ts')
 const tmp = () => mkdtempSync(join(tmpdir(), 'tbal-cli-'))
 
 function run(dir: string, args: string[], tool = bin) {
-  const result = spawnSync(process.execPath, [tool, ...args], { cwd: dir, encoding: 'utf8' })
+  const result = spawnSync(process.execPath, [tool, ...args], { cwd: dir, encoding: 'utf8', windowsHide: true })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 
@@ -111,7 +111,7 @@ test('feature clean сообщает причину и возвращает ко
 
 test('init подсказывает закоммитить скелет в git-репозитории', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-init-git-'))
-  execFileSync('git', ['init', '-q'], { cwd: dir })
+  execFileSync('git', ['init', '-q'], { cwd: dir, windowsHide: true })
 
   const text = runInit(dir)
 
@@ -141,7 +141,7 @@ test('done без аргументов отвечает кодом 3, а не п
 
 test('init подсказывает создать dev, если её нет', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-init-dev-'))
-  execFileSync('git', ['init', '-q'], { cwd: dir })
+  execFileSync('git', ['init', '-q'], { cwd: dir, windowsHide: true })
 
   const text = runInit(dir)
   assert.match(text, /git branch dev/)
@@ -149,7 +149,7 @@ test('init подсказывает создать dev, если её нет', (
 
 test('init сообщает установленные git-хуки', () => {
   const dir = mkdtempSync(join(tmpdir(), 'al-init-hooks-'))
-  execFileSync('git', ['init', '-q'], { cwd: dir })
+  execFileSync('git', ['init', '-q'], { cwd: dir, windowsHide: true })
 
   const text = runInit(dir)
 

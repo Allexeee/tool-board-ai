@@ -16,26 +16,28 @@ function run(dir: string, args: string[]) {
     cwd: dir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
   return result
 }
 
 function repo() {
   const dir = mkdtempSync(join(tmpdir(), 'al-done-out-'))
-  execFileSync('git', ['init', '-q'], { cwd: dir })
-  execFileSync('git', ['config', 'user.email', 't@e.x'], { cwd: dir })
-  execFileSync('git', ['config', 'user.name', 'T'], { cwd: dir })
+  execFileSync('git', ['init', '-q'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['config', 'user.email', 't@e.x'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['config', 'user.name', 'T'], { cwd: dir, windowsHide: true })
   writeFileSync(join(dir, 'README.md'), 'x')
-  execFileSync('git', ['add', '.'], { cwd: dir })
-  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir })
-  execFileSync('git', ['branch', 'dev'], { cwd: dir })
-  execFileSync('git', ['checkout', '-q', 'dev'], { cwd: dir })
+  execFileSync('git', ['add', '.'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['branch', 'dev'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['checkout', '-q', 'dev'], { cwd: dir, windowsHide: true })
 
   run(dir, ['init'])
-  execFileSync('git', ['add', '.'], { cwd: dir })
+  execFileSync('git', ['add', '.'], { cwd: dir, windowsHide: true })
   execFileSync('git', ['commit', '-q', '-m', 'setup'], {
     cwd: dir,
     env: { ...process.env, AL_ALLOW: '1' },
+    windowsHide: true,
   })
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   run(dir, ['task', 'add', 'Правка', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
@@ -66,8 +68,8 @@ test('с --force-outside изменённый отслеживаемый фай�
   mkdirSync(join(dir, 'src'), { recursive: true })
   mkdirSync(join(dir, 'docs'), { recursive: true })
   writeFileSync(join(dir, 'docs/b.md'), 'старое')
-  execFileSync('git', ['add', 'docs/b.md'], { cwd: dir })
-  execFileSync('git', ['commit', '-m', 'docs'], { cwd: dir, env: { ...process.env, AL_ALLOW: '1' } })
+  execFileSync('git', ['add', 'docs/b.md'], { cwd: dir, windowsHide: true })
+  execFileSync('git', ['commit', '-m', 'docs'], { cwd: dir, env: { ...process.env, AL_ALLOW: '1' }, windowsHide: true })
 
   writeFileSync(join(dir, 'src/a.ts'), 'a')
   writeFileSync(join(dir, 'docs/b.md'), 'b')
@@ -78,6 +80,7 @@ test('с --force-outside изменённый отслеживаемый фай�
   const committed = execFileSync('git', ['show', '--name-only', '--pretty=format:', 'HEAD'], {
     cwd: dir,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.match(committed, /src\/a\.ts/)
   assert.match(committed, /docs\/b\.md/, 'правка отслеживаемого файла не должна теряться')
@@ -95,11 +98,12 @@ test('с --force-outside неотслеживаемый файл не попад
   const committed = execFileSync('git', ['show', '--name-only', '--pretty=format:', 'HEAD'], {
     cwd: dir,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.match(committed, /src\/a\.ts/)
   assert.doesNotMatch(committed, /\.env/, 'секрет не должен уехать в историю')
 
-  const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' })
+  const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8', windowsHide: true })
   assert.match(status, /\.env/, 'неотслеживаемый файл остался в дереве')
 })
 

@@ -11,12 +11,12 @@ const bin = resolve('bin/toolbox-al.ts')
 const flags = ['--dod', 'шаг сделан', '--size', 'XS', '--skill', 'backend', '--scope', 'src/**']
 
 function run(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', windowsHide: true })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 
 function git(dir: string, args: string[]) {
-  execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
 }
 
 /**
@@ -25,7 +25,7 @@ function git(dir: string, args: string[]) {
  */
 function repo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'al-take-'))
-  execFileSync('git', ['init', '-q'], { cwd: dir })
+  execFileSync('git', ['init', '-q'], { cwd: dir, windowsHide: true })
   git(dir, ['config', 'user.email', 't@e.x'])
   git(dir, ['config', 'user.name', 'T'])
   writeFileSync(join(dir, 'README.md'), 'x')
@@ -41,6 +41,7 @@ function repo(): string {
   execFileSync('git', ['commit', '-q', '-m', 'setup'], {
     cwd: dir,
     env: { ...process.env, AL_ALLOW: '1' },
+    windowsHide: true,
   })
 
   run(dir, ['task', 'add', 'Первый шаг', ...flags])

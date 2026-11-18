@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite'
 const bin = resolve('bin/toolbox-al.ts')
 
 function run(dir: string, args: string[], input?: string) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', input })
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', input, windowsHide: true })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 

@@ -257,6 +257,7 @@ test('dry-run показывает отложенные задачи и их п�
   const shown = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(shown.status, 0, shown.stderr)
   assert.match(shown.stdout, /НЕ ВОШЛО, ЖДЁТ РЕШЕНИЯ/)
@@ -353,6 +354,7 @@ test('release предупреждает, что ревью прогона не 
   const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(dry.status, 0, dry.stderr)
   assert.match(dry.stdout, /РЕВЬЮ ПРОГОНА:/)
@@ -363,6 +365,7 @@ test('release предупреждает, что ревью прогона не 
   const after = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(after.status, 0, after.stderr)
   assert.doesNotMatch(after.stdout, /ревью не было/)
@@ -379,6 +382,7 @@ test('ревью с находками тоже оставляет предуп�
   const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(dry.status, 0, dry.stderr)
   assert.match(dry.stdout, /ревью прогона RUN1 нашло замечания/)
@@ -394,7 +398,7 @@ test('настоящий релиз предупреждает о ревью, н
   const released = spawnSync(
     process.execPath,
     [resolve('bin/toolbox-al.ts'), 'release', 'minor', '--reason', 'прогон закончен', '--review', 'none'],
-    { cwd: root, encoding: 'utf8' },
+    { cwd: root, encoding: 'utf8', windowsHide: true },
   )
 
   assert.equal(released.status, 0, released.stderr)
@@ -409,6 +413,7 @@ test('релиз без закрытого прогона о ревью молч
   const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(dry.status, 0, dry.stderr)
   assert.doesNotMatch(dry.stdout, /РЕВЬЮ ПРОГОНА/)
@@ -429,6 +434,7 @@ test('закрытый владельцем прогон не прячет не�
   const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(dry.status, 0, dry.stderr)
   assert.match(dry.stdout, /ревью не было: 1 этап не проверялся, предлагаю run review RUN1/)
@@ -439,6 +445,7 @@ test('закрытый владельцем прогон не прячет не�
   const after = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(after.status, 0, after.stderr)
   assert.doesNotMatch(after.stdout, /РЕВЬЮ ПРОГОНА/)
@@ -456,6 +463,7 @@ test('непроверенных прогонов несколько — пре�
   const dry = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.equal(dry.status, 0, dry.stderr)
   assert.match(dry.stdout, /предлагаю run review RUN2/)
@@ -465,6 +473,7 @@ test('непроверенных прогонов несколько — пре�
   const middle = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.match(middle.stdout, /предлагаю run review RUN2/)
 
@@ -472,6 +481,7 @@ test('непроверенных прогонов несколько — пре�
   const after = spawnSync(process.execPath, [resolve('bin/toolbox-al.ts'), 'release', '--dry-run'], {
     cwd: root,
     encoding: 'utf8',
+    windowsHide: true,
   })
   assert.doesNotMatch(after.stdout, /РЕВЬЮ ПРОГОНА/)
 })

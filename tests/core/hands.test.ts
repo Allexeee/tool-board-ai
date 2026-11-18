@@ -638,12 +638,12 @@ const bin = resolve('bin/toolbox-al.ts')
 const taskFlags = ['--dod', 'шаг сделан', '--size', 'XS', '--skill', 'backend', '--scope', 'src/**']
 
 function spawnCli(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', windowsHide: true })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 
 function gitIn(dir: string, args: string[], env?: NodeJS.ProcessEnv) {
-  execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env })
+  execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true })
 }
 
 /** Проект на ветке dev, где done коммитит в корне: рука из T1 и T2, свободная T3. */
