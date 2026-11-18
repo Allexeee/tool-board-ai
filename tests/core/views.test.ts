@@ -497,7 +497,7 @@ test('сданная на ревью задача видна у исполнит
   assert.deepEqual(state, { kind: 'review', taskId: task.id }, 'кто сдал — тот и на ревью')
 })
 
-test('задача на ревью — работа этапа, в очереди причина «на ревью»', () => {
+test('задача на ревью — работа этапа, но не задача очереди', () => {
   const db = openDb(':memory:')
   seed(db)
   const first = db.prepare('select id from tasks order by id limit 1').get() as { id: string }
@@ -513,8 +513,8 @@ test('задача на ревью — работа этапа, в очеред�
   assert.equal(review.status, active.status)
   assert.deepEqual(review.progress, active.progress, 'счёт этапа как у активной')
 
-  const row = taskQueue(db).find((item) => item.taskId === first.id)!
-  assert.equal(row.reason, 'на ревью')
+  // взять её нельзя, а у исполнителя она уже показана: в очереди ей не место
+  assert.equal(taskQueue(db).find((item) => item.taskId === first.id), undefined, 'ревью не в очереди')
 })
 
 test('снятая занятость исчезает из now', () => {

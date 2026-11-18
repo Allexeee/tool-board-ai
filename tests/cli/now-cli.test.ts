@@ -313,7 +313,7 @@ test('фича без решений печатается как раньше', 
   assert.doesNotMatch(view.out, /→/)
 })
 
-test('задача на ревью: этап в работе, в очереди причина на ревью', () => {
+test('задача на ревью: этап в работе, в очереди её нет', () => {
   const dir = project()
   run(dir, ['request', 'add', 'Платежи'])
   run(dir, ['feature', 'add', 'Платежи', '--request', 'R1'])
@@ -329,8 +329,74 @@ test('задача на ревью: этап в работе, в очереди 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.match(view.out, /^\tF1\s+0\/1\s+wip\s+Платежи$/m, 'этап в работе, а не pending')
-  assert.match(view.out, /F1\.S1-1\s+Шаг · на ревью/)
-  assert.doesNotMatch(view.out, /не готова: in_review/)
+  assert.doesNotMatch(view.out, /F1\.S1-1\s+Шаг/, 'задачу на ревью взять нельзя — в очереди её нет')
+  assert.doesNotMatch(view.out, /ОЧЕРЕДЬ/, 'брать нечего — блока нет')
+})
+
+test('задача на ревью видна у исполнителя и не дублируется в очереди', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Ревью', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'in_review', holder = null where id = 'T1'").run()
+  db.prepare(
+    "insert into events (at, type, actor, subject, before, after, note) values (?, 'task.done', 'w1', 'T1', null, ?, null)",
+  ).run(new Date().toISOString(), JSON.stringify({ summary: 'сделано', checks: [] }))
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+на ревью: T1/, 'у исполнителя ревью остаётся')
+  assert.doesNotMatch(view.out, /^\tОЧЕРЕДЬ$/m, 'в очереди ревью нет')
+  assert.doesNotMatch(view.out, /T1\s+Ревью/, 'второй строки с той же задачей нет')
+})
+
+test('now --json: working совпадает с state', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['executor', 'add', 'w2', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Тесты', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'T1'").run()
+  db.close()
+
+  const now = Date.now()
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(
+    dataHome,
+    [{ id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: false, updatedAt: now }],
+    [
+      {
+        sessionId: 'ses_1',
+        seq: 1,
+        at: now,
+        data: JSON.stringify({
+          content: [
+            {
+              type: 'tool',
+              name: 'shell',
+              state: { status: 'running', input: { command: 'node --test tests/cli/now-cli.test.ts' } },
+              time: { created: now },
+            },
+          ],
+        }),
+      },
+    ],
+  )
+
+  const view = run(dir, ['now', '--json'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  const data = JSON.parse(view.out) as {
+    holders: Array<{ executor: string; working: boolean; state: { kind: string } }>
+  }
+  const holder = (id: string) => data.holders.find((item) => item.executor === id)!
+
+  assert.equal(holder('w1').state.kind, 'test')
+  assert.equal(holder('w1').working, true, 'ожидание теста — работа, а не простой')
+  assert.equal(holder('w2').state.kind, 'rest')
+  assert.equal(holder('w2').working, false, 'отдых — не работа')
 })
 
 test('пул-задача видна в ОЧЕРЕДИ, отдельного блока ПУЛ нет', () => {

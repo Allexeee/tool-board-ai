@@ -42,6 +42,19 @@ export const LIVE_SESSION_TTL_MS = 15 * 60 * 1000
 export const OFFLINE_AFTER_MS = 120 * 60 * 1000
 
 /**
+ * Состояния, которые считаются работой. Один источник для строки доски и для
+ * поля `working` в JSON: ожидание теста, ревью и резерв — тоже работа.
+ */
+const WORKING_KINDS = new Set<ExecutorState['kind']>([
+  'work',
+  'silent',
+  'test',
+  'command',
+  'review',
+  'reserved',
+])
+
+/**
  * Сессия без исполнителя говорит владельцу только о живой работе: занята и
  * обновлялась за последние 15 минут. Простаивающие и старые не печатаются вовсе.
  */
@@ -211,7 +224,12 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
   }
 
   const tasks = listTasks(db).filter(
-    (task) => task.status !== 'done' && task.status !== 'cancelled' && task.status !== 'deferred',
+    (task) =>
+      task.status !== 'done' &&
+      task.status !== 'cancelled' &&
+      task.status !== 'deferred' &&
+      // задача на ревью уже не в очереди: её не взять, и у исполнителя она видна
+      task.status !== 'in_review',
   )
 
   const depth = new Map<string, number>()
@@ -324,8 +342,6 @@ function reasonOf(input: {
   if (waitsFor.length > 0) return `ждёт ${waitsFor.join(', ')}`
 
   if (task.status !== 'ready') {
-    // ревью — это работа, а не простой: задача сдана и ждёт вердикта
-    if (task.status === 'in_review') return 'на ревью'
     // refreshReady превращает задачи неактивного этапа в planned:
     // владельцу важна причина «этап не активен», а не название статуса.
     if (task.status === 'planned' && task.stageId !== null && place?.status !== 'active') {
@@ -373,7 +389,7 @@ export interface NowView {
     session: string | null
     /** занятость без задачи: причина и срок; null — свободен */
     busy: { reason: string; until: string } | null
-    /** есть работа: держит задачу, имеет руку или (для worker-0) идёт прогон */
+    /** Работа ли это по состоянию: одно и то же с строкой доски, не второй счётчик. */
     working: boolean
     /** Что показать в строке: работает над задачей, ждёт причину или отдыхает. */
     state: ExecutorState
@@ -599,9 +615,18 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
     // работа — это своя задача, непустая рука или (у оркестратора) идущий прогон.
     // субагенты считаются чужой работой: пока они живы, worker-0 сам не работает.
     const running = executor.id === 'worker-0' && run !== null
-    const working = active.length > 0 || hand.length > 0 || running
     // живая сессия агента: у одного их может быть несколько, берём свежую — она первая
     const session = (options.sessions ?? []).find((item) => item.agent === executor.id) ?? null
+    const state = holderState(db, {
+      active,
+      hand: handTasks,
+      busy: busyState,
+      running,
+      session,
+      review: reviewOf.get(executor.id) ?? null,
+      lastSeen: executor.lastSeen,
+      now,
+    })
     return {
       executor: executor.id,
       session: executor.session,
@@ -609,17 +634,9 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
       active: active.map((task) => task.id),
       hand,
       busy: busyState,
-      working,
-      state: holderState(db, {
-        active,
-        hand: handTasks,
-        busy: busyState,
-        running,
-        session,
-        review: reviewOf.get(executor.id) ?? null,
-        lastSeen: executor.lastSeen,
-        now,
-      }),
+      // одно поле, один источник: working не спорит с тем, что видит владелец в строке
+      working: WORKING_KINDS.has(state.kind),
+      state,
     }
   })
 
