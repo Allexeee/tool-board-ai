@@ -450,3 +450,40 @@ test('тариф и лимит читаются из конфига проект
   assert.equal(end.agents[0]!.amount, 9)
   assert.equal(end.agents[0]!.percent, 30)
 })
+
+test('чужие проекты в замер не попадают', () => {
+  const root = makeRoot()
+  const db = projectDb()
+  startProfile(db, { root, label: '1 агент', now: new Date(START) })
+
+  const dbPath = makeOpencodeDb([], {
+    schema: `
+      create table session_v2 (
+        id text primary key,
+        agent text,
+        tokens_input integer,
+        tokens_output integer,
+        cost real,
+        time_created integer,
+        time_updated integer,
+        directory text
+      )
+    `,
+  })
+  const writer = new DatabaseSync(dbPath)
+  const insert = writer.prepare(
+    'insert into session_v2 (id, agent, tokens_input, tokens_output, cost, time_created, time_updated, directory) values (?, ?, ?, ?, ?, ?, ?, ?)',
+  )
+  insert.run('ses_own', 'worker-1', 100, 10, 0, START, START + 1_000, root)
+  insert.run('ses_slot', 'worker-1', 50, 5, 0, START, START + 1_000, join(root, '.worktrees', 'f1'))
+  insert.run('ses_foreign', 'build', 9_000_000, 0, 9, START, START + 1_000, 'D:/other-project')
+  writer.close()
+
+  const end = endProfile({ root, dbPath, now: new Date(START + 60_000) })
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  assert.deepEqual(end.agents.map((agent) => agent.agent), ['worker-1'])
+  assert.equal(end.totals.input, 150, 'только свои сессии: 100 + 50')
+  assert.equal(end.totals.sessions, 2)
+})

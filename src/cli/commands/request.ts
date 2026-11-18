@@ -1,6 +1,6 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { addRequest, closeKind, closeRequest, editRequest, landState, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
+import { addRequest, closeKind, closeRequest, editRequest, finishedByFeatures, landState, getRequest, listRequests, laterRequest, openRequests, mergeRequests, removeRequest, reopenRequest, splitRequest } from '../../core/requests.ts'
 import { listEvents } from '../../core/events.ts'
 import { listFeatures } from '../../core/features.ts'
 import { getQuestions } from '../../core/questions.ts'
@@ -197,7 +197,8 @@ export default async function command(args: ParsedArgs) {
             const parts: string[] = []
             // статус в базе может отставать: запрос закрыт, когда закрыты все его фичи
             const land = landState(db, r.id)
-            const status = r.status !== 'closed' && land !== null ? 'closed' : r.status
+            const finished = finishedByFeatures(db, r.id)
+            const status = r.status !== 'closed' && (land !== null || finished) ? 'closed' : r.status
             const kind = r.status === 'closed' ? closeKind(db, r.id) : null
             if (kind) parts.push(kind === 'merged' ? 'объединён' : kind)
             if (land) parts.push(land)

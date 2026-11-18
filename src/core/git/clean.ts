@@ -70,7 +70,6 @@ export function cleanWorktree(
   if (ignored.length > 0) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const target = join(input.root, '.toolbox-al', 'rescued', featureSlug(feature), stamp)
-    if (process.env.AL_DEBUG) console.error('TARGET=', target, 'ROOT=', input.root)
 
     for (const relative of ignored) {
       const from = join(dir, relative)
@@ -200,6 +199,31 @@ interface SweepConfig {
   worktreePool?: number | undefined
 }
 
+/**
+ * Удаление ветки не должно валить слияние: если ветку держит рабочий каталог,
+ * оставляем её до следующей уборки и говорим об этом событием.
+ */
+function tryDeleteBranch(
+  db: DatabaseSync,
+  root: string,
+  branch: string,
+  featureId: string,
+  actor: string,
+): boolean {
+  try {
+    runGit(root, ['branch', '-D', branch])
+    return true
+  } catch (error) {
+    appendEvent(db, {
+      type: 'feature.cleanup_skipped',
+      actor,
+      subject: featureId,
+      note: `${branch}: ${(error as Error).message}`,
+    })
+    return false
+  }
+}
+
 /** Убирает то, что уже не нужно: слитые старые ветки и отменённые фичи после выдержки. */
 export function sweepBranches(
   db: DatabaseSync,
@@ -224,7 +248,10 @@ export function sweepBranches(
         continue
       }
 
-      runGit(input.root, ['branch', '-D', branch])
+      if (!tryDeleteBranch(db, input.root, branch, feature.id, input.actor)) {
+        result.kept.push(branch)
+        continue
+      }
       db.prepare('update features set branch = null where id = ?').run(feature.id)
       appendEvent(db, {
         type: 'feature.branch_deleted',
@@ -262,8 +289,20 @@ export function sweepBranches(
     if (!branch || !branchExists(input.root, branch)) continue
 
     const tag = archiveTag(feature)
-    runGit(input.root, ['tag', '-f', tag, branch])
-    runGit(input.root, ['branch', '-D', branch])
+    try {
+      runGit(input.root, ['tag', '-f', tag, branch])
+      runGit(input.root, ['branch', '-D', branch])
+    } catch (error) {
+      // уборка не должна валить слияние: занятую каталогом ветку оставим до следующего раза
+      appendEvent(db, {
+        type: 'feature.cleanup_skipped',
+        actor: input.actor,
+        subject: feature.id,
+        note: `${branch}: ${(error as Error).message}`,
+      })
+      result.kept.push(branch)
+      continue
+    }
     db.prepare('update features set branch = null where id = ?').run(feature.id)
     appendEvent(db, {
       type: 'feature.branch_deleted',

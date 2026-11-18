@@ -5,7 +5,7 @@ import { UserError } from '../cli/errors.ts'
 import { readConfig, type Config } from './config.ts'
 import { listExecutors } from './executors.ts'
 import { activeRun } from './runs.ts'
-import { opencodeDbPath, type Pricing } from './usage.ts'
+import { belongsToProject, normalizeDirectory, opencodeDbPath, type Pricing } from './usage.ts'
 
 // ─── профайлер прогона: замер, который можно сравнить ───────────────────────
 //
@@ -243,6 +243,7 @@ interface SessionRow {
   updated: number
   busy: number | null
   idle: number | null
+  directory: string | null
 }
 
 const num = (value: unknown): number | null =>
@@ -319,7 +320,13 @@ const unavailable = (dbPath: string, reason: string): ProfileUnavailable => ({
  */
 function readWindow(
   dbPath: string,
-  window: { since: number; until: number; pricing?: Pricing | null | undefined },
+  window: {
+    since: number
+    until: number
+    pricing?: Pricing | null | undefined
+    /** Каталог проекта: сессии других проектов в замер не входят. */
+    projectDir?: string | undefined
+  },
 ): ProfileWindow {
   if (!existsSync(dbPath)) return unavailable(dbPath, `база OpenCode не найдена — ${dbPath}`)
 
@@ -357,14 +364,24 @@ function readWindow(
       `${mark('time_created')} as created, ` +
       'time_updated as updated, ' +
       `${mark('time_busy')} as busy, ` +
-      `${mark('time_idle')} as idle ` +
-      'from session_v2 where time_updated >= ? order by time_updated, id'
+      `${mark('time_idle')} as idle, ` +
+      `${mark('directory')} as directory ` +
+      'from session_v2 where time_updated >= ?' +
+      (columns.has('time_archived') ? ' and time_archived is null' : '') +
+      ' order by time_updated, id'
 
     let rows: SessionRow[]
     try {
       rows = db.prepare(sql).all(window.since) as unknown as SessionRow[]
     } catch (error) {
       return unavailable(dbPath, `таблица session_v2 не читается — ${(error as Error).message}`)
+    }
+
+    // чужой проект в замер не попадает: иначе цена и процент считаются по всей машине.
+    // База без колонки directory не даёт различить проекты — тогда фильтровать нечем.
+    if (columns.has('directory') && window.projectDir) {
+      const project = normalizeDirectory(window.projectDir)
+      rows = rows.filter((row) => belongsToProject(row.directory, project))
     }
 
     interface Acc {
@@ -561,6 +578,7 @@ export function endProfile(options: EndOptions): ProfileEnd {
     since: Number.isNaN(startedAt) ? now.getTime() : startedAt,
     until: now.getTime(),
     pricing,
+    projectDir: options.root,
   })
 
   return { marker, durationMs, ...window }

@@ -78,7 +78,7 @@ export function listRequests(db: DatabaseSync): Request[] {
  * Запрос закрыт, когда все его фичи закрыты — это тот же признак, что печатает `request show`.
  * Иначе статус в базе остаётся inbox, и запрос висит в списке, хотя работы по нему нет.
  */
-function finishedByFeatures(db: DatabaseSync, requestId: string): boolean {
+export function finishedByFeatures(db: DatabaseSync, requestId: string): boolean {
   const rows = db
     .prepare('select status from features where request_id = ?')
     .all(requestId) as Array<{ status: string }>

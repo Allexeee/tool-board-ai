@@ -149,12 +149,11 @@ function renderUsage(report: UsageReport): string {
     percentText(agent.percent),
   ])
 
+  // «итого» — та же база, что у строк: cost из базы, а где его нет — цена по тарифу
   const totalPercent =
     report.budget === null || report.basis === 'share'
       ? 100
-      : report.basis === 'cost'
-        ? (report.totals.cost / report.budget) * 100
-        : (report.totals.amount / report.budget) * 100
+      : (report.totals.amount / report.budget) * 100
   rows.push([
     'итого',
     num(report.totals.sessions),
@@ -179,11 +178,15 @@ function renderUsage(report: UsageReport): string {
 
   lines.push(render(header), ...rows.map(render))
 
+  // часть агентов может быть без cost: их цена посчитана по тарифу — подпись не должна врать
+  const mixed = report.basis === 'cost' && report.totals.amount > report.totals.cost
   const basis =
     report.basis === 'cost'
       ? report.budget === null
         ? 'процент: доля агента от общего cost (бюджет не задан)'
-        : `процент: cost из базы от бюджета ${money(report.budget)}`
+        : mixed
+          ? `процент: cost из базы, где его нет — по тарифу, от бюджета ${money(report.budget)}`
+          : `процент: cost из базы от бюджета ${money(report.budget)}`
       : report.basis === 'tariff'
         ? report.budget === null
           ? 'процент: доля агента от общего расхода по тарифу (бюджет не задан)'

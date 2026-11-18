@@ -158,7 +158,7 @@ const hasTable = (db: DatabaseSync, name: string): boolean =>
   Boolean(db.prepare("select 1 from sqlite_master where type = 'table' and name = ?").get(name))
 
 /** Путь проекта в одном виде: прямые слэши, без хвоста, Windows — без регистра. */
-function normalizeDirectory(value: string): string {
+export function normalizeDirectory(value: string): string {
   const slashed = value.replace(/\\/g, '/').replace(/\/+$/, '')
   return /^[A-Za-z]:/.test(slashed) ? slashed.toLowerCase() : slashed
 }
@@ -167,7 +167,7 @@ function normalizeDirectory(value: string): string {
  * Свои сессии — каталог проекта и его рабочие каталоги фич.
  * project_id не годится: у одного каталога в базе встречается несколько id.
  */
-function belongsToProject(directory: string | null, project: string): boolean {
+export function belongsToProject(directory: string | null, project: string): boolean {
   if (!directory) return false
   const session = normalizeDirectory(directory)
   return session === project || session.startsWith(`${project}/.worktrees/`)

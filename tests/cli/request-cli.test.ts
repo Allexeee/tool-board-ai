@@ -295,3 +295,18 @@ test('request --text-file важнее --body и говорит об этом', 
   assert.doesNotMatch(shown.out, /Тело из строки/)
 })
 
+
+test('request list не держит запрос, закрытый по фичам', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'al-req-closed-'))
+  run(dir, ['init'])
+  run(dir, ['request', 'add', 'Оплата'])
+  run(dir, ['feature', 'add', 'Оплата', '--request', 'R1'])
+  const abandoned = run(dir, ['feature', 'abandon', 'F1', '--reason', 'передумали'])
+  assert.equal(abandoned.code, 0, abandoned.err)
+
+  const list = run(dir, ['request', 'list'])
+  assert.match(list.out, /R1\s+closed/)
+
+  const open = run(dir, ['request', 'open'])
+  assert.match(open.out, /открытых запросов нет/)
+})
