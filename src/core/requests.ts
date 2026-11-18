@@ -74,8 +74,22 @@ export function listRequests(db: DatabaseSync): Request[] {
   return (db.prepare('select * from requests order by created_at, id').all() as unknown as Row[]).map(toRequest)
 }
 
+/**
+ * Запрос закрыт, когда все его фичи закрыты — это тот же признак, что печатает `request show`.
+ * Иначе статус в базе остаётся inbox, и запрос висит в списке, хотя работы по нему нет.
+ */
+function finishedByFeatures(db: DatabaseSync, requestId: string): boolean {
+  const rows = db
+    .prepare('select status from features where request_id = ?')
+    .all(requestId) as Array<{ status: string }>
+
+  return rows.length > 0 && rows.every((row) => row.status === 'done' || row.status === 'cancelled')
+}
+
 export function openRequests(db: DatabaseSync): Request[] {
-  return listRequests(db).filter((request) => request.status !== 'closed')
+  return listRequests(db).filter(
+    (request) => request.status !== 'closed' && !finishedByFeatures(db, request.id),
+  )
 }
 
 export type LandState = 'main' | 'dev'
