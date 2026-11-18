@@ -137,7 +137,7 @@ export function mergeStage(
     }
 
     // фича закрыта: рабочий каталог больше не нужен, ветка остаётся историей
-    cleanWorktree(db, { featureId: feature.id, root: input.root, actor: 'system' })
+    cleanWorktree(db, { featureId: feature.id, root: input.root, actor: 'system', config: input.config })
   } else {
     activateNextStage(db, feature.id)
   }

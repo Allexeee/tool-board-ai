@@ -106,14 +106,16 @@ test('запрос не закрывается, пока у него есть д
   assert.notEqual(getRequest(db, feature.requestId!)!.status, 'closed')
 })
 
-test('после слияния каталог фичи удаляется, а ветка остаётся', () => {
+test('после слияния слот возвращается в пул, а ветка остаётся', () => {
   const { root, db, config, stage, feature, worktree } = mergedReadyFixture()
   mergeStage(db, { root, stageId: stage.id, config })
 
-  assert.equal(existsSync(worktree), false)
+  assert.equal(existsSync(worktree), true, 'каталог не удаляется: он вернулся в пул')
   assert.equal(getFeature(db, feature.id)!.worktree, null)
   const branch = getFeature(db, feature.id)!.branch!
   assert.ok(runGit(root, ['branch', '--list', branch]).length > 0)
+  assert.equal(runGit(worktree, ['status', '--porcelain']), '', 'слот чист')
+  assert.equal(runGit(worktree, ['rev-parse', 'HEAD']), runGit(root, ['rev-parse', 'dev']))
 })
 
 test('грязный каталог спасается коммитом и тегом', () => {
@@ -122,7 +124,8 @@ test('грязный каталог спасается коммитом и те�
 
   mergeStage(db, { root, stageId: stage.id, config })
 
-  assert.equal(existsSync(worktree), false)
+  assert.equal(existsSync(worktree), true, 'слот остался в пуле')
+  assert.equal(runGit(worktree, ['status', '--porcelain']), '', 'грязь не переехала в слот')
   const tags = runGit(root, ['tag', '--list', 'archive/*'])
   assert.match(tags, /archive\//)
   const branch = getFeature(db, feature.id)!.branch!

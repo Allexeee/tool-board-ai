@@ -63,7 +63,7 @@ export default async function command(args: ParsedArgs) {
     }
 
     const what = [
-      result.removed ? 'каталог убран' : 'каталога не было',
+      result.returned ? 'слот возвращён в пул' : result.removed ? 'каталог убран' : 'каталога не было',
       result.rescued ? 'наработки спасены в тег' : null,
       result.branchDeleted ? 'ветка удалена' : null,
     ]

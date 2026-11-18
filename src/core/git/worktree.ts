@@ -39,7 +39,9 @@ export function isRegisteredWorktree(root: string, dir: string): boolean {
     .some((line) => normalizePath(line.slice('worktree '.length).trim()) === wanted)
 }
 
-const alreadyCheckedOut = (error: unknown): boolean => /already checked out/i.test((error as Error).message)
+// git говорит по-разному: "already checked out" и "is already used by worktree"
+const alreadyCheckedOut = (error: unknown): boolean =>
+  /already checked out|is already used by worktree/i.test((error as Error).message)
 
 /** Ветку нельзя взять вторым каталогом: тогда голова отвязана, содержимое то же. */
 function addWorktree(root: string, worktree: string, dev: string): void {
