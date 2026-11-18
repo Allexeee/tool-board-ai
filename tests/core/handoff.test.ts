@@ -8,10 +8,10 @@ import { SCHEMA_VERSION } from '../../src/core/schema.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage } from '../../src/core/stages.ts'
-import { createTask, getTask } from '../../src/core/tasks.ts'
+import { createTask, getTask, updateTask } from '../../src/core/tasks.ts'
 import { ask } from '../../src/core/questions.ts'
 import { listEvents } from '../../src/core/events.ts'
-import { getRunRecord, startRun } from '../../src/core/runs.ts'
+import { getRunRecord, runCursor, startRun } from '../../src/core/runs.ts'
 import {
   collectHandoff,
   latestHandoff,
@@ -361,3 +361,45 @@ test('resume закрытого прогона не подхватывает', (
   assert.throws(() => resumeRun(db, { root: dir }), /уже закрыт: подхватывать нечего.*run report RUN1/s)
 })
 
+
+test('две сессии доводят план без потерь и повторов', () => {
+  const db = openDb(':memory:')
+  const dir = root()
+
+  const request = addRequest(db, { title: 'Эстафета', body: '', author: 'owner' })
+  const run = startRun(db, { mode: 'plan', requests: [request.id] })
+  const feature = addFeature(db, { requestId: request.id, name: 'Эстафета', rank: 1 })
+  setFeatureBranch(db, feature.id, 'feat/x', 'D:/tmp/x')
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '1 день' })
+  db.prepare("update stages set status = 'active' where id = ?").run(stage.id)
+
+  const task = (title) =>
+    createTask(db, {
+      stageId: stage.id,
+      title,
+      dod: ['a'],
+      size: 'S',
+      skill: 'backend',
+      class: 'standard',
+      scope: ['src/**'],
+    })
+
+  const first = task('Первый шаг')
+  const second = task('Второй шаг')
+  updateTask(db, first.id, { status: 'done' })
+  updateTask(db, second.id, { status: 'ready' })
+
+  // первая сессия: часть закрыта, эстафета оставлена
+  const handoff = writeHandoff(db, run.id, { root: dir })
+  assert.match(handoff.nextStep, new RegExp(second.id.replace('.', '\\.')))
+  assert.match(handoff.nextStep, /осталось 1 из 2/)
+
+  // вторая сессия поднимает эстафету: ничего не потеряно и не задвоено
+  const brief = resumeRun(db, { root: dir })
+  assert.deepEqual(brief.released, [])
+  assert.ok(brief.queue.some((row) => row.id === second.id))
+
+  // и доводит план до конца
+  updateTask(db, second.id, { status: 'done' })
+  assert.equal(runCursor(db, run.id)?.remaining, 0)
+})
