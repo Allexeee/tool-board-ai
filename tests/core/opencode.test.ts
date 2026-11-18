@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   AGENTS_BEGIN,
   AGENTS_END,
@@ -322,4 +323,32 @@ test('скилл требует спеку до плана', () => {
   assert.match(skill, /Спека до плана/)
   assert.match(skill, /docs\/specs/)
   assert.match(skill, /брейншторм/)
+})
+
+test('плагин не подставляет фиктивного исполнителя', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
+
+  assert.match(plugin, /withExecutor/)
+  assert.match(plugin, /pickExecutor/)
+  assert.doesNotMatch(plugin, /\?\? 'worker'/)
+})
+
+test('вызов CLI ограничен по времени и буферу', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
+
+  assert.match(plugin, /timeout: 120_000/)
+  assert.match(plugin, /maxBuffer: 8 \* 1024 \* 1024/)
+})
+
+test('плагин сверяет версию CLI', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
+
+  assert.match(plugin, /checkVersion/)
+  assert.match(plugin, /PLUGIN_VERSION/)
 })
