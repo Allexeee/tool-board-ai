@@ -2,6 +2,7 @@
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
 import { inbox, type OwnerItem } from '../../core/questions.ts'
+import { openRequests } from '../../core/requests.ts'
 import { nowView } from '../../core/views.ts'
 import type { Stage } from '../../core/stages.ts'
 import { ok } from '../output.ts'
@@ -34,9 +35,12 @@ export default async function command() {
     .join('\n\n')
 
   const view = nowView(db)
+  // В этом блоке ждут только запросы из inbox: отложенные (`request later`) и уже
+  // разобранные владельцем решением не ждут, и печатать их — врать.
+  const waiting = openRequests(db).filter((request) => request.status === 'inbox')
   const extra: string[] = []
-  if (view.requests.length > 0) {
-    extra.push('ЗАПРОСЫ В INBOX\n' + view.requests.map((r) => `  ${r.id.padEnd(5)} ${r.title}`).join('\n'))
+  if (waiting.length > 0) {
+    extra.push('ЗАПРОСЫ В INBOX\n' + waiting.map((r) => `  ${r.id.padEnd(5)} ${r.title}`).join('\n'))
   }
   if (view.plans.length > 0) {
     extra.push(

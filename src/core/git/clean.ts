@@ -67,23 +67,31 @@ export function cleanWorktree(
 
   // ignored-файлы не тащим в git: секреты и node_modules в истории недопустимы.
   // Складываем их рядом, в .toolbox-al/rescued, который сам игнорируется.
+  // Один нечитаемый файл (симлинк, спецфайл, каталог) не должен ронять всю уборку:
+  // пропускаем его и говорим об этом событием, а уже скопированное остаётся.
   if (ignored.length > 0) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const target = join(input.root, '.toolbox-al', 'rescued', featureSlug(feature), stamp)
+    let copied = 0
 
     for (const relative of ignored) {
       const from = join(dir, relative)
       if (!existsSync(from)) continue
       const to = join(target, relative)
-      mkdirSync(dirname(to), { recursive: true })
-      copyFileSync(from, to)
+      try {
+        mkdirSync(dirname(to), { recursive: true })
+        copyFileSync(from, to)
+        copied += 1
+      } catch {
+        continue
+      }
     }
 
     appendEvent(db, {
       type: 'feature.ignored_rescued',
       actor: input.actor,
       subject: feature.id,
-      after: { dir: target, files: ignored.length },
+      after: { dir: target, files: copied, skipped: ignored.length - copied },
     })
   }
 
@@ -107,8 +115,9 @@ export function cleanWorktree(
   }
 
   // пул: каталог не удаляем, а сбрасываем на dev — слот достанется следующей фиче.
-  // Только при включённом пуле: merge и прямые вызовы без конфига убирают как раньше.
-  const poolSize = input.config?.worktreePool ?? 0
+  // Размер берём тот же, что и выдача слота в startFeature: конфиг без поля не
+  // должен означать «пула нет», иначе выданный слот уборка удалит.
+  const poolSize = input.config?.worktreePool ?? DEFAULT_CONFIG.worktreePool
   const slot = poolSize > 0 ? poolSlotOf(input.root, dir) : null
   if (slot) {
     const { dev } = resolveBranches(input.root, input.config ?? DEFAULT_CONFIG)

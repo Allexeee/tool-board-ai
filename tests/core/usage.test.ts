@@ -275,6 +275,69 @@ test('при активном прогоне в расход идёт тольк
   assert.equal(usage.totals.input, 10)
 })
 
+test('база без tokens_reasoning даёт частичный отчёт, а не «учёт недоступен»', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tbal-usage-old-'))
+  const dbPath = join(dir, 'opencode.db')
+  const db = new DatabaseSync(dbPath)
+  try {
+    // старая база OpenCode: колонки reasoning ещё нет, остальные токены есть
+    db.exec(`
+      create table session_v2 (
+        id text primary key,
+        agent text,
+        tokens_input integer,
+        tokens_output integer,
+        tokens_cache_read integer,
+        tokens_cache_write integer,
+        cost real,
+        time_created integer,
+        time_updated integer
+      )
+    `)
+    db.prepare(
+      `insert into session_v2 (id, agent, tokens_input, tokens_output, cost, time_created, time_updated)
+       values (?, ?, ?, ?, ?, ?, ?)`,
+    ).run('ses_1', 'worker-1', 100, 50, 0.5, 1_000, 2_000)
+  } finally {
+    db.close()
+  }
+
+  const usage = readUsage({ dbPath })
+  assert.equal(usage.available, true, 'цифры важнее отказа')
+  if (!usage.available) return
+
+  assert.equal(usage.agents[0]!.input, 100)
+  assert.equal(usage.agents[0]!.output, 50)
+  assert.equal(usage.agents[0]!.reasoning, 0, 'колонки нет — ноль, а не «no such column»')
+  assert.equal(usage.agents[0]!.tokens, 150)
+})
+
+test('сессия, начатая до окна, входит целиком и отмечается как накопленная', () => {
+  const dbPath = makeDb([
+    { agent: 'worker-1', input: 10, directory: 'D:/work/alpha', createdAt: 1_000, updatedAt: 3_500 },
+    { agent: 'worker-1', input: 7, directory: 'D:/work/alpha', createdAt: 3_100, updatedAt: 3_600 },
+  ])
+
+  const usage = readUsage({ dbPath, projectDir: 'D:/work/alpha', window: { from: 3_000 } })
+  assert.equal(usage.available, true)
+  if (!usage.available) return
+
+  assert.equal(usage.carryOverSessions, 1, 'историей считается только начатая до окна')
+  assert.equal(usage.totals.input, 17, 'её токены входят целиком')
+})
+
+test('сессии, начатые внутри окна, историей не считаются', () => {
+  const dbPath = makeDb([
+    { agent: 'worker-1', input: 7, directory: 'D:/work/alpha', createdAt: 3_100, updatedAt: 3_600 },
+  ])
+
+  const usage = readUsage({ dbPath, projectDir: 'D:/work/alpha', window: { from: 3_000 } })
+  assert.equal(usage.available, true)
+  if (!usage.available) return
+
+  assert.equal(usage.carryOverSessions, 0)
+})
+
 test('битый файл базы: «учёт недоступен», а не исключение', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tbal-usage-broken-'))
   const dbPath = join(dir, 'opencode.db')

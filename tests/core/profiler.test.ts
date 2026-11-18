@@ -20,6 +20,7 @@ const SCHEMA = `
     agent text,
     tokens_input integer,
     tokens_output integer,
+    tokens_reasoning integer,
     tokens_cache_read integer,
     tokens_cache_write integer,
     cost real,
@@ -34,6 +35,7 @@ interface SessionRow {
   agent: string | null
   input?: number
   output?: number
+  reasoning?: number
   cacheRead?: number
   cacheWrite?: number
   cost?: number
@@ -52,9 +54,9 @@ function makeOpencodeDb(rows: SessionRow[], options: { schema?: string } = {}): 
     if (!options.schema) {
       const insert = db.prepare(
         `insert into session_v2
-           (id, agent, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost,
+           (id, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost,
             time_created, time_updated, time_busy, time_idle)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       rows.forEach((row, index) => {
         insert.run(
@@ -62,6 +64,7 @@ function makeOpencodeDb(rows: SessionRow[], options: { schema?: string } = {}): 
           row.agent,
           row.input ?? 0,
           row.output ?? 0,
+          row.reasoning ?? 0,
           row.cacheRead ?? 0,
           row.cacheWrite ?? 0,
           row.cost ?? 0,
@@ -271,6 +274,8 @@ test('без time_busy/time_idle токены считаются, время —
 
   assert.equal(end.agents[0]!.input, 100)
   assert.equal(end.agents[0]!.tokens, 150)
+  // колонки tokens_reasoning нет — это ноль, а не падение
+  assert.equal(end.agents[0]!.reasoning, 0)
   assert.equal(end.agents[0]!.busyMs, null)
   assert.equal(end.agents[0]!.idleMs, null)
   assert.match(end.note ?? '', /time_busy\/time_idle/)
@@ -401,14 +406,69 @@ test('без тарифа и без cost — «тариф не задан», а 
 
   assert.equal(end.agents[0]!.amount, null)
   assert.equal(end.agents[0]!.percent, null)
-  assert.equal(end.agents[0]!.basis, 'none')
-  assert.equal(end.basis, 'none')
+  assert.equal(end.agents[0]!.basis, 'share')
+  assert.equal(end.basis, 'share')
   assert.match(end.note ?? '', /тариф не задан/)
 
   const table = renderProfile(end)
   assert.match(table, /—/)
   assert.match(table, /тариф не задан/)
   assert.doesNotMatch(table, /0\.00/)
+})
+
+test('reasoning входит в tokens и в цену по тарифу, как в учёте токенов', () => {
+  // ставка задана только на reasoning: если её не увидеть, тариф сочли бы пустым
+  const end = oneSession(
+    makeRoot(),
+    [
+      {
+        agent: 'worker-1',
+        input: 1_000_000,
+        reasoning: 1_000_000,
+        created: START,
+        updated: START + 1_000,
+      },
+    ],
+    { reasoning: 2, budget: 60 },
+  )
+
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  const agent = end.agents[0]!
+  assert.equal(agent.reasoning, 1_000_000)
+  assert.equal(agent.tokens, 2_000_000, 'reasoning входит в сумму токенов')
+  assert.equal(agent.amount, 2, '1 млн reasoning по 2')
+  assert.equal(agent.basis, 'tariff')
+  assert.equal(agent.percent, 3.3)
+  assert.equal(end.totals.tokens, 2_000_000)
+  assert.equal(end.totals.reasoning, 1_000_000)
+})
+
+test('смешанная таблица: у каждого агента свой basis, подпись не врёт про один источник', () => {
+  const end = oneSession(
+    makeRoot(),
+    [
+      { agent: 'worker-1', input: 1_000_000, cost: 5, created: START, updated: START + 1_000 },
+      { agent: 'worker-2', input: 1_000_000, created: START, updated: START + 1_000 },
+    ],
+    { input: 1, budget: 60 },
+  )
+
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  const byAgent = new Map(end.agents.map((agent) => [agent.agent, agent]))
+  assert.equal(byAgent.get('worker-1')!.basis, 'cost', 'cost из базы сильнее тарифа')
+  assert.equal(byAgent.get('worker-1')!.amount, 5)
+  assert.equal(byAgent.get('worker-2')!.basis, 'tariff', 'без cost — тариф')
+  assert.equal(byAgent.get('worker-2')!.amount, 1)
+  assert.equal(end.basis, 'mixed', 'отчёт не подписывает всех одним источником')
+
+  const table = renderProfile(end)
+  assert.match(table, /источники смешаны/)
+  assert.match(table, /cost из базы/)
+  assert.match(table, /тариф из конфига/)
 })
 
 test('бюджета в конфиге нет — лимит 60 по умолчанию', () => {

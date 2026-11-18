@@ -64,6 +64,11 @@ export interface UsageReport {
   totals: UsageTotals
   budget: number | null
   basis: UsageBasis
+  /**
+   * Сессий, начатых до окна прогона: токены в них накопительные, поэтому такая
+   * сессия входит целиком, и расход прогона включает её историю.
+   */
+  carryOverSessions: number
   /** Почему процент именно такой: «тариф не задан», «бюджет не задан» и т. п. */
   note: string | null
 }
@@ -136,15 +141,17 @@ function readSessions(db: DatabaseSync): SessionRow[] {
     ),
   )
   const optional = (name: string): string => (names.has(name) ? name : 'null')
+  // токены необязательны: старая база без колонки даёт 0, а не «no such column»
+  const count = (name: string): string => `coalesce(${optional(name)}, 0)`
 
   return db
     .prepare(
       `select agent,
-              coalesce(tokens_input, 0) as input,
-              coalesce(tokens_output, 0) as output,
-              coalesce(tokens_reasoning, 0) as reasoning,
-              coalesce(tokens_cache_read, 0) as cacheRead,
-              coalesce(tokens_cache_write, 0) as cacheWrite,
+              ${count('tokens_input')} as input,
+              ${count('tokens_output')} as output,
+              ${count('tokens_reasoning')} as reasoning,
+              ${count('tokens_cache_read')} as cacheRead,
+              ${count('tokens_cache_write')} as cacheWrite,
               coalesce(cost, 0) as cost,
               ${optional('directory')} as directory,
               ${optional('time_created')} as timeCreated,
@@ -276,13 +283,21 @@ export function readUsage(options: UsageOptions = {}): UsageResult {
 
     const project = options.projectDir ? normalizeDirectory(options.projectDir) : null
     const window = options.window ?? null
-    const rows = groupByAgent(
-      readSessions(db).filter(
-        (row) =>
-          (project === null || belongsToProject(row.directory, project)) &&
-          (window === null || insideWindow(row, window)),
-      ),
+    const sessions = readSessions(db).filter(
+      (row) =>
+        (project === null || belongsToProject(row.directory, project)) &&
+        (window === null || insideWindow(row, window)),
     )
+
+    // токены в сессии накопительные: начатая до прогона сессия входит целиком,
+    // и расход прогона включает её историю — об этом надо сказать в выводе
+    const from = window?.from
+    const carryOverSessions =
+      from === undefined
+        ? 0
+        : sessions.filter((row) => row.timeCreated !== null && row.timeCreated < from).length
+
+    const rows = groupByAgent(sessions)
 
     const agents = rows.map((row): AgentUsage => {
       const tokens = row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite
@@ -348,7 +363,7 @@ export function readUsage(options: UsageOptions = {}): UsageResult {
 
     agents.sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent))
 
-    return { available: true, dbPath, agents, totals, budget, basis, note }
+    return { available: true, dbPath, agents, totals, budget, basis, carryOverSessions, note }
   } catch (error) {
     return {
       available: false,

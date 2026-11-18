@@ -21,14 +21,15 @@ import { mergeStage } from '../../src/core/git/merge.ts'
 import { cleanFeature, cleanWorktree, sweepBranches } from '../../src/core/git/clean.ts'
 import { branchExists, currentBranch, runGit } from '../../src/core/git/git.ts'
 
-function cancelledFixture(options: { pool?: number } = {}) {
+function cancelledFixture(options: { pool?: number; withoutPoolField?: boolean } = {}) {
   const root = makeRepoWithDev()
   initProject(root)
   const db = openDb(join(root, '.toolbox-al/tracker.db'))
-  const config = {
-    ...readConfig(join(root, '.toolbox-al/config.json')),
-    worktreePool: options.pool ?? 2,
-  }
+  const base = readConfig(join(root, '.toolbox-al/config.json'))
+  // без поля worktreePool: слот выдаётся по DEFAULT_CONFIG, уборка должна считать так же
+  const config = options.withoutPoolField
+    ? { branches: base.branches }
+    : { ...base, worktreePool: options.pool ?? 2 }
 
   const feature = addFeature(db, { name: 'Оплата', rank: 1 })
   addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
@@ -292,6 +293,44 @@ test('игнорируемые файлы не попадают в git, а сп�
   const found = runGit(root, ['status', '--porcelain'])
   void found
   assert.equal(existsSync(rescued), true)
+})
+
+test('конфиг без поля worktreePool не теряет слот: уборка возвращает каталог в пул', () => {
+  const { root, db, config, feature, worktree, branch } = cancelledFixture({ withoutPoolField: true })
+
+  const result = cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
+
+  assert.equal(result.removed, false, 'каталог не удалён')
+  assert.equal(result.returned, true, 'слот вернулся в пул')
+  assert.equal(existsSync(worktree), true, 'каталог на месте')
+  assert.equal(currentBranch(worktree), 'dev')
+  assert.equal(branchExists(root, branch), true, 'ветка осталась у фичи')
+  assert.equal(getFeature(db, feature.id)!.worktree, null)
+})
+
+test('нечитаемый ignored-файл не роняет уборку и не теряет уже скопированное', () => {
+  const { root, db, config, feature, worktree } = cancelledFixture({ pool: 0 })
+  writeFileSync(join(worktree, '.gitignore'), 'local/\n')
+  mkdirSync(join(worktree, 'local'), { recursive: true })
+  writeFileSync(join(worktree, 'local', 'секрет.env'), 'ключ')
+  // вложенный репозиторий: git перечисляет его каталогом, копирование такого «файла» падает
+  mkdirSync(join(worktree, 'local', 'nested'), { recursive: true })
+  runGit(join(worktree, 'local', 'nested'), ['init', '-q'])
+  runGit(worktree, ['add', '.gitignore', 'src/a.ts'])
+  runGit(worktree, ['commit', '-m', 'ignore'])
+
+  const result = cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
+
+  assert.equal(result.removed, true, 'уборка дошла до конца')
+  assert.equal(existsSync(worktree), false, 'каталог убран')
+
+  const row = db
+    .prepare("select after from events where type = 'feature.ignored_rescued' order by id desc limit 1")
+    .get() as { after: string }
+  const after = JSON.parse(row.after) as { dir: string; files: number; skipped: number }
+  assert.equal(after.files, 1, 'скопирован только настоящий файл')
+  assert.equal(after.skipped, 1, 'нечитаемый файл пропущен и посчитан')
+  assert.equal(existsSync(join(after.dir, 'local', 'секрет.env')), true, 'секрет спасён')
 })
 
 
