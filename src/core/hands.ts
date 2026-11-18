@@ -167,7 +167,7 @@ function followersOf(db: DatabaseSync, taskId: string): string[] {
  * в одном рабочем каталоге, поэтому этап не делят между исполнителями.
  * Слитый этап ничей: его задачи закрыты, в очереди и в руке их нет.
  */
-function stageOwner(db: DatabaseSync, stageId: string): string | null {
+export function stageOwner(db: DatabaseSync, stageId: string): string | null {
   const inWork = db
     .prepare(
       "select holder as owner from tasks where stage_id = ? and status = 'active' and holder is not null " +
@@ -185,8 +185,11 @@ function stageOwner(db: DatabaseSync, stageId: string): string | null {
   return reserved?.owner ?? null
 }
 
-/** Этап не делят: его задачи достаются тому, кто уже держит этап. Свободный этап и пул — любому. */
-function ownsStage(db: DatabaseSync, executorId: string, stageId: string | null): boolean {
+/**
+ * Этап не делят: его задачи достаются тому, кто уже держит этап. Свободный этап и пул — любому.
+ * Правило одно для раздачи и для руки, выставленной вручную.
+ */
+export function ownsStage(db: DatabaseSync, executorId: string, stageId: string | null): boolean {
   if (stageId === null) return true
   const owner = stageOwner(db, stageId)
   return owner === null || owner === executorId
@@ -358,6 +361,12 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
         .get(id, executorId) as { executor_id: string } | undefined
       if (reserved) {
         throw new UserError(3, `задача ${id} уже зарезервирована за ${reserved.executor_id}`)
+      }
+
+      // этап не делят и руками: его задачи живут в одном рабочем каталоге фичи.
+      // правило то же, что у раздачи, — иначе рука открывает вторую дверь в тот же каталог.
+      if (task.stageId !== null && !ownsStage(db, executorId, task.stageId)) {
+        throw new UserError(3, `этап ${task.stageId} уже у ${stageOwner(db, task.stageId)}`)
       }
     }
 

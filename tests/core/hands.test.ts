@@ -175,6 +175,34 @@ test('setHand не отбирает задачу, зарезервированн
   assert.throws(() => setHand(db, 'w2', [`${stageId}-1`], 'orchestrator'), /зарезервирован/)
 })
 
+test('setHand не отдаёт задачу этапа чужой руке и называет владельца', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const [first, second] = [1, 2].map((n) => `${stageId}-${n}`)
+
+  setHand(db, 'w1', [first], 'owner')
+
+  assert.throws(
+    () => setHand(db, 'w2', [second], 'owner'),
+    (error: Error) => error.message === `этап ${stageId} уже у w1`,
+    'отказ называет владельца этапа',
+  )
+  assert.deepEqual(getHand(db, 'w2'), [], 'чужая рука осталась пустой')
+  assert.deepEqual(
+    getHand(db, 'w1').map((task) => task.id),
+    [first],
+    'рука владельца этапа не тронута',
+  )
+
+  // этап освободили — его задача снова достаётся любой руке
+  clearHand(db, 'w1', 'owner')
+  assert.deepEqual(
+    setHand(db, 'w2', [second], 'owner').map((task) => task.id),
+    [second],
+    'свободный этап не привязан к прежней руке',
+  )
+})
+
 test('setHand не падает, если задача в списке повторяется', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)
