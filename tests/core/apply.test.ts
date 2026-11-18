@@ -1,9 +1,10 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { openDb } from '../../src/core/db.ts'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { addRequest, getRequest } from '../../src/core/requests.ts'
 import { listFeatures } from '../../src/core/features.ts'
 import { addPlan, approvePlan, type PlanStage, type PlanStep } from '../../src/core/plans.ts'
@@ -190,5 +191,43 @@ test('опечатка в каталоге по-прежнему ловится,
   ])
 
   assert.match(validatePlan(plan, { root }).join('\n'), /src\/stroe не существует/)
+})
+
+const bin = resolve('bin/toolbox-al.ts')
+
+function runCli(dir: string, args: string[]) {
+  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  return { code: result.status, out: result.stdout, err: result.stderr }
+}
+
+// план применяется в настоящем проекте: task show читает ту же базу, что plan apply
+function showAfterApply(assumptions: string[]) {
+  const dir = mkdtempSync(join(tmpdir(), 'al-task-assumptions-'))
+  const init = runCli(dir, ['init'])
+  assert.equal(init.code, 0, init.err)
+
+  const db = openDb(join(dir, '.toolbox-al', 'tracker.db'))
+  const request = addRequest(db, { title: 'Оплата', body: '', author: 'owner' })
+  const stages: PlanStage[] = [{ name: 'Каркас', goal: 'можно заплатить', appetite: '3 дня', steps: [step] }]
+  const plan = addPlan(db, { requestId: request.id, title: 'Оплата', assumptions, stages })
+  approvePlan(db, { requestId: request.id, version: plan.version, actor: 'owner' })
+  applyPlan(db, { requestId: request.id })
+  db.close()
+
+  return runCli(dir, ['task', 'show', 'F1.S1-1'])
+}
+
+test('допущения плана видны в задаче фичи', () => {
+  const shown = showAfterApply(['карты принимаем', 'один валютный счёт'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /допущения:/)
+  assert.match(shown.out, /- карты принимаем/)
+  assert.match(shown.out, /- один валютный счёт/)
+})
+
+test('без допущений блока в задаче нет', () => {
+  const shown = showAfterApply([])
+  assert.equal(shown.code, 0, shown.err)
+  assert.doesNotMatch(shown.out, /допущения/)
 })
 

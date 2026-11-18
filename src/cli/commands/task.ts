@@ -4,6 +4,7 @@ import { advanceTime } from '../../core/clock.ts'
 import { listEvents } from '../../core/events.ts'
 import { getStage } from '../../core/stages.ts'
 import { getFeature } from '../../core/features.ts'
+import { assumptionsForFeature } from '../../core/plans.ts'
 import { taskContext } from '../../core/context.ts'
 import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
@@ -266,6 +267,9 @@ export default async function command(args: ParsedArgs) {
     const task = getTask(db, args.positionals[0] ?? '')
     if (!task) throw new UserError(3, 'задача не найдена')
 
+    const stage = task.stageId ? getStage(db, task.stageId) : null
+    const feature = stage ? getFeature(db, stage.featureId) : null
+
     const lines = [
       `${task.id}  ${task.title}`,
       `размер: ${task.size} · навык: ${task.skill} · класс: ${task.class}` +
@@ -277,6 +281,13 @@ export default async function command(args: ParsedArgs) {
 
     if (task.attempts > 0) lines.push(`попыток: ${task.attempts}`)
     if (task.reason) lines.push(`причина: ${task.reason}`)
+
+    // допущения плана — часть контекста фичи, а не отдельного шага
+    const assumptions = feature ? assumptionsForFeature(db, feature.id) : []
+    if (assumptions.length > 0) {
+      lines.push('', 'допущения:')
+      for (const assumption of assumptions) lines.push(`  - ${assumption}`)
+    }
 
     const done = db
       .prepare("select after, actor from events where type = 'task.done' and subject = ? order by id desc limit 1")
@@ -314,10 +325,9 @@ export default async function command(args: ParsedArgs) {
     if (session) lines.push(`сессия: ${session}`)
 
     const subjects = [task.id]
-    if (task.stageId) {
-      subjects.push(task.stageId)
-      const stage = getStage(db, task.stageId)
-      if (stage) subjects.push(stage.featureId)
+    if (stage) {
+      subjects.push(stage.id)
+      subjects.push(stage.featureId)
     }
 
     const decisions = decisionsFor(db, subjects)
