@@ -436,13 +436,10 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
     const hand = getHand(db, executor.id).map((task) => task.id)
     const busy = busyOf(db, executor.id)
-    // оркестратор занят и без задачи: идёт прогон или только что работал его субагент
-    const liveSessions = options.sessions ?? []
-    const freshSubagent = liveSessions.some((item) => Date.now() - item.updatedAt < 15 * 60 * 1000)
+    // работа — это своя задача, непустая рука или (у оркестратора) идущий прогон.
+    // субагенты считаются чужой работой: пока они живы, worker-0 сам не работает.
     const working =
-      active.length > 0 ||
-      hand.length > 0 ||
-      (executor.id === 'worker-0' && (run !== null || freshSubagent))
+      active.length > 0 || hand.length > 0 || (executor.id === 'worker-0' && run !== null)
     return {
       executor: executor.id,
       session: executor.session,
@@ -486,13 +483,15 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
 const SESSION_TITLE_LIMIT = 40
 
 /**
- * Строка живого субагента для доски: агент, занятость и короткий заголовок.
+ * Состояние живого субагента без имени агента: «занят · заголовок».
+ * Одна и та же строка идёт и в строку исполнителя, и в строку сессии без исполнителя:
+ * имя агента стоит в начале строки, второй раз его не печатаем.
  * Заголовок режется до 40 символов; многоточие входит в лимит.
  */
-export function liveSessionLine(session: LiveSession): string {
+export function sessionState(session: LiveSession): string {
   const title = session.title || 'без названия'
   const short = title.length > SESSION_TITLE_LIMIT ? `${title.slice(0, SESSION_TITLE_LIMIT - 1)}…` : title
-  return `${session.agent} · ${session.busy ? 'занят' : 'простаивает'} · ${short}`
+  return `${session.busy ? 'занят' : 'простаивает'} · ${short}`
 }
 
 // владельцу нужен не журнал, а картина работы: строка на каждый этап.

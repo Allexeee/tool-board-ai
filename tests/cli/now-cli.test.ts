@@ -1,7 +1,7 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -24,6 +24,50 @@ function project() {
   const dir = mkdtempSync(join(tmpdir(), 'al-now-'))
   run(dir, ['init'])
   return dir
+}
+
+/**
+ * Живые сессии OpenCode для доски: база лежит во временном XDG_DATA_HOME,
+ * настоящую не трогаем. Сессии — дочерние, свежие, из каталога проекта.
+ */
+function liveSessions(
+  dataHome: string,
+  rows: Array<{ id: string; agent: string; title: string; directory: string; busy: boolean }>,
+) {
+  mkdirSync(join(dataHome, 'opencode'), { recursive: true })
+  const db = new DatabaseSync(join(dataHome, 'opencode', 'opencode.db'))
+  db.exec(`
+    create table session_v2 (
+      id text primary key,
+      parent_id text,
+      agent text,
+      title text,
+      directory text,
+      time_updated integer,
+      time_busy integer,
+      time_idle integer,
+      time_archived integer
+    )
+  `)
+  const insert = db.prepare(
+    'insert into session_v2 (id, parent_id, agent, title, directory, time_updated, time_busy, time_idle, time_archived) ' +
+      'values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  )
+  const now = Date.now()
+  for (const row of rows) {
+    insert.run(
+      row.id,
+      'root',
+      row.agent,
+      row.title,
+      row.directory,
+      now,
+      row.busy ? now : null,
+      row.busy ? null : now - 1000,
+      null,
+    )
+  }
+  db.close()
 }
 
 test('now показывает только последнюю версию плана', () => {
@@ -403,6 +447,40 @@ test('ЖДЁТ MAIN нет, если не все этапы слиты', () => {
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /ЖДЁТ MAIN/)
+})
+
+test('живая сессия исполнителя встаёт в его строку, блока СУБАГЕНТЫ нет', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(dataHome, [{ id: 'ses_1', agent: 'w1', title: 'шаг по F86', directory: dir, busy: true }])
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /СУБАГЕНТЫ/, 'отдельного блока субагентов больше нет')
+  assert.match(view.out, /^\t {2}w1\s+занят · шаг по F86$/m, 'сессия стоит в строке своего исполнителя')
+
+  const lines = view.out.split('\n').filter((line) => line.includes('w1'))
+  assert.equal(lines.length, 1, 'сессия не заводит вторую строку')
+})
+
+test('живая сессия без исполнителя — своя строка в ИСПОЛНИТЕЛЯХ', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(dataHome, [
+    { id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: true },
+    { id: 'ses_2', agent: 'general', title: 'Ревью', directory: dir, busy: false },
+  ])
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /СУБАГЕНТЫ/)
+  assert.match(view.out, /^\t {2}general\s+простаивает · Ревью$/m, 'сессия без исполнителя — своя строка')
+
+  const header = view.out.indexOf('ИСПОЛНИТЕЛИ')
+  const session = view.out.indexOf('general')
+  assert.ok(header !== -1 && session > header, 'сессия стоит в списке исполнителей, а не отдельным блоком')
 })
 
 test('цвет очереди: зелёный — брать, жёлтый — в руке, циан — в работе, серый — ждёт', () => {
