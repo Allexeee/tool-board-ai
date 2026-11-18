@@ -12,6 +12,7 @@ const HELP = `toolbox-al — ящик инструментов для работ
   request add|list|open   запросы: добавить, все, незакрытые
   feature list|show|clean фичи: список, карточка, уборка каталога и ветки
   stage list|show|add|activate|accept|reject|merge этапы: список, карточка, добавление, активация, приёмка, слияние в dev
+  profiler start|end      замер прогона: метка, время, токены и цена по агентам
   plan new|show|approve|apply планы: создать, показать, утвердить, применить
   task add|show|list|open задачи: добавить, карточка, список, открытые
   task context <id>       контекст задачи: файлы области, решения, коммиты

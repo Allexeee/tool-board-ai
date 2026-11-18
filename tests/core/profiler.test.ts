@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
@@ -316,4 +316,137 @@ test('новый замер после закрытого — новый мар�
     name.endsWith('.json'),
   )
   assert.equal(files.length, 2)
+})
+
+/** Одна сессия в окне: цена и процент считаются от её токенов. */
+function oneSession(
+  root: string,
+  rows: Parameters<typeof makeOpencodeDb>[0],
+  pricing: Parameters<typeof endProfile>[0]['pricing'],
+) {
+  const db = projectDb()
+  startProfile(db, { root, label: 'цена', now: new Date(START) })
+  const dbPath = makeOpencodeDb(rows)
+  return endProfile({ root, dbPath, pricing, now: new Date(START + 60_000) })
+}
+
+test('тариф задан: чтение и запись отдельно, процент от лимита из конфига', () => {
+  const end = oneSession(
+    makeRoot(),
+    [
+      {
+        agent: 'worker-1',
+        input: 1_000_000,
+        output: 1_000_000,
+        cacheRead: 500_000,
+        created: START,
+        updated: START + 1_000,
+      },
+    ],
+    { input: 1, output: 3, cacheRead: 0.5, budget: 60 },
+  )
+
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  const agent = end.agents[0]!
+  // 1 млн чтения по 1 + 1 млн записи по 3 + 0.5 млн кеша по 0.5
+  assert.equal(agent.amount, 4.25)
+  assert.equal(agent.percent, 7.1)
+  assert.equal(agent.basis, 'tariff')
+  assert.equal(end.basis, 'tariff')
+  assert.equal(end.budget, 60)
+  assert.equal(end.totals.amount, 4.25)
+  assert.equal(end.totals.percent, 7.1)
+  assert.match(renderProfile(end), /тариф из конфига/)
+  assert.match(renderProfile(end), /7\.1%/)
+})
+
+test('cost в базе больше нуля: берём его, тариф не пересчитывает', () => {
+  const end = oneSession(
+    makeRoot(),
+    [
+      {
+        agent: 'worker-1',
+        input: 1_000_000,
+        output: 1_000_000,
+        cost: 5,
+        created: START,
+        updated: START + 1_000,
+      },
+    ],
+    { input: 100, output: 100, budget: 60 },
+  )
+
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  assert.equal(end.agents[0]!.amount, 5)
+  assert.equal(end.agents[0]!.percent, 8.3)
+  assert.equal(end.agents[0]!.basis, 'cost')
+  assert.equal(end.basis, 'cost')
+  assert.match(renderProfile(end), /cost из базы/)
+})
+
+test('без тарифа и без cost — «тариф не задан», а не нули', () => {
+  const end = oneSession(
+    makeRoot(),
+    [{ agent: 'worker-1', input: 100, output: 50, created: START, updated: START + 1_000 }],
+    // пустой блок pricing — не тариф: нули вместо цены недопустимы
+    {},
+  )
+
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  assert.equal(end.agents[0]!.amount, null)
+  assert.equal(end.agents[0]!.percent, null)
+  assert.equal(end.agents[0]!.basis, 'none')
+  assert.equal(end.basis, 'none')
+  assert.match(end.note ?? '', /тариф не задан/)
+
+  const table = renderProfile(end)
+  assert.match(table, /—/)
+  assert.match(table, /тариф не задан/)
+  assert.doesNotMatch(table, /0\.00/)
+})
+
+test('бюджета в конфиге нет — лимит 60 по умолчанию', () => {
+  const end = oneSession(
+    makeRoot(),
+    [{ agent: 'worker-1', input: 600_000, created: START, updated: START + 1_000 }],
+    { input: 1, output: 1 },
+  )
+
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  assert.equal(end.budget, 60)
+  assert.equal(end.agents[0]!.amount, 0.6)
+  assert.equal(end.agents[0]!.percent, 1)
+})
+
+test('тариф и лимит читаются из конфига проекта, если не переданы явно', () => {
+  const db = projectDb()
+  const root = makeRoot()
+  mkdirSync(join(root, '.toolbox-al'), { recursive: true })
+  writeFileSync(
+    join(root, '.toolbox-al', 'config.json'),
+    JSON.stringify({ pricing: { input: 2, output: 1, budget: 30 } }),
+    'utf8',
+  )
+
+  startProfile(db, { root, label: 'из конфига', now: new Date(START) })
+  const dbPath = makeOpencodeDb([
+    { agent: 'worker-1', input: 3_000_000, output: 3_000_000, created: START, updated: START + 1_000 },
+  ])
+
+  const end = endProfile({ root, dbPath, now: new Date(START + 60_000) })
+  assert.equal(end.available, true)
+  if (!end.available) return
+
+  // 3 млн чтения по 2 + 3 млн записи по 1 = 9 из лимита 30
+  assert.equal(end.budget, 30)
+  assert.equal(end.agents[0]!.amount, 9)
+  assert.equal(end.agents[0]!.percent, 30)
 })

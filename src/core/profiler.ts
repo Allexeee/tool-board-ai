@@ -2,9 +2,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
+import { readConfig, type Config } from './config.ts'
 import { listExecutors } from './executors.ts'
 import { activeRun } from './runs.ts'
-import { opencodeDbPath } from './usage.ts'
+import { opencodeDbPath, type Pricing } from './usage.ts'
 
 // ─── профайлер прогона: замер, который можно сравнить ───────────────────────
 //
@@ -16,6 +17,12 @@ import { opencodeDbPath } from './usage.ts'
 const REPORTS_DIR = ['.toolbox-al', 'reports'] as const
 const MARKER_PREFIX = 'profiler-'
 const MARKER_SUFFIX = '.json'
+
+/** Лимит по умолчанию, если в конфиге не задан: 60 — та же цифра, что в заказе. */
+export const DEFAULT_BUDGET = 60
+
+/** Откуда взялась цена: cost из базы, тариф конфига или её нет вовсе. */
+export type PriceBasis = 'cost' | 'tariff' | 'none'
 
 /** Исполнитель на момент старта: состав замера — снимок, а не текущий список. */
 export interface ProfileExecutor {
@@ -52,8 +59,13 @@ export interface AgentProfile {
   cacheRead: number
   cacheWrite: number
   tokens: number
-  /** Стоимость, записанная в базе OpenCode: цена по тарифу — отдельная задача. */
+  /** Стоимость, записанная в базе OpenCode. */
   cost: number
+  /** Цена: cost из базы, иначе по тарифу; null — тариф не задан. */
+  amount: number | null
+  /** Процент от месячного лимита; null — цена не посчитана. */
+  percent: number | null
+  basis: PriceBasis
 }
 
 export interface ProfileTotals {
@@ -66,14 +78,20 @@ export interface ProfileTotals {
   cacheWrite: number
   tokens: number
   cost: number
+  amount: number | null
+  percent: number | null
 }
 
 export interface ProfileAvailable {
   available: true
   dbPath: string
+  /** Месячный лимит: из pricing.budget или DEFAULT_BUDGET. */
+  budget: number
+  /** Чем посчитана цена: cost из базы, тарифом конфига или ничем. */
+  basis: PriceBasis
   agents: AgentProfile[]
   totals: ProfileTotals
-  /** Почему время работы или простой не посчитаны; null — всё на месте. */
+  /** Почему время работы, простой или цена не посчитаны; null — всё на месте. */
   note: string | null
 }
 
@@ -100,6 +118,8 @@ export interface EndOptions {
   root: string
   /** Путь к базе OpenCode. В тестах подменяется: настоящую базу не трогаем. */
   dbPath?: string | undefined
+  /** Блок `pricing` из конфига проекта: ставки за миллион токенов и лимит. */
+  pricing?: Pricing | null | undefined
   now?: Date
 }
 
@@ -233,6 +253,55 @@ function overlap(from: number, to: number, since: number, until: number): number
   return Math.max(0, Math.min(to, until) - Math.max(from, since))
 }
 
+/** Тариф задан, только если есть хотя бы одна положительная ставка: пустой блок — не тариф. */
+function hasRates(pricing: Pricing | null | undefined): pricing is Pricing {
+  if (!pricing) return false
+  const rates = [pricing.input, pricing.output, pricing.cacheRead, pricing.cacheWrite]
+  if (rates.some((rate) => typeof rate === 'number' && rate > 0)) return true
+  return Object.values(pricing.agents ?? {}).some((tariff) =>
+    [tariff.input, tariff.output, tariff.cacheRead, tariff.cacheWrite].some(
+      (rate) => typeof rate === 'number' && rate > 0,
+    ),
+  )
+}
+
+/**
+ * Цена по тарифу: ставки заданы за миллион токенов, чтение и запись считаются
+ * отдельно. Кеш берётся только если ставка задана — иначе он бесплатный, а не
+ * посчитанный по чужой цене.
+ */
+function priceOf(
+  tariff: Pricing,
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number },
+): number {
+  const perMillion =
+    tokens.input * (tariff.input ?? 0) +
+    tokens.output * (tariff.output ?? 0) +
+    tokens.cacheRead * (tariff.cacheRead ?? 0) +
+    tokens.cacheWrite * (tariff.cacheWrite ?? 0)
+  return perMillion / 1e6
+}
+
+/** Месячный лимит: из конфига, а без него — общий 60. */
+function budgetOf(pricing: Pricing | null | undefined): number {
+  const budget = pricing?.budget
+  return typeof budget === 'number' && Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BUDGET
+}
+
+/**
+ * Тариф и лимит живут в конфиге проекта. Замер читает их сам: путь к базе
+ * инжектируется (в тестах временная SQLite), а тариф — свойство проекта, а не
+ * обёртки CLI. Нет конфига — нет тарифа, и это честно говорится в отчёте.
+ */
+function pricingOf(root: string): Pricing | null {
+  const path = join(root, '.toolbox-al', 'config.json')
+  if (!existsSync(path)) return null
+  return (readConfig(path) as Config & { pricing?: Pricing }).pricing ?? null
+}
+
+const percentOf = (amount: number, budget: number): number =>
+  Math.round((amount / budget) * 1000) / 10
+
 const unavailable = (dbPath: string, reason: string): ProfileUnavailable => ({
   available: false,
   dbPath,
@@ -250,7 +319,7 @@ const unavailable = (dbPath: string, reason: string): ProfileUnavailable => ({
  */
 function readWindow(
   dbPath: string,
-  window: { since: number; until: number },
+  window: { since: number; until: number; pricing?: Pricing | null | undefined },
 ): ProfileWindow {
   if (!existsSync(dbPath)) return unavailable(dbPath, `база OpenCode не найдена — ${dbPath}`)
 
@@ -357,20 +426,39 @@ function readWindow(
       byAgent.set(row.agent, acc)
     }
 
+    const budget = budgetOf(window.pricing)
+    const rates = hasRates(window.pricing) ? window.pricing : null
+
     const agents: AgentProfile[] = [...byAgent.values()]
-      .map((acc) => ({
-        agent: acc.agent,
-        sessions: acc.sessions,
-        busyMs: acc.sawBusy ? acc.busyMs : null,
-        idleMs: acc.sawIdle ? acc.idleMs : null,
-        input: acc.input,
-        output: acc.output,
-        cacheRead: acc.cacheRead,
-        cacheWrite: acc.cacheWrite,
-        tokens: acc.input + acc.output + acc.cacheRead + acc.cacheWrite,
-        cost: acc.cost,
-      }))
+      .map((acc) => {
+        // агент может переопределить ставки проекта — как в учёте токенов
+        const override = rates?.agents?.[acc.agent]
+        const tariff = override ? { ...rates, ...override } : rates
+        const fromBase = acc.cost > 0 ? acc.cost : null
+        const amount = fromBase ?? (tariff ? priceOf(tariff, acc) : null)
+
+        return {
+          agent: acc.agent,
+          sessions: acc.sessions,
+          busyMs: acc.sawBusy ? acc.busyMs : null,
+          idleMs: acc.sawIdle ? acc.idleMs : null,
+          input: acc.input,
+          output: acc.output,
+          cacheRead: acc.cacheRead,
+          cacheWrite: acc.cacheWrite,
+          tokens: acc.input + acc.output + acc.cacheRead + acc.cacheWrite,
+          cost: acc.cost,
+          amount,
+          percent: amount === null ? null : percentOf(amount, budget),
+          basis: fromBase !== null ? 'cost' : amount !== null ? 'tariff' : 'none',
+        }
+      })
       .sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent))
+
+    const amount = agents.reduce<number | null>(
+      (sum, agent) => (agent.amount === null ? sum : (sum ?? 0) + agent.amount),
+      null,
+    )
 
     const totals = agents.reduce<ProfileTotals>(
       (sum, agent) => ({
@@ -383,6 +471,8 @@ function readWindow(
         cacheWrite: sum.cacheWrite + agent.cacheWrite,
         tokens: sum.tokens + agent.tokens,
         cost: sum.cost + agent.cost,
+        amount: null,
+        percent: null,
       }),
       {
         sessions: 0,
@@ -394,17 +484,42 @@ function readWindow(
         cacheWrite: 0,
         tokens: 0,
         cost: 0,
+        amount: null,
+        percent: null,
       },
     )
+    totals.amount = amount
+    totals.percent = amount === null ? null : percentOf(amount, budget)
 
-    const note =
-      !columns.has('time_busy') || !columns.has('time_idle')
-        ? 'время работы и простой недоступны: в базе нет time_busy/time_idle'
-        : agents.length > 0 && agents.every((agent) => agent.busyMs === null && agent.idleMs === null)
-          ? 'время работы и простой неизвестны: у сессий нет отметок занятости'
-          : null
+    // цена из базы сильнее тарифа: это настоящие деньги, а не оценка
+    const basis: PriceBasis = agents.some((agent) => agent.basis === 'tariff')
+      ? 'tariff'
+      : agents.some((agent) => agent.basis === 'cost')
+        ? 'cost'
+        : 'none'
 
-    return { available: true, dbPath, agents, totals, note }
+    const notes: string[] = []
+    if (!columns.has('time_busy') || !columns.has('time_idle')) {
+      notes.push('время работы и простой недоступны: в базе нет time_busy/time_idle')
+    } else if (agents.length > 0 && agents.every((agent) => agent.busyMs === null && agent.idleMs === null)) {
+      notes.push('время работы и простой неизвестны: у сессий нет отметок занятости')
+    }
+
+    if (basis === 'none' && agents.length > 0) {
+      notes.push('тариф не задан: цена не посчитана')
+    } else if (agents.some((agent) => agent.basis === 'none')) {
+      notes.push('у части агентов тариф не задан: их цена не посчитана')
+    }
+
+    return {
+      available: true,
+      dbPath,
+      budget,
+      basis,
+      agents,
+      totals,
+      note: notes.length > 0 ? notes.join('; ') : null,
+    }
   } finally {
     db.close()
   }
@@ -439,9 +554,11 @@ export function endProfile(options: EndOptions): ProfileEnd {
   writeMarker(marker.path, written)
 
   const durationMs = Math.max(0, now.getTime() - (Number.isNaN(startedAt) ? now.getTime() : startedAt))
+  const pricing = options.pricing === undefined ? pricingOf(options.root) : options.pricing
   const window = readWindow(options.dbPath ?? opencodeDbPath(), {
     since: Number.isNaN(startedAt) ? now.getTime() : startedAt,
     until: now.getTime(),
+    pricing,
   })
 
   return { marker, durationMs, ...window }
@@ -462,7 +579,7 @@ export function renderProfile(end: ProfileEnd): string {
     return lines.join('\n')
   }
 
-  const header = ['агент', 'сессий', 'работа', 'простой', 'вход', 'выход', 'кеш', 'cost']
+  const header = ['агент', 'сессий', 'работа', 'простой', 'вход', 'выход', 'кеш', 'цена', '%']
   const rows = end.agents.map((agent) => [
     agent.agent,
     String(agent.sessions),
@@ -471,7 +588,8 @@ export function renderProfile(end: ProfileEnd): string {
     numText(agent.input),
     numText(agent.output),
     numText(agent.cacheRead + agent.cacheWrite),
-    moneyText(agent.cost),
+    moneyText(agent.amount),
+    percentText(agent.percent),
   ])
 
   rows.push([
@@ -482,7 +600,8 @@ export function renderProfile(end: ProfileEnd): string {
     numText(end.totals.input),
     numText(end.totals.output),
     numText(end.totals.cacheRead + end.totals.cacheWrite),
-    moneyText(end.totals.cost),
+    moneyText(end.totals.amount),
+    percentText(end.totals.percent),
   ])
 
   // ширины считаем по содержимому: цифры не должны разъезжаться на длинных числах
@@ -495,6 +614,14 @@ export function renderProfile(end: ProfileEnd): string {
       .join('  ')
 
   lines.push(render(header), ...rows.map(render))
+
+  // «тариф не задан» живёт в note: строка про basis молчала бы о цене
+  if (end.basis === 'cost') {
+    lines.push(`цена: cost из базы · процент от лимита ${moneyText(end.budget)}`)
+  } else if (end.basis === 'tariff') {
+    lines.push(`цена: тариф из конфига за 1 млн токенов · процент от лимита ${moneyText(end.budget)}`)
+  }
+
   lines.push('работа и простой — последний интервал занятости сессий в окне (time_busy/time_idle), не история')
   if (end.note) lines.push(end.note)
 
@@ -514,4 +641,10 @@ function numText(value: number): string {
   return Math.round(value).toLocaleString('ru-RU').replace(/\u00A0/g, ' ')
 }
 
-const moneyText = (value: number): string => value.toFixed(2)
+const moneyText = (value: number | null): string => (value === null ? '—' : value.toFixed(2))
+
+/** «7.1%»; null — цена не посчитана, а не ноль. */
+function percentText(value: number | null): string {
+  if (value === null) return '—'
+  return `${Number(value.toFixed(1))}%`
+}
