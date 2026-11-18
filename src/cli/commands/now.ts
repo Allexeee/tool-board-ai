@@ -1,9 +1,9 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, taskQueue, queueFreeReason, liveSessionLine, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
+import { nowView, ownerView, taskQueue, queueFreeReason, sessionState, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
 import { pendingRelease } from '../../core/git/release.ts'
-import { readLiveSessions } from '../../core/usage.ts'
+import { readLiveSessions, type LiveSession } from '../../core/usage.ts'
 import { listTasks } from '../../core/tasks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
 import { ok, paint, setColorMode, type ColorName } from '../output.ts'
@@ -88,6 +88,22 @@ export default async function command(args: ParsedArgs) {
     return `  ${row.taskId.padEnd(queueIdWidth)}  ${paint(assign.padEnd(assignWidth), queueColor(row))}  ${row.title}${note}`
   })
 
+  // исполнители и живые субагенты — один список: субагент и есть исполнитель.
+  // сессия агента, который уже есть в списке, встаёт в его строку; остальные — своими строками.
+  const sessionByAgent = new Map<string, LiveSession>()
+  for (const session of view.sessions) {
+    // у одного агента живых сессий может быть несколько: в строку идёт свежая, она первая
+    if (!sessionByAgent.has(session.agent)) sessionByAgent.set(session.agent, session)
+  }
+
+  const holderNames = new Set(view.holders.map((holder) => holder.executor))
+  const freeSessions = view.sessions.filter((session) => !holderNames.has(session.agent))
+  const nameWidth = Math.max(
+    12,
+    ...view.holders.map((holder) => holder.executor.length),
+    ...freeSessions.map((session) => session.agent.length),
+  )
+
   const holders = view.holders.map((holder) => {
     // занятость без задачи видна так же ясно, как выданная задача: причина и срок.
     const state: string[] = []
@@ -95,13 +111,19 @@ export default async function command(args: ParsedArgs) {
     if (holder.busy) {
       state.push(paint(`занят: ${holder.busy.reason} (до ${shortTime(holder.busy.until)})`, 'cyan'))
     }
+    const session = sessionByAgent.get(holder.executor)
+    if (session) state.push(paint(sessionState(session), session.busy ? 'cyan' : 'gray'))
     // worker-0 может работать без задачи: пока идёт прогон, он занят
     if (state.length === 0) state.push(holder.working ? paint('работает', 'cyan') : paint('свободен', 'gray'))
 
-    return `  ${holder.executor.padEnd(12)} ${state.join(' · ')}`
+    return `  ${holder.executor.padEnd(nameWidth)} ${state.join(' · ')}`
   })
 
-  const sessionLines = view.sessions.map((session) => `    ${liveSessionLine(session)}`)
+  // живая сессия без исполнителя — такая же строка списка, а не отдельный блок
+  const sessionRows = freeSessions.map(
+    (session) => `  ${session.agent.padEnd(nameWidth)} ${paint(sessionState(session), session.busy ? 'cyan' : 'gray')}`,
+  )
+  const executors = [...holders, ...sessionRows]
 
   const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
 
@@ -121,8 +143,7 @@ export default async function command(args: ParsedArgs) {
     (queue.length ? `\n\nОЧЕРЕДЬ\n` + queueLines.join('\n') : '') +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
-    (holders.length ? holders.join('\n') : '  нет') +
-    (sessionLines.length ? '\n\n  СУБАГЕНТЫ\n' + sessionLines.join('\n') : '')
+    (executors.length ? executors.join('\n') : '  нет')
 
   ok(view, '\n' + indent(text))
   return 0

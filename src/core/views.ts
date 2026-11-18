@@ -483,13 +483,15 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
 const SESSION_TITLE_LIMIT = 40
 
 /**
- * Строка живого субагента для доски: агент, занятость и короткий заголовок.
+ * Состояние живого субагента без имени агента: «занят · заголовок».
+ * Одна и та же строка идёт и в строку исполнителя, и в строку сессии без исполнителя:
+ * имя агента стоит в начале строки, второй раз его не печатаем.
  * Заголовок режется до 40 символов; многоточие входит в лимит.
  */
-export function liveSessionLine(session: LiveSession): string {
+export function sessionState(session: LiveSession): string {
   const title = session.title || 'без названия'
   const short = title.length > SESSION_TITLE_LIMIT ? `${title.slice(0, SESSION_TITLE_LIMIT - 1)}…` : title
-  return `${session.agent} · ${session.busy ? 'занят' : 'простаивает'} · ${short}`
+  return `${session.busy ? 'занят' : 'простаивает'} · ${short}`
 }
 
 // владельцу нужен не журнал, а картина работы: строка на каждый этап.

@@ -17,7 +17,7 @@ import { takeTask } from '../../src/core/lease.ts'
 import { endRun, startRun } from '../../src/core/runs.ts'
 import { collectRunReport, renderRunReport } from '../../src/core/run-report.ts'
 import { readLiveSessions } from '../../src/core/usage.ts'
-import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats, liveSessionLine } from '../../src/core/views.ts'
+import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats, sessionState } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
@@ -585,8 +585,8 @@ test('нет базы OpenCode: живых субагентов просто н�
   assert.deepEqual(readLiveSessions({ dbPath, now: Date.now() }), [])
 })
 
-test('строка субагента: агент, занятость и заголовок до 40 символов', () => {
-  const line = liveSessionLine({
+test('состояние сессии: занятость и заголовок до 40 символов, без имени агента', () => {
+  const state = sessionState({
     id: 's',
     agent: 'worker-2',
     title: 'x'.repeat(60),
@@ -594,15 +594,15 @@ test('строка субагента: агент, занятость и заг�
     updatedAt: 0,
   })
 
-  const [agent, state, title] = line.split(' · ')
-  assert.equal(agent, 'worker-2')
-  assert.equal(state, 'занят')
+  const [busy, title] = state.split(' · ')
+  assert.equal(busy, 'занят')
   assert.equal(title!.length, 40)
   assert.match(title!, /…$/)
+  assert.doesNotMatch(state, /worker-2/, 'имя агента печатается в начале строки, а не в состоянии')
 
   assert.equal(
-    liveSessionLine({ id: 's', agent: 'general', title: 'Ревью', busy: false, updatedAt: 0 }),
-    'general · простаивает · Ревью',
+    sessionState({ id: 's', agent: 'general', title: 'Ревью', busy: false, updatedAt: 0 }),
+    'простаивает · Ревью',
   )
 })
 
