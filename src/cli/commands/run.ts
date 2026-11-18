@@ -27,6 +27,8 @@ import { isJsonMode, ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 import { renderRunReport, writeRunReport } from '../../core/run-report.ts'
 import { appendPowerLog } from '../../core/power.ts'
+import { readUsage, type Pricing, type UsageReport } from '../../core/usage.ts'
+import type { Config } from '../../core/config.ts'
 import { relative } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -47,7 +49,7 @@ const USAGE =
   'использование: run start --mode plan|all [--request R1 …] [--nearest] [--approve] ' +
   '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision ' +
   '[--power hibernate|shutdown] · run review <id> --verdict ok|found [--note "…"] · ' +
-  'run report <id> · run power <id> [--power hibernate|shutdown] · run show'
+  'run report <id> · run power <id> [--power hibernate|shutdown] · run usage [бюджет] · run show'
 
 /** Настоящие системные команды: только из CLI, в тестах runner подменяется. */
 const systemRunner: CommandRunner = (command, args) => {
@@ -80,6 +82,114 @@ function describe(run: RunRecord): string {
 function reasonText(run: RunRecord): string {
   if (!run.endReason) return 'не указана'
   return REASON_LABEL[run.endReason] ?? run.endReason
+}
+
+/** Число с пробелами между разрядами: 7 307 361 читается, 7307361 — нет. */
+function num(value: number): string {
+  return Math.round(value).toLocaleString('ru-RU').replace(/\u00A0/g, ' ')
+}
+
+function money(value: number): string {
+  return value.toFixed(2)
+}
+
+function percentText(value: number | null): string {
+  if (value === null) return '—'
+  return `${Number(value.toFixed(1))}%`
+}
+
+/** «1 сессия», «2 сессии», «5 сессий»: счёт без кривого падежа. */
+function sessionsWord(count: number): string {
+  const tail = count % 100
+  if (tail >= 11 && tail <= 14) return 'сессий'
+  switch (count % 10) {
+    case 1:
+      return 'сессия'
+    case 2:
+    case 3:
+    case 4:
+      return 'сессии'
+    default:
+      return 'сессий'
+  }
+}
+
+/** Бюджет из позиции (`run usage 60`) или известного флага `--limit`. */
+function budgetOf(args: ParsedArgs): number | null {
+  const raw = args.positionals[0] ?? stringFlag(args, 'limit')
+  if (raw === undefined) return null
+  const value = Number(raw.replace(',', '.'))
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new UserError(3, `бюджет должен быть положительным числом: ${raw}`)
+  }
+  return value
+}
+
+function renderUsage(report: UsageReport): string {
+  const sessions = report.totals.sessions
+  const lines = [`учёт токенов: ${num(sessions)} ${sessionsWord(sessions)} · база ${report.dbPath}`]
+
+  if (report.agents.length === 0) {
+    lines.push('сессий в базе нет: считать нечего')
+    return lines.join('\n')
+  }
+
+  const header = ['агент', 'сессий', 'вход', 'выход', 'разум', 'кеш чт', 'кеш за', 'cost', '%']
+  const rows = report.agents.map((agent) => [
+    agent.agent,
+    num(agent.sessions),
+    num(agent.input),
+    num(agent.output),
+    num(agent.reasoning),
+    num(agent.cacheRead),
+    num(agent.cacheWrite),
+    money(agent.cost),
+    percentText(agent.percent),
+  ])
+
+  const totalPercent =
+    report.budget === null || report.basis === 'share'
+      ? 100
+      : report.basis === 'cost'
+        ? (report.totals.cost / report.budget) * 100
+        : (report.totals.amount / report.budget) * 100
+  rows.push([
+    'итого',
+    num(report.totals.sessions),
+    num(report.totals.input),
+    num(report.totals.output),
+    num(report.totals.reasoning),
+    num(report.totals.cacheRead),
+    num(report.totals.cacheWrite),
+    money(report.totals.cost),
+    percentText(totalPercent),
+  ])
+
+  // ширины считаем по содержимому: цифры не должны разъезжаться на длинных числах
+  const widths = header.map((title, index) =>
+    Math.max(title.length, ...rows.map((row) => row[index]?.length ?? 0)),
+  )
+
+  const render = (row: string[]) =>
+    row
+      .map((cell, index) => (index === 0 ? cell.padEnd(widths[index]!) : cell.padStart(widths[index]!)))
+      .join('  ')
+
+  lines.push(render(header), ...rows.map(render))
+
+  const basis =
+    report.basis === 'cost'
+      ? report.budget === null
+        ? 'процент: доля агента от общего cost (бюджет не задан)'
+        : `процент: cost из базы от бюджета ${money(report.budget)}`
+      : report.basis === 'tariff'
+        ? report.budget === null
+          ? 'процент: доля агента от общего расхода по тарифу (бюджет не задан)'
+          : `процент: цена токенов по тарифу проекта от бюджета ${money(report.budget)}`
+        : 'процент: доля агента от общего расхода токенов (тариф не задан)'
+
+  lines.push(basis)
+  return lines.join('\n')
 }
 
 export default async function command(args: ParsedArgs) {
@@ -246,6 +356,19 @@ export default async function command(args: ParsedArgs) {
       { run: plan.run, requested: plan.requested, action: plan.action, reportPath: shown, outcome },
       lines.join('\n'),
     )
+    return 0
+  }
+
+  if (args.sub === 'usage') {
+    const pricing = (project.config as Config & { pricing?: Pricing }).pricing ?? null
+    const result = readUsage({ pricing, budget: budgetOf(args) })
+
+    if (!result.available) {
+      ok(result, result.reason)
+      return 1
+    }
+
+    ok(result, renderUsage(result))
     return 0
   }
 
