@@ -267,6 +267,11 @@ export default async function command(args: ParsedArgs) {
     const task = getTask(db, args.positionals[0] ?? '')
     if (!task) throw new UserError(3, 'задача не найдена')
 
+    // ссылка на спеку живёт в отдельной колонке: карточка показывает её рядом с областью
+    const spec = (
+      db.prepare('select spec from tasks where id = ?').get(task.id) as { spec: string | null } | undefined
+    )?.spec
+
     const stage = task.stageId ? getStage(db, task.stageId) : null
     const feature = stage ? getFeature(db, stage.featureId) : null
 
@@ -278,6 +283,8 @@ export default async function command(args: ParsedArgs) {
       `DoD: ${task.dod.join('; ')}`,
       `область: ${task.scope === 'exclusive' ? 'эксклюзивно' : task.scope.join(', ')}`,
     ]
+
+    if (spec) lines.push(`спека: ${spec}`)
 
     if (task.attempts > 0) lines.push(`попыток: ${task.attempts}`)
     if (task.reason) lines.push(`причина: ${task.reason}`)

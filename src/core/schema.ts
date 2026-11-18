@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 11
+export const SCHEMA_VERSION = 12
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -253,6 +253,14 @@ export function migrate(db: DatabaseSync): number {
       // старый дефолт 20 шагов душил агента на середине: поднимаем тем, у кого он остался.
       // явные значения (кроме совпавших с дефолтом) не трогаем — отличить нельзя, поэтому только 20.
       db.prepare('update executors set steps = 60 where steps = 20').run()
+    }
+    if (from < 12) {
+      // задача помнит раздел спеки, из которого выросла: на приёмке видно, с чем сверять.
+      // колонку проверяем отдельно: метка версии могла отстать от фактической схемы
+      const hasSpec = db
+        .prepare("select 1 as found from pragma_table_info('tasks') where name = 'spec'")
+        .get()
+      if (!hasSpec) db.exec('alter table tasks add column spec text')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +

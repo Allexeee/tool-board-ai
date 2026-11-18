@@ -78,6 +78,7 @@ export default async function command(args: ParsedArgs) {
           `    DoD: ${step.dod.join('; ')}`,
           `    область: ${step.scope.join(', ')}`,
         ]
+        if (step.spec) lines.push(`    спека: ${step.spec}`)
         if (step.deps?.length) lines.push(`    зависит от: ${step.deps.map((index) => index + 1).join(', ')}`)
         return lines.join('\n')
       }),
