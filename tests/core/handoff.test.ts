@@ -8,11 +8,17 @@ import { SCHEMA_VERSION } from '../../src/core/schema.ts'
 import { addRequest } from '../../src/core/requests.ts'
 import { addFeature, setFeatureBranch } from '../../src/core/features.ts'
 import { addStage } from '../../src/core/stages.ts'
-import { createTask } from '../../src/core/tasks.ts'
+import { createTask, getTask } from '../../src/core/tasks.ts'
 import { ask } from '../../src/core/questions.ts'
 import { listEvents } from '../../src/core/events.ts'
 import { getRunRecord, startRun } from '../../src/core/runs.ts'
-import { collectHandoff, writeHandoff } from '../../src/core/handoff.ts'
+import {
+  collectHandoff,
+  latestHandoff,
+  renderResumeBrief,
+  resumeRun,
+  writeHandoff,
+} from '../../src/core/handoff.ts'
 
 function root(): string {
   return mkdtempSync(join(tmpdir(), 'al-handoff-'))
@@ -20,7 +26,8 @@ function root(): string {
 
 /**
  * Прогон в середине работы: этап с закрытой задачей уже слит в dev, вторая
- * задача в руках исполнителя. Ровно тот случай, ради которого эстафета.
+ * задача в руках исполнителя на активном этапе. Ровно тот случай, ради
+ * которого эстафета.
  */
 function halfway(db: DatabaseSync) {
   const run = startRun(db, { mode: 'plan', now: new Date('2026-11-18T08:00:00.000Z') })
@@ -34,6 +41,13 @@ function halfway(db: DatabaseSync) {
     goal: 'состояние снимается в файл',
     appetite: 'день',
   })
+  const activeStage = addStage(db, {
+    featureId: feature.id,
+    name: 'run resume',
+    goal: 'новая сессия подхватывает прогон',
+    appetite: 'день',
+  })
+  db.prepare("update stages set status = 'active' where id = ?").run(activeStage.id)
 
   const finished = createTask(db, {
     stageId: stage.id,
@@ -47,7 +61,7 @@ function halfway(db: DatabaseSync) {
   db.prepare("update tasks set status = 'done' where id = ?").run(finished.id)
 
   const active = createTask(db, {
-    stageId: stage.id,
+    stageId: activeStage.id,
     title: 'run resume читает файл',
     dod: ['новая сессия продолжает'],
     size: 'M',
@@ -65,7 +79,7 @@ function halfway(db: DatabaseSync) {
     stage.id,
   )
 
-  return { run, request, feature, stage, finished, active }
+  return { run, request, feature, stage, activeStage, finished, active }
 }
 
 test('эстафета снимает сделанное и работу в руках, json и md лежат файлами', () => {
@@ -144,10 +158,10 @@ test('каждый handoff увеличивает сегмент: 1 → 2 пос
 
 test('в эстафету попадают очередь готовых и решения владельца', () => {
   const db = openDb(':memory:')
-  const { run, stage, active } = halfway(db)
+  const { run, activeStage, active } = halfway(db)
 
   const queued = createTask(db, {
-    stageId: stage.id,
+    stageId: activeStage.id,
     title: 'run report по сегментам',
     dod: ['отчёт знает сегменты'],
     size: 'S',
@@ -222,3 +236,101 @@ test('миграция 12 → 13 добавляет сегмент и не те�
   assert.equal(kept!.segment, 1, 'старый прогон — первый сегмент, а не потерянный')
   db.close()
 })
+
+// ─── подхват: resume сверяет файл с базой ───────────────────────────────────
+
+test('resume возвращает в ready задачу с истёкшей арендой и говорит об этом', () => {
+  const db = openDb(':memory:')
+  const { run, active } = halfway(db)
+  const dir = root()
+
+  // эстафета снята, пока аренда ещё жива: 14:00
+  writeHandoff(db, run.id, { root: dir, now: new Date('2026-11-18T13:00:00.000Z') })
+  assert.equal(getTask(db, active.id)!.status, 'active')
+
+  // новая сессия приходит через час после истечения аренды
+  const brief = resumeRun(db, { root: dir, now: new Date('2026-11-18T15:00:00.000Z') })
+
+  const task = getTask(db, active.id)!
+  assert.equal(task.status, 'ready', 'мёртвая аренда вернула задачу в очередь')
+  assert.equal(task.holder, null)
+  assert.equal(task.leaseUntil, null)
+  assert.deepEqual(brief.released, [active.id])
+  assert.ok(brief.queue.some((row) => row.id === active.id), 'задача снова в очереди')
+  assert.deepEqual(brief.inWork, [])
+
+  const text = renderResumeBrief(brief)
+  assert.match(text, /аренда истекла/)
+  assert.match(text, new RegExp(active.id.replace('.', '\\.')))
+  assert.match(text, /вернул в очередь 1/)
+
+  // бриф — на 10–15 строк, а не пересказ файла
+  const lines = text.split('\n')
+  assert.ok(lines.length >= 10 && lines.length <= 15, `строк в брифе: ${lines.length}\n${text}`)
+  assert.match(lines[0]!, /^RUN1 · сегмент 2 · эстафета из сегмента 1/)
+  assert.match(lines.at(-1)!, /^следующий шаг: взять из очереди/)
+
+  // истечение видно в журнале, а resume не двигает сегмент — двигает handoff
+  const expired = listEvents(db, { subject: active.id }).filter((event) => event.type === 'task.lease_expired')
+  assert.equal(expired.length, 1)
+  assert.equal(getRunRecord(db, run.id)!.segment, 2)
+  assert.equal(brief.segment, 2)
+  assert.equal(brief.fromSegment, 1)
+})
+
+test('resume возвращает в ready задачу, которая выпала из работы', () => {
+  const db = openDb(':memory:')
+  const { run, active } = halfway(db)
+  const dir = root()
+
+  writeHandoff(db, run.id, { root: dir, now: new Date('2026-11-18T13:00:00.000Z') })
+
+  // старая сессия умерла на середине: задачу отпустили, но не довели до очереди
+  db.prepare("update tasks set status = 'open', holder = null, lease_until = null where id = ?").run(active.id)
+
+  const brief = resumeRun(db, { root: dir, now: new Date('2026-11-18T13:30:00.000Z') })
+
+  // «не в работе» — это ready: часы прогона ставят её в очередь, resume это фиксирует
+  assert.equal(getTask(db, active.id)!.status, 'ready')
+  assert.ok(brief.queue.some((row) => row.id === active.id), 'задача снова в очереди')
+  assert.match(renderResumeBrief(brief), /уже в очереди/)
+})
+
+test('закрытую задачу resume не воскрешает', () => {
+  const db = openDb(':memory:')
+  const { run, active } = halfway(db)
+  const dir = root()
+
+  writeHandoff(db, run.id, { root: dir, now: new Date('2026-11-18T13:00:00.000Z') })
+  db.prepare("update tasks set status = 'done', holder = null, lease_until = null where id = ?").run(active.id)
+
+  const brief = resumeRun(db, { root: dir, now: new Date('2026-11-18T15:00:00.000Z') })
+
+  assert.equal(getTask(db, active.id)!.status, 'done', 'сделанное не возвращается в очередь')
+  assert.deepEqual(brief.released, [])
+  assert.match(renderResumeBrief(brief), /закрыта/)
+})
+
+test('resume без handoff-файла — честный отказ с подсказкой', () => {
+  const db = openDb(':memory:')
+  const dir = root()
+
+  assert.throws(() => resumeRun(db, { root: dir }), /handoff-файла нет:.*run handoff/s)
+  assert.equal(latestHandoff(dir), null)
+})
+
+test('resume закрытого прогона не подхватывает', () => {
+  const db = openDb(':memory:')
+  const { run } = halfway(db)
+  const dir = root()
+
+  writeHandoff(db, run.id, { root: dir, now: new Date('2026-11-18T13:00:00.000Z') })
+  db.prepare('update runs set ended_at = ?, end_reason = ? where id = ?').run(
+    '2026-11-18T20:00:00.000Z',
+    'tasks',
+    run.id,
+  )
+
+  assert.throws(() => resumeRun(db, { root: dir }), /уже закрыт: подхватывать нечего.*run report RUN1/s)
+})
+

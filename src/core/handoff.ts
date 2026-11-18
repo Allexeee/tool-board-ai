@@ -1,12 +1,15 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
+import { advanceTime } from './clock.ts'
 import { tx } from './db.ts'
+import { isReady } from './deps.ts'
 import { appendEvent } from './events.ts'
+import { releaseTask } from './lease.ts'
 import { ownerHand, type OwnerItem } from './questions.ts'
-import type { TaskSize, TaskStatus } from './tasks.ts'
-import { bumpRunSegment, getRunRecord, type RunRecord } from './runs.ts'
+import { getTask, type TaskSize, type TaskStatus } from './tasks.ts'
+import { activeRun, bumpRunSegment, getRunRecord, type RunRecord } from './runs.ts'
 
 // ─── эстафета прогона: состояние переезжает в новую сессию ───────────────────
 //
@@ -330,3 +333,341 @@ export function writeHandoff(
 
   return { ...data, jsonPath, mdPath }
 }
+
+// ─── подхват эстафеты: новая сессия сверяет файл с базой ─────────────────────
+//
+// Файл — снимок на момент передачи, база — правда сейчас. Пока сессия
+// переезжала, задачу могли закрыть, вернуть в очередь или бросить с истёкшей
+// арендой. Resume не верит файлу на слово: сверяет «в работе» с базой,
+// мёртвую аренду возвращает в очередь и говорит об этом в брифе.
+
+export type ResumeAction = 'released' | 'queued' | 'closed' | 'moved' | 'missing'
+
+export interface ResumeNote {
+  taskId: string
+  /** Что сверка сделала с задачей или что с ней стало. */
+  action: ResumeAction
+  text: string
+}
+
+export interface ResumeBrief {
+  run: RunRecord
+  /** Сегмент, в котором работает новая сессия: файл снял предыдущий. */
+  segment: number
+  /** Сегмент из файла — тот, который закончился. */
+  fromSegment: number
+  /** Когда снята эстафета, которую читаем. */
+  at: string
+  /** Файл, по которому подхватываем. */
+  path: string
+  done: HandoffStageRow[]
+  inWork: HandoffTaskRow[]
+  queue: HandoffTaskRow[]
+  owner: OwnerItem[]
+  nextStep: string
+  /** Что сверка нашла по задачам из файла. */
+  notes: ResumeNote[]
+  /** Задачи, которые сверка вернула в очередь. */
+  released: string[]
+  /** Сколько задач «в работе» было в файле. */
+  checked: number
+}
+
+const HANDOFF_TAIL = '-handoff.json'
+
+/** Файл эстафеты читается целиком: половина снимка хуже отсутствия снимка. */
+function readHandoffFile(path: string): HandoffData {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    throw new UserError(3, `файл эстафеты ${path} не читается: выполните run handoff заново`)
+  }
+
+  const data = parsed as Partial<HandoffData> | null
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    typeof data.run?.id !== 'string' ||
+    typeof data.segment !== 'number' ||
+    !Array.isArray(data.inWork)
+  ) {
+    throw new UserError(3, `файл эстафеты ${path} не похож на эстафету: выполните run handoff заново`)
+  }
+
+  return data as HandoffData
+}
+
+/**
+ * Последняя эстафета: файл свежее прогона, поэтому ищем по времени записи.
+ * Имя RUN1/RUN10 сравнивать нельзя — «10» лексикографически меньше «2».
+ */
+export function latestHandoff(root: string): { path: string; data: HandoffData } | null {
+  const dir = join(root, '.toolbox-al', 'reports')
+  if (!existsSync(dir)) return null
+
+  const files = readdirSync(dir)
+    .filter((name) => name.endsWith(HANDOFF_TAIL))
+    .map((name) => {
+      const path = join(dir, name)
+      return { path, name, mtime: statSync(path).mtimeMs }
+    })
+    .sort((a, b) => b.mtime - a.mtime || b.name.localeCompare(a.name))
+
+  const latest = files[0]
+  return latest ? { path: latest.path, data: readHandoffFile(latest.path) } : null
+}
+
+/**
+ * Подхватить прогон по последней эстафете. Часы двигаются общим правилом
+ * `advanceTime`: истёкшая аренда возвращает задачу в ready тем же путём, что и
+ * в `now`, — второго способа истечения в инструменте быть не должно.
+ *
+ * Задача, которая уже закрыта или заблокирована, в очередь не возвращается:
+ * «не active» — это не всегда «потерялась», иногда это «сделана».
+ */
+export function resumeRun(
+  db: DatabaseSync,
+  options: { root: string; now?: Date; actor?: string },
+): ResumeBrief {
+  const actor = options.actor ?? 'run resume'
+  const found = latestHandoff(options.root)
+  if (!found) {
+    throw new UserError(
+      1,
+      'handoff-файла нет: новая сессия подхватывает прогон по файлу, выполните run handoff',
+    )
+  }
+
+  const data = found.data
+  const run = getRunRecord(db, data.run.id)
+  if (!run) {
+    throw new UserError(
+      3,
+      `прогон ${data.run.id} из эстафеты не найден: файл устарел, выполните run handoff`,
+    )
+  }
+  if (run.endedAt) {
+    const open = activeRun(db)
+    if (open && open.id !== run.id) {
+      throw new UserError(1, `у прогона ${open.id} эстафета ещё не снята: выполните run handoff`)
+    }
+    throw new UserError(
+      1,
+      `прогон ${run.id} уже закрыт: подхватывать нечего, смотри run report ${run.id}`,
+    )
+  }
+
+  const now = options.now ?? new Date()
+  const advanced = advanceTime(db, now.toISOString())
+  const expired = new Set(advanced.expired)
+
+  const notes: ResumeNote[] = []
+  const released: string[] = []
+
+  for (const snapshot of data.inWork) {
+    const task = getTask(db, snapshot.id)
+    if (!task) {
+      notes.push({
+        taskId: snapshot.id,
+        action: 'missing',
+        text: `${snapshot.id} «${snapshot.title}» — задачи больше нет в базе`,
+      })
+      continue
+    }
+
+    if (expired.has(task.id)) {
+      if (task.status === 'ready') {
+        released.push(task.id)
+        const when = snapshot.leaseUntil ? ` ${stamp(snapshot.leaseUntil)}` : ''
+        notes.push({
+          taskId: task.id,
+          action: 'released',
+          text: `${task.id} «${task.title}» — вернул в очередь: аренда истекла${when}`,
+        })
+      } else {
+        notes.push({
+          taskId: task.id,
+          action: 'moved',
+          text:
+            `${task.id} «${task.title}» — аренда истекла, ` +
+            (task.status === 'needs_owner'
+              ? 'попытки кончились: нужно решение владельца'
+              : `задача стала ${task.status}`),
+        })
+      }
+      continue
+    }
+
+    if (task.status === 'active') {
+      // живая работа: держателя видно в разделе «в работе», трогать нечего
+      if (task.leaseUntil === null) {
+        releaseTask(db, { taskId: task.id, reason: 'аренда не записана', actor })
+        released.push(task.id)
+        notes.push({
+          taskId: task.id,
+          action: 'released',
+          text: `${task.id} «${task.title}» — вернул в очередь: аренда не записана`,
+        })
+      }
+      continue
+    }
+
+    if (task.status === 'open' || task.status === 'planned') {
+      // Вернуть в очередь можно только то, что инструмент сам считает готовым:
+      // задача, ждущая зависимости или неактивного этапа, остаётся где стоит —
+      // иначе resume обошёл бы гейт, который сторожит именно эти состояния.
+      if (isReady(db, task.id)) {
+        releaseTask(db, { taskId: task.id, reason: `задача не в работе: ${task.status}`, actor })
+        released.push(task.id)
+        notes.push({
+          taskId: task.id,
+          action: 'released',
+          text: `${task.id} «${task.title}» — вернул в очередь: задача не в работе (${task.status})`,
+        })
+      } else {
+        notes.push({
+          taskId: task.id,
+          action: 'moved',
+          text:
+            `${task.id} «${task.title}» — не в работе: ${task.status}` +
+            (task.status === 'open' ? ', ждёт зависимости' : ', этап не активен'),
+        })
+      }
+      continue
+    }
+
+    if (task.status === 'ready') {
+      notes.push({
+        taskId: task.id,
+        action: 'queued',
+        text: `${task.id} «${task.title}» — уже в очереди`,
+      })
+      continue
+    }
+
+    if (task.status === 'done' || task.status === 'cancelled') {
+      notes.push({
+        taskId: task.id,
+        action: 'closed',
+        text: `${task.id} «${task.title}» — ${task.status === 'done' ? 'закрыта' : 'отменена'}`,
+      })
+      continue
+    }
+
+    notes.push({
+      taskId: task.id,
+      action: 'moved',
+      text: `${task.id} «${task.title}» — не в работе: ${task.status}`,
+    })
+  }
+
+  // после сверки «в работе» и «очередь» берутся из базы: файл уже не правда
+  const inWork = tasksWithPlace(db, ['active', 'in_review'])
+  const queue = tasksWithPlace(db, ['ready'])
+  const owner = ownerHand(db)
+
+  const brief: ResumeBrief = {
+    run,
+    segment: run.segment,
+    fromSegment: data.segment,
+    at: data.at,
+    path: found.path,
+    done: mergedInRun(db, run, now.toISOString()),
+    inWork,
+    queue,
+    owner,
+    nextStep: nextStepOf(run, owner, inWork, queue),
+    notes,
+    released,
+    checked: data.inWork.length,
+  }
+
+  appendEvent(db, {
+    type: 'run.resumed',
+    actor,
+    subject: run.id,
+    after: {
+      fromSegment: data.segment,
+      segment: run.segment,
+      checked: brief.checked,
+      released,
+      nextStep: brief.nextStep,
+    },
+  })
+
+  return brief
+}
+
+function shortOwner(item: OwnerItem): string {
+  if (item.kind === 'question') {
+    const question = item.item as { text: string }
+    return `вопрос ${item.id} «${question.text}»`
+  }
+  if (item.kind === 'task') {
+    const task = item.item as { title: string }
+    return `задача ${item.id} «${task.title}»`
+  }
+  const stage = item.item as { name: string }
+  return `этап ${item.id} «${stage.name}»`
+}
+
+/**
+ * Бриф для новой сессии: 10–15 строк, а не пересказ файла. Очередь — первые
+ * пять (дальше неё всё равно не дойдёт в этом сегменте), остальные разделы
+ * упираются в три строки с честным «ещё N».
+ */
+export function renderResumeBrief(brief: ResumeBrief): string {
+  const closed = brief.notes.filter((note) => note.action === 'closed').length
+  const requests = brief.run.requests.length > 0 ? brief.run.requests.join(', ') : 'не выбраны'
+  const lines = [
+    `${brief.run.id} · сегмент ${brief.segment} · эстафета из сегмента ${brief.fromSegment}, ` +
+      `снята ${stamp(brief.at)}`,
+    `режим: ${MODE_TEXT[brief.run.mode]}${brief.run.nearest ? ' (плюс ближайшие)' : ''} · ` +
+      `запросы: ${requests}`,
+    `сверка с базой: в работе было ${brief.checked} · вернул в очередь ${brief.released.length}` +
+      (closed > 0 ? ` · закрыто ${closed}` : '') +
+      ` · в работе сейчас ${brief.inWork.length}`,
+  ]
+
+  for (const note of brief.notes.slice(0, 3)) lines.push(`  - ${note.text}`)
+  if (brief.notes.length > 3) lines.push(`  - ещё ${brief.notes.length - 3} по файлу`)
+
+  if (brief.done.length === 0) lines.push('сделано: пусто')
+  else {
+    lines.push(`сделано (${brief.done.length}):`)
+    for (const row of brief.done.slice(0, 3)) {
+      lines.push(`  - ${row.stageId} «${row.stageName}» — в dev ${stamp(row.mergedAt)}`)
+    }
+    if (brief.done.length > 3) lines.push(`  - ещё ${brief.done.length - 3}`)
+  }
+
+  if (brief.inWork.length === 0) lines.push('в работе: пусто')
+  else {
+    lines.push(`в работе (${brief.inWork.length}):`)
+    for (const task of brief.inWork.slice(0, 3)) lines.push(`  ${workLine(task)}`)
+    if (brief.inWork.length > 3) lines.push(`  - ещё ${brief.inWork.length - 3}`)
+  }
+
+  if (brief.queue.length === 0) lines.push('очередь: пусто')
+  else {
+    const first = brief.queue.slice(0, 5)
+    const tail = brief.queue.length > 5 ? ` · ещё ${brief.queue.length - 5}` : ''
+    lines.push(
+      `очередь (${brief.queue.length}): ` +
+        first.map((task) => `${task.id} «${task.title}»`).join(', ') +
+        tail,
+    )
+  }
+
+  if (brief.owner.length === 0) lines.push('нужны решения: нет')
+  else {
+    const first = brief.owner.slice(0, 3).map(shortOwner)
+    const tail = brief.owner.length > 3 ? ` · ещё ${brief.owner.length - 3}` : ''
+    lines.push(`нужны решения (${brief.owner.length}): ${first.join('; ')}${tail}`)
+  }
+
+  lines.push(`следующий шаг: ${brief.nextStep}`)
+  return lines.join('\n')
+}
+

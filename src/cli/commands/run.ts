@@ -27,7 +27,7 @@ import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { isJsonMode, ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 import { renderRunReport, writeRunReport } from '../../core/run-report.ts'
-import { renderHandoffSummary, writeHandoff } from '../../core/handoff.ts'
+import { renderHandoffSummary, renderResumeBrief, resumeRun, writeHandoff } from '../../core/handoff.ts'
 import { appendPowerLog } from '../../core/power.ts'
 import { readUsage, type Pricing, type UsageReport } from '../../core/usage.ts'
 import type { Config } from '../../core/config.ts'
@@ -51,7 +51,7 @@ const USAGE =
   'использование: run start --mode plan|all [--request R1 …] [--nearest] [--approve] ' +
   '[--power none|hibernate|shutdown] · run end <id> --reason owner|tasks|decision ' +
   '[--power hibernate|shutdown] · run review <id> --verdict ok|found [--note "…"] · ' +
-  'run handoff [<id>] · run report <id> · run power <id> [--power hibernate|shutdown] · run usage [бюджет] · run show'
+  'run handoff [<id>] · run resume · run report <id> · run power <id> [--power hibernate|shutdown] · run usage [бюджет] · run show'
 
 /** Настоящие системные команды: только из CLI, в тестах runner подменяется. */
 const systemRunner: CommandRunner = (command, args) => {
@@ -297,6 +297,17 @@ export default async function command(args: ParsedArgs) {
       { ...handoff, jsonPath: json, mdPath: md },
       `${renderHandoffSummary(handoff)}\nфайлы: ${md} · ${json}`,
     )
+    return 0
+  }
+
+  if (args.sub === 'resume') {
+    // новая сессия начинает с файла: он свежее памяти и чата
+    const brief = resumeRun(db, {
+      root: project.root,
+      actor: stringFlag(args, 'as') ?? 'orchestrator',
+    })
+
+    ok(brief, renderResumeBrief(brief))
     return 0
   }
 
