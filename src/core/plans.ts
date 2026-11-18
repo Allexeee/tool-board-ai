@@ -138,6 +138,14 @@ export function getPlan(
   return row ? toPlan(row) : null
 }
 
+/** Допущения применённого плана: после apply о них должна помнить каждая задача фичи. */
+export function assumptionsForFeature(db: DatabaseSync, featureId: string): string[] {
+  const row = db
+    .prepare('select assumptions from plans where feature_id = ? order by version desc limit 1')
+    .get(featureId) as { assumptions: string } | undefined
+  return row ? (JSON.parse(row.assumptions) as string[]) : []
+}
+
 export function approvePlan(
   db: DatabaseSync,
   input: { requestId: string; version: number; actor: string },
