@@ -46,6 +46,24 @@ export function lastSnapshot(db: DatabaseSync, taskId: string): string[] | null 
   }
 }
 
+/**
+ * Задача уже кому-то выдавалась: в журнале есть её выдача. Такая задача второй раз
+ * не выдаётся — иначе счётчик выдач растёт на ровном месте.
+ */
+function wasAssigned(db: DatabaseSync, taskId: string): boolean {
+  const rows = db
+    .prepare("select after from events where type = 'hand.assigned' and after is not null")
+    .all() as Array<{ after: string }>
+
+  return rows.some((row) => {
+    try {
+      return (JSON.parse(row.after) as { task?: unknown }).task === taskId
+    } catch {
+      return false
+    }
+  })
+}
+
 export interface TakeOptions {
   executor: string
   taskId?: string
@@ -193,13 +211,6 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       throw new UserError(2, `задача ${task.id} уже занята или недоступна`)
     }
 
-    // взятие по id видно владельцу: задачу выдали рукой или её взяли прямо из очереди
-    const reserved = byId
-      ? (db.prepare('select executor_id from hand where task_id = ?').get(task.id) as
-          | { executor_id: string }
-          | undefined)
-      : undefined
-
     db.prepare('delete from hand where task_id = ?').run(task.id)
     // занятость «без задачи» кончается вместе с появлением задачи: держатель теперь известен.
     clearBusy(db, { executorId: executor.id, actor: executor.id })
@@ -211,7 +222,12 @@ export function takeTask(db: DatabaseSync, options: TakeOptions): Task {
       after: snapshot ? { leaseUntil, snapshot } : { leaseUntil },
     })
 
-    if (byId) appendAssigned(db, executor.id, task.id, reserved ? 'hand' : 'take', executor.id)
+    // взятие по id видно владельцу: задачу, которой ни у кого не было, считаем взятием из очереди.
+    // выданную раньше задачу взятие заново не выдаёт: её событие уже есть, а источник
+    // (рука или раздача) остаётся прежним — вторая запись только накрутила бы счётчик.
+    if (byId && !wasAssigned(db, task.id)) {
+      appendAssigned(db, executor.id, task.id, 'take', executor.id)
+    }
 
     return getTask(db, task.id)!
   })

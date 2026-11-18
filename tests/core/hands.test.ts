@@ -411,7 +411,7 @@ test('каждая выдача оставляет hand.assigned со своим
     { executor: 'w1', task: third, source: 'dispatch' },
   ])
 
-  // взятие по id задачи, лежавшей в руке, — источник hand
+  // взятие по id задачи из своей руки — не выдача: событие у неё уже есть, новое не пишется
   takeTask(db, { executor: 'w1', taskId: third })
 
   // взятие по id задачи, которой ни у кого не было — источник take
@@ -429,13 +429,13 @@ test('каждая выдача оставляет hand.assigned со своим
   const events = assignedOf(db)
   assert.deepEqual(
     events.map((event) => event.source),
-    ['hand', 'dispatch', 'dispatch', 'hand', 'take'],
-    'источники различаются: рука, раздача и взятие по id',
+    ['hand', 'dispatch', 'dispatch', 'take'],
+    'источники различаются: рука, раздача и взятие по id; взятие выданной задачи второй выдачи не пишет',
   )
   assert.equal(
     events.length,
-    5,
-    'событий ровно столько, сколько выдач: выдача рукой, две раздачи и два взятия по id',
+    4,
+    'событий ровно столько, сколько выдач: выдача рукой, две раздачи и взятие задачи, которой ни у кого не было',
   )
 })
 
@@ -544,6 +544,66 @@ test('dispatch и взятие по id дают счётчики 1/0/1', () => {
   takeTask(db, { executor: 'w2', taskId: pool.id })
 
   assert.deepEqual(countAssignments(db), { dispatch: 1, hand: 0, take: 1 })
+})
+
+test('взятие по id выданной задачи не пишет вторую выдачу: счётчики 1/0/0', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+
+  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
+  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
+  setFeatureBranch(db, feature.id, 'feat/test', 'C:/tmp/test-worktree')
+  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
+  activateNextStage(db, feature.id)
+  createTask(db, {
+    stageId: stage.id,
+    title: 'Первый шаг',
+    dod: ['a'],
+    size: 'S',
+    skill: 'backend',
+    class: 'standard',
+    scope: ['src/**'],
+  })
+  refreshReady(db)
+
+  // раздача выдала единственную задачу этапа
+  dispatchHands(db)
+  assert.deepEqual(countAssignments(db), { dispatch: 1, hand: 0, take: 0 })
+
+  // исполнитель берёт ту же задачу по id: она уже выдана, второй выдачи нет
+  const task = getHand(db, 'w1')[0]!
+  takeTask(db, { executor: 'w1', taskId: task.id })
+
+  assert.deepEqual(
+    countAssignments(db),
+    { dispatch: 1, hand: 0, take: 0 },
+    'взятие по id не двигает счётчик руками: задачу уже выдала раздача',
+  )
+  const assigned = assignedOf(db).filter((event) => event.task === task.id)
+  assert.equal(assigned.length, 1, 'у задачи ровно одно событие выдачи')
+  assert.equal(assigned[0]!.source, 'dispatch', 'источник выдачи не переписан взятием')
+})
+
+test('взятие по id задачи из руки не пишет вторую выдачу: источник остаётся hand', () => {
+  const db = openDb(':memory:')
+  const stageId = seed(db)
+  const first = `${stageId}-1`
+
+  setHand(db, 'w1', [first], 'owner')
+  assert.deepEqual(countAssignments(db), { dispatch: 0, hand: 1, take: 0 })
+
+  takeTask(db, { executor: 'w1', taskId: first })
+
+  assert.deepEqual(
+    countAssignments(db),
+    { dispatch: 0, hand: 1, take: 0 },
+    'задачу выдали руками один раз: взятие счётчик не двигает',
+  )
+  assert.deepEqual(
+    assignedOf(db).map((event) => [event.task, event.source]),
+    [[first, 'hand']],
+    'по задаче одно событие выдачи, и источник у него прежний',
+  )
 })
 
 const bin = resolve('bin/toolbox-al.ts')
