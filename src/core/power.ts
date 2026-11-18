@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
 import { appendEvent } from './events.ts'
@@ -34,6 +34,18 @@ export type CommandRunner = (command: string, args: string[]) => CommandResult
 
 /** Проверка «файл на месте»: настоящий диск в CLI, заглушка в тестах. */
 export type FileExists = (path: string) => boolean
+
+/**
+ * Журнал питания: без него неудачный `shutdown /h` выглядит как успех —
+ * именно так гибернация «сработала» и не сработала.
+ */
+export function appendPowerLog(root: string, line: string): string {
+  const dir = join(root, '.toolbox-al', 'reports')
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, 'power.log')
+  appendFileSync(file, `${new Date().toISOString()} ${line}\n`, 'utf8')
+  return file
+}
 
 /**
  * Системный диск: `hiberfil.sys` лежит в его корне, и это не всегда C:.

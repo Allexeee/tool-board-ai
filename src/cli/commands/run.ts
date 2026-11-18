@@ -1,4 +1,4 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import {
   activeRun,
@@ -26,6 +26,7 @@ import { boolFlag, listFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { isJsonMode, ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 import { renderRunReport, writeRunReport } from '../../core/run-report.ts'
+import { appendPowerLog } from '../../core/power.ts'
 import { relative } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -192,35 +193,53 @@ export default async function command(args: ParsedArgs) {
     const shown = relative(process.cwd(), plan.reportPath).replace(/\\/g, '/')
     const lines = [`${plan.run.id}  ${POWER_LABEL[plan.requested]} после отчёта`, `отчёт: ${shown}`]
     if (plan.note) lines.push(plan.note)
-    if (plan.action === 'shutdown') lines.push('выключаюсь сразу: shutdown /s /t 0')
 
-    // отмена по Ctrl+C: 90 секунд гибернации существуют ровно для этого
+    // отмена по Ctrl+C: 90 секунд существуют ровно для этого
     const controller = new AbortController()
     const onSigint = () => controller.abort()
     process.once('SIGINT', onSigint)
+
+    // каждый вызов и его код — в журнал: иначе неудачный shutdown выглядит как успех
+    let failed = 0
+    const loggedRunner: CommandRunner = (command, args) => {
+      const result = systemRunner(command, args)
+      const status = result.status ?? 'null'
+      if (result.status !== 0) failed += 1
+      appendPowerLog(
+        project.root,
+        `${command} ${args.join(' ')} → ${status}${result.output.trim() ? ` · ${result.output.trim()}` : ''}`,
+      )
+      return result
+    }
 
     let outcome: PowerOutcome
     try {
       outcome = await schedulePower({
         action: plan.action,
-        runner: systemRunner,
+        runner: loggedRunner,
         seconds: HIBERNATE_COUNTDOWN_SECONDS,
         signal: controller.signal,
-        onTick: (left) => {
-          if (!isJsonMode()) process.stdout.write(`\rгибернация через ${left} с, Ctrl+C отменяет   `)
+        onTick: (left, action) => {
+          if (isJsonMode()) return
+          const what = action === 'hibernate' ? 'гибернация' : 'выключение'
+          process.stdout.write(`\r${what} через ${left} с, Ctrl+C отменяет   `)
         },
       })
     } finally {
       process.off('SIGINT', onSigint)
     }
 
-    if (!isJsonMode() && plan.action === 'hibernate') process.stdout.write('\n')
+    if (!isJsonMode()) process.stdout.write('\n')
+
+    appendPowerLog(project.root, `итог: ${outcome}, действие ${plan.action}, отчет ${shown}`)
 
     const performed = POWER_LABEL[outcome as 'hibernate' | 'shutdown'] ?? 'питание'
     lines.push(
       outcome === 'cancelled'
         ? 'питание отменено: машина остаётся включённой'
-        : `питание: ${performed} выполнена`,
+        : failed > 0
+          ? `питание: ${performed} не подтверждена — код возврата записан в журнал`
+          : `питание: ${performed} выполнена`,
     )
 
     ok(
@@ -258,3 +277,4 @@ export default async function command(args: ParsedArgs) {
 
   throw new UserError(3, USAGE)
 }
+

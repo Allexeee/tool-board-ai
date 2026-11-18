@@ -1,7 +1,7 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
@@ -9,6 +9,7 @@ import { endRun, getRunRecord, startRun } from '../../src/core/runs.ts'
 import {
   effectivePower,
   hibernateFile,
+  appendPowerLog,
   hibernateInstalled,
   hibernateSupported,
   orderRunPower,
@@ -390,3 +391,15 @@ test(
     assert.equal(powerOf('RUN3').endedAt, null, 'прогон остался открытым')
   },
 )
+
+test('журнал питания пишет команду и код возврата', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-power-log-'))
+
+  const file = appendPowerLog(root, 'shutdown /h → 1')
+  appendPowerLog(root, 'итог: cancelled')
+
+  const text = readFileSync(file, 'utf8')
+  assert.match(text, /shutdown \/h → 1/)
+  assert.match(text, /итог: cancelled/)
+  assert.equal(text.split('\n').filter(Boolean).length, 2)
+})
