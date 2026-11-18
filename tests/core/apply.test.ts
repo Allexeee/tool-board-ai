@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { openDb } from '../../src/core/db.ts'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { addRequest, getRequest } from '../../src/core/requests.ts'
@@ -193,10 +193,60 @@ test('опечатка в каталоге по-прежнему ловится,
   assert.match(validatePlan(plan, { root }).join('\n'), /src\/stroe не существует/)
 })
 
+test('шаг со ссылкой на спеку применяется, задача помнит спеку', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-spec-'))
+  mkdirSync(join(root, 'docs'), { recursive: true })
+  writeFileSync(join(root, 'docs/spec.md'), '# Оплата\n')
+
+  const { db, request, plan } = fixture([{ ...step, spec: 'docs/spec.md#Оплата' }])
+  // как plan approve: план считается утверждённым, проверяется только содержимое
+  assert.deepEqual(validatePlan({ ...plan, approvedAt: new Date().toISOString() }, { root }), [])
+
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+  const result = applyPlan(db, { requestId: request.id })
+
+  const saved = db.prepare('select spec from tasks where id = ?').get(result.tasks[0].id) as {
+    spec: string | null
+  }
+  assert.equal(saved.spec, 'docs/spec.md#Оплата')
+})
+
+test('ссылка на несуществующую спеку не проходит проверку', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-spec-missing-'))
+  const { plan } = fixture([{ ...step, spec: 'docs/spec.md' }])
+
+  assert.match(validatePlan(plan, { root }).join('\n'), /спеки docs\/spec\.md нет/)
+})
+
+test('спека вне проекта отвергается', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-plan-spec-escape-'))
+
+  const absolute = fixture([{ ...step, spec: '/etc/spec.md' }])
+  assert.match(validatePlan(absolute.plan, { root }).join('\n'), /относительной/)
+
+  const escape = fixture([{ ...step, spec: '../spec.md' }])
+  assert.match(validatePlan(escape.plan, { root }).join('\n'), /выходить за проект/)
+})
+
+test('шаг без спеки применяется как раньше', () => {
+  const { db, request } = fixture()
+  approvePlan(db, { requestId: request.id, version: 1, actor: 'owner' })
+
+  const result = applyPlan(db, { requestId: request.id })
+  const saved = db.prepare('select spec from tasks where id = ?').get(result.tasks[0].id) as {
+    spec: string | null
+  }
+  assert.equal(saved.spec, null)
+})
+
 const bin = resolve('bin/toolbox-al.ts')
 
 function runCli(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8' })
+  const result = spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    windowsHide: true,
+  })
   return { code: result.status, out: result.stdout, err: result.stderr }
 }
 

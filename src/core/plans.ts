@@ -10,6 +10,11 @@ export interface PlanStep {
   size: 'XS' | 'S' | 'M' | 'L'
   dod: string[]
   scope: string[]
+  /**
+   * Раздел спеки, на который опирается шаг: `docs/spec.md` или `docs/spec.md#Оплата`.
+   * Необязателен, но если указан — расхождение с документом видно на приёмке.
+   */
+  spec?: string
   deps?: number[]
 }
 
