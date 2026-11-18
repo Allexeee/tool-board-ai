@@ -4,7 +4,7 @@ import { activateNextStage, addStage, getStage, listStages } from '../../core/st
 import { getFeature } from '../../core/features.ts'
 import { listTasks } from '../../core/tasks.ts'
 import { mergeStage } from '../../core/git/merge.ts'
-import { dispatchHands } from '../../core/hands.ts'
+import { refillHands } from '../../core/hands.ts'
 import { acceptStage, rejectStage } from '../../core/accept.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -82,8 +82,8 @@ export default async function command(args: ParsedArgs) {
     const stageId = args.positionals[0]
     if (!stageId) throw new UserError(3, 'использование: stage merge F1.S1')
     const result = mergeStage(db, { root: project.root, stageId, config: project.config })
-    // слитый этап больше не держит себя за одной рукой: свободные руки добираются сразу
-    if (result.merged) dispatchHands(db)
+    // слитый этап больше не держит себя за одной рукой: свободные руки добираются, пока прогон идёт
+    if (result.merged) refillHands(db)
     const deferred = result.deferred ?? []
     const tail = deferred.length > 0 ? ` · не вошло: ${deferred.join(', ')}` : ''
     ok(

@@ -6,6 +6,7 @@ import { depsOf, isSatisfied } from './deps.ts'
 import { getExecutor, listExecutors, type Executor } from './executors.ts'
 import { getTask, type Task } from './tasks.ts'
 import { isReady } from './deps.ts'
+import { activeRun } from './runs.ts'
 
 const CLASS_ORDER: Record<string, number> = {
   expedite: 0,
@@ -166,7 +167,7 @@ function followersOf(db: DatabaseSync, taskId: string): string[] {
  * в одном рабочем каталоге, поэтому этап не делят между исполнителями.
  * Слитый этап ничей: его задачи закрыты, в очереди и в руке их нет.
  */
-function stageOwner(db: DatabaseSync, stageId: string): string | null {
+export function stageOwner(db: DatabaseSync, stageId: string): string | null {
   const inWork = db
     .prepare(
       "select holder as owner from tasks where stage_id = ? and status = 'active' and holder is not null " +
@@ -184,8 +185,11 @@ function stageOwner(db: DatabaseSync, stageId: string): string | null {
   return reserved?.owner ?? null
 }
 
-/** Этап не делят: его задачи достаются тому, кто уже держит этап. Свободный этап и пул — любому. */
-function ownsStage(db: DatabaseSync, executorId: string, stageId: string | null): boolean {
+/**
+ * Этап не делят: его задачи достаются тому, кто уже держит этап. Свободный этап и пул — любому.
+ * Правило одно для раздачи и для руки, выставленной вручную.
+ */
+export function ownsStage(db: DatabaseSync, executorId: string, stageId: string | null): boolean {
   if (stageId === null) return true
   const owner = stageOwner(db, stageId)
   return owner === null || owner === executorId
@@ -297,6 +301,17 @@ export function dispatchHands(db: DatabaseSync): void {
   })
 }
 
+/**
+ * Автодобор после события (задача закрыта, этап слит): только пока прогон идёт.
+ * Вне прогона руки никто не разбирает, а резерв молча исключает задачи из очереди —
+ * поэтому за пределами прогона не наполняем.
+ */
+export function refillHands(db: DatabaseSync): boolean {
+  if (!activeRun(db)) return false
+  dispatchHands(db)
+  return true
+}
+
 /** Задачи руки в её порядке: готовые к работе и следующие шаги, ждущие своей очереди. */
 export function getHand(db: DatabaseSync, executorId: string): Task[] {
   const rows = db
@@ -347,6 +362,12 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
       if (reserved) {
         throw new UserError(3, `задача ${id} уже зарезервирована за ${reserved.executor_id}`)
       }
+
+      // этап не делят и руками: его задачи живут в одном рабочем каталоге фичи.
+      // правило то же, что у раздачи, — иначе рука открывает вторую дверь в тот же каталог.
+      if (task.stageId !== null && !ownsStage(db, executorId, task.stageId)) {
+        throw new UserError(3, `этап ${task.stageId} уже у ${stageOwner(db, task.stageId)}`)
+      }
     }
 
     // что уже выдано этой руке: повторная установка тех же задач — не новая выдача
@@ -378,6 +399,33 @@ export function setHand(db: DatabaseSync, executorId: string, taskIds: string[],
     }
 
     return getHand(db, executorId)
+  })
+}
+
+/**
+ * Освободить руку целиком: строки руки удаляются, задача снова свободна для раздачи.
+ * Событие хранит, что именно сняли: иначе бронь исчезает бесследно.
+ */
+export function clearHand(db: DatabaseSync, executorId: string, actor: string): string[] {
+  return tx(db, () => {
+    const executor = getExecutor(db, executorId)
+    if (!executor) throw new UserError(3, `исполнитель ${executorId} не найден`)
+
+    const tasks = (
+      db
+        .prepare('select task_id from hand where executor_id = ? order by position, task_id')
+        .all(executorId) as Array<{ task_id: string }>
+    ).map((row) => row.task_id)
+
+    db.prepare('delete from hand where executor_id = ?').run(executorId)
+    appendEvent(db, {
+      type: 'hand.cleared',
+      actor,
+      subject: executorId,
+      after: { tasks },
+    })
+
+    return tasks
   })
 }
 

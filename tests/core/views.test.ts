@@ -298,12 +298,13 @@ test('причина свободной задачи: нет исполните�
   assert.equal(reasonOf(db, `${stageId}-4`), 'нет исполнителя: audio')
 })
 
-test('причина свободной задачи: все исполнители с навыком заняты', () => {
+test('причина свободной задачи: этап держит другая рука', () => {
   const db = openDb(':memory:')
   const stageId = seed(db)
   db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(`${stageId}-1`)
 
-  assert.equal(reasonOf(db, `${stageId}-2`), 'исполнители заняты')
+  // точнее, чем «заняты»: задача того же этапа уйдёт только владельцу этапа
+  assert.equal(reasonOf(db, `${stageId}-2`), 'этап у w1')
 })
 
 test('причина свободной задачи: ждёт зависимость', () => {

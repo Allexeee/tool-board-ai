@@ -5,7 +5,7 @@ import { listStages, type StageStatus } from './stages.ts'
 import { busyOf, listExecutors } from './executors.ts'
 import { listTasks, type TaskStatus } from './tasks.ts'
 import { depsOf, isSatisfied } from './deps.ts'
-import { getHand, dispatchHands, nextTask, type AssignSource } from './hands.ts'
+import { getHand, dispatchHands, nextTask, stageOwner, type AssignSource } from './hands.ts'
 import { activeRun, lastClosedRun } from './runs.ts'
 import { ownerHand } from './questions.ts'
 import { listDecisions } from './decisions.ts'
@@ -227,7 +227,15 @@ export function taskQueue(db: DatabaseSync): QueueRow[] {
     const reason =
       task.holder !== null || handOf.has(task.id)
         ? null
-        : reasonOf({ task, place, waitsFor, feature: featureId ? featureOf.get(featureId) : undefined, executors, isBusy })
+        : reasonOf({
+            task,
+            place,
+            waitsFor,
+            feature: featureId ? featureOf.get(featureId) : undefined,
+            executors,
+            isBusy,
+            stageOwner: task.stageId ? stageOwner(db, task.stageId) : null,
+          })
 
     rows.set(task.id, {
       taskId: task.id,
@@ -268,6 +276,7 @@ function reasonOf(input: {
   feature: { worktree: string | null } | undefined
   executors: Array<{ id: string; skills: string[]; handSize: number }>
   isBusy: (executorId: string, handSize: number) => boolean
+  stageOwner?: string | null
 }): string {
   const { task, place, waitsFor, feature, executors, isBusy } = input
 
@@ -285,6 +294,8 @@ function reasonOf(input: {
   if (task.stageId !== null) {
     if (!place || place.status !== 'active') return 'этап не активен'
     if (!feature || feature.worktree === null) return 'нет каталога фичи'
+    // этап живёт в одном каталоге: пока его держит другая рука, раздача сюда не пойдёт
+    if (input.stageOwner) return `этап у ${input.stageOwner}`
   }
 
   const skilled = executors.filter((executor) => executor.skills.includes(task.skill))
@@ -567,6 +578,7 @@ export function dispatchPlan(db: DatabaseSync): DispatchPlan {
 
   return { assignments, warnings }
 }
+
 
 
 
