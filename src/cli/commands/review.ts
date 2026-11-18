@@ -1,6 +1,7 @@
-import { findProject } from '../../core/project.ts'
+﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { formatDigest, reviewDigest } from '../../core/digest.ts'
+import { formatWeek, reviewWeek } from '../../core/week.ts'
 import { submitReview, type Verdict } from '../../core/reviews.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
@@ -18,6 +19,14 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  // week — поток, а не список: сколько стоило, что переоткрывали и сколько срочного
+  if (args.positionals[0] === 'week') {
+    const days = Number(stringFlag(args, 'days') ?? 7)
+    const report = reviewWeek(db, { days: Number.isFinite(days) && days > 0 ? days : 7 })
+    ok(report, formatWeek(report))
+    return 0
+  }
+
   const taskId = args.positionals[0]
   const reviewer = stringFlag(args, 'as')
   const verdict = stringFlag(args, 'verdict') as Verdict | undefined
@@ -32,3 +41,4 @@ export default async function command(args: ParsedArgs) {
   ok(review, `${review.taskId}  ${review.verdict}${review.comments ? ': ' + review.comments : ''}`)
   return 0
 }
+
