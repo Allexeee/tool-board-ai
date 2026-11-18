@@ -196,19 +196,42 @@ test('mergeManaged отказывается, если в файле нет ма�
   assert.equal(mergeManaged('# просто текст\n', `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`), null)
 })
 
-test('refreshOpenCode не затирает файл без маркеров даже с --yes', () => {
+test('файл без маркеров без --yes: файл цел, рядом .new', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
 
   const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
   writeFileSync(path, '# моя версия без маркеров\n', 'utf8')
 
-  const result = refreshOpenCode(root, '9.9.9', { yes: true })
+  const result = refreshOpenCode(root, '9.9.9')
   const skill = result.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
 
   assert.equal(skill.status, 'pending')
   assert.equal(readFileSync(path, 'utf8'), '# моя версия без маркеров\n')
   assert.match(readFileSync(`${path}.new`, 'utf8'), /toolbox-al/)
+  assert.equal(existsSync(`${path}.bak`), false)
+})
+
+test('файл без маркеров: план update, refresh --yes заменяет и держит .bak', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
+  writeFileSync(path, '# старый скилл без маркеров\n', 'utf8')
+
+  const planned = planOpenCode(root, '9.9.9').find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
+  assert.equal(planned.status, 'update', 'не blocked: проект должен догонять релиз')
+
+  const result = refreshOpenCode(root, '9.9.9', { yes: true })
+  const skill = result.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
+  assert.equal(skill.status, 'updated')
+
+  const after = readFileSync(path, 'utf8')
+  assert.match(after, /toolbox-al:begin/, 'файл заменён новым')
+  assert.match(after, /toolbox-al:end/)
+  assert.equal(readFileSync(`${path}.bak`, 'utf8'), '# старый скилл без маркеров\n', 'старая версия рядом')
+
+  const again = planOpenCode(root, '9.9.9').find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
+  assert.equal(again.status, 'same', 'повторный план после обновления — same')
 })
 
 test('planOpenCode показывает дифф и ничего не пишет', () => {
@@ -227,14 +250,15 @@ test('planOpenCode показывает дифф и ничего не пишет
   assert.equal(readFileSync(path, 'utf8'), withNote)
 })
 
-test('planOpenCode помечает чужой файл как blocked', () => {
+test('planOpenCode считает файл без маркеров обновлением и ничего не пишет', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
   writeFileSync(path, '# без маркеров\n', 'utf8')
 
   const items = planOpenCode(root, '9.9.9')
-  assert.equal(items.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!.status, 'blocked')
+  assert.equal(items.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!.status, 'update')
+  assert.equal(readFileSync(path, 'utf8'), '# без маркеров\n', 'план не пишет')
 })
 
 test('lineDiff показывает изменённые строки', () => {

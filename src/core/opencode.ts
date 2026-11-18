@@ -159,6 +159,13 @@ export function lineDiff(current: string, next: string): string {
   return lines.join('\n')
 }
 
+/** Маркеры на месте и в правильном порядке: по ним файл и опознаётся как наш. */
+function hasMarkers(text: string): boolean {
+  const begin = text.indexOf(AGENTS_BEGIN)
+  const end = text.indexOf(AGENTS_END)
+  return begin !== -1 && end !== -1 && end > begin
+}
+
 /** Что случится с управляемыми файлами, если применить обновление. Ничего не пишет. */
 export function planOpenCode(root: string, toolVersion: string): ManagedPlanItem[] {
   const files: Array<[string, string, boolean]> = [
@@ -179,7 +186,14 @@ export function planOpenCode(root: string, toolVersion: string): ManagedPlanItem
     }
 
     const merged = mergeManaged(current, next)
-    if (merged === null) return { path: relative, status: 'blocked' }
+    if (merged === null) {
+      // файл от старой версии: маркеров в нём ещё нет, а в новом они есть.
+      // Это обновление, а не вечная блокировка: иначе проект не догонит релиз.
+      if (!hasMarkers(current) && hasMarkers(next)) {
+        return { path: relative, status: 'update', diff: lineDiff(current, next) }
+      }
+      return { path: relative, status: 'blocked' }
+    }
     if (merged === current) return { path: relative, status: 'same' }
     return { path: relative, status: 'update', diff: lineDiff(current, merged) }
   })
@@ -228,8 +242,16 @@ export function refreshOpenCode(
     if (merge) {
       const merged = mergeManaged(current, next)
 
-      // файл без маркеров — чужой: не затираем даже с --yes, кладём рядом .new
+      // файл без маркеров, а в новом они есть: это версия от старого релиза —
+      // с --yes заменяем целиком и держим копию рядом как .bak
       if (merged === null) {
+        if (options.yes && !hasMarkers(current) && hasMarkers(next)) {
+          writeFileSync(`${path}.bak`, current, 'utf8')
+          writeFileSync(path, next, 'utf8')
+          result.push({ path: relative, status: 'updated' })
+          continue
+        }
+        // без --yes и для чужого формата — прежнее поведение: рядом .new, файл цел
         writeFileSync(`${path}.new`, next, 'utf8')
         result.push({ path: relative, status: 'pending' })
         continue
