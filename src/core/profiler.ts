@@ -38,6 +38,31 @@ export interface ProfileExecutor {
   model: string | null
 }
 
+/** Сессия в окне замера: снимок для меток и приростов между ними. */
+export interface ProfileSession {
+  id: string
+  /** Все токены сессии: вход, выход, reasoning и кеш. */
+  tokens: number
+  /** Цена сессии: cost из базы или по тарифу; null — не посчитана. */
+  amount: number | null
+}
+
+/** Метка фазы: время и снимок по сессиям, чтобы прирост считался по каждой. */
+export interface ProfileMark {
+  label: string
+  at: string
+  sessions: ProfileSession[]
+}
+
+/** Фаза замера: отрезок между соседними метками. */
+export interface ProfilePhase {
+  label: string
+  minutes: number
+  /** Прирост токенов: разница снимков по сессиям, новая сессия входит целиком. */
+  tokens: number
+  amount: number | null
+}
+
 export interface ProfileMarker {
   /** Метка владельца: «2 агента», «без субагентов» — по ней и сравнивают. */
   label: string
@@ -47,6 +72,8 @@ export interface ProfileMarker {
   /** Прогон, если он был активен на старте замера. */
   run: string | null
   executors: ProfileExecutor[]
+  /** Метки фаз в порядке появления; пусто — замер без фаз. */
+  marks: ProfileMark[]
 }
 
 export interface StoredMarker extends ProfileMarker {
@@ -100,6 +127,8 @@ export interface ProfileAvailable {
   basis: ProfileBasis
   agents: AgentProfile[]
   totals: ProfileTotals
+  /** Снимок по сессиям: по нему считаются приросты между метками. */
+  sessions: ProfileSession[]
   /** Почему время работы, простой или цена не посчитаны; null — всё на месте. */
   note: string | null
 }
@@ -115,6 +144,8 @@ export type ProfileWindow = ProfileAvailable | ProfileUnavailable
 export type ProfileEnd = {
   marker: StoredMarker
   durationMs: number
+  /** Фазы между метками; пусто — меток не было. */
+  phases: ProfilePhase[]
 } & ProfileWindow
 
 export interface StartOptions {
@@ -128,6 +159,15 @@ export interface EndOptions {
   /** Путь к базе OpenCode. В тестах подменяется: настоящую базу не трогаем. */
   dbPath?: string | undefined
   /** Блок `pricing` из конфига проекта: ставки за миллион токенов и лимит. */
+  pricing?: Pricing | null | undefined
+  now?: Date
+}
+
+export interface MarkOptions {
+  root: string
+  /** Метка фазы: «создание», «брифы», «работа», «слияние». */
+  label: string
+  dbPath?: string | undefined
   pricing?: Pricing | null | undefined
   now?: Date
 }
@@ -154,6 +194,26 @@ function stamp(iso: string): string {
   )
 }
 
+/** Метки из файла: битую метку пропускаем, а не роняем весь замер. */
+function marksOf(value: unknown): ProfileMark[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const mark = item as { label?: unknown; at?: unknown; sessions?: unknown } | null
+    if (!mark || typeof mark.label !== 'string' || typeof mark.at !== 'string') return []
+    const sessions = Array.isArray(mark.sessions)
+      ? mark.sessions.flatMap((entry) => {
+          const session = entry as { id?: unknown; tokens?: unknown; amount?: unknown } | null
+          if (!session || typeof session.id !== 'string') return []
+          const tokens = typeof session.tokens === 'number' && Number.isFinite(session.tokens) ? session.tokens : 0
+          const amount =
+            typeof session.amount === 'number' && Number.isFinite(session.amount) ? session.amount : null
+          return [{ id: session.id, tokens, amount }]
+        })
+      : []
+    return [{ label: mark.label, at: mark.at, sessions }]
+  })
+}
+
 function readMarker(path: string): ProfileMarker | null {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')) as Partial<ProfileMarker>
@@ -164,6 +224,7 @@ function readMarker(path: string): ProfileMarker | null {
       endedAt: typeof parsed.endedAt === 'string' ? parsed.endedAt : null,
       run: typeof parsed.run === 'string' ? parsed.run : null,
       executors: Array.isArray(parsed.executors) ? (parsed.executors as ProfileExecutor[]) : [],
+      marks: marksOf(parsed.marks),
     }
   } catch {
     return null
@@ -198,6 +259,18 @@ function writeMarker(path: string, marker: ProfileMarker): void {
   writeFileSync(path, JSON.stringify(marker, null, 2) + '\n', 'utf8')
 }
 
+/** Маркер в том виде, в каком он ложится в файл: без пути и без лишних полей. */
+function toMarker(marker: ProfileMarker): ProfileMarker {
+  return {
+    label: marker.label,
+    startedAt: marker.startedAt,
+    endedAt: marker.endedAt,
+    run: marker.run,
+    executors: marker.executors,
+    marks: marker.marks,
+  }
+}
+
 /**
  * Начать замер: маркер с меткой, временем, активным прогоном и составом
  * исполнителей. Второй старт без `profiler end` — отказ: иначе маркер
@@ -225,6 +298,7 @@ export function startProfile(db: DatabaseSync, options: StartOptions): StoredMar
       skills: executor.skills,
       model: executor.model,
     })),
+    marks: [],
   }
 
   const path = join(reportsDir(options.root), `${MARKER_PREFIX}${fileStamp(now)}${MARKER_SUFFIX}`)
@@ -242,6 +316,7 @@ function columnsOf(db: DatabaseSync, table: string): Set<string> {
 }
 
 interface SessionRow {
+  id: string
   agent: string
   input: number
   output: number
@@ -366,7 +441,7 @@ function readWindow(
       : "'без агента'"
 
     const sql =
-      `select ${agent} as agent, ` +
+      `select id, ${agent} as agent, ` +
       `${value('tokens_input')} as input, ` +
       `${value('tokens_output')} as output, ` +
       `${value('tokens_reasoning')} as reasoning, ` +
@@ -463,6 +538,18 @@ function readWindow(
     const budget = budgetOf(window.pricing)
     const rates = hasRates(window.pricing) ? window.pricing : null
 
+    // Снимок по сессиям: токены в сессии накопительные, поэтому прирост фазы
+    // считается как разница снимков по каждому id, а не по общей сумме
+    const sessions: ProfileSession[] = rows.map((row) => {
+      const override = rates?.agents?.[row.agent]
+      const tariff = override ? { ...rates, ...override } : rates
+      return {
+        id: row.id,
+        tokens: row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite,
+        amount: row.cost > 0 ? row.cost : tariff ? priceOf(tariff, row) : null,
+      }
+    })
+
     const agents: AgentProfile[] = [...byAgent.values()]
       .map((acc) => {
         // агент может переопределить ставки проекта — как в учёте токенов
@@ -557,6 +644,7 @@ function readWindow(
       basis,
       agents,
       totals,
+      sessions,
       note: notes.length > 0 ? notes.join('; ') : null,
     }
   } finally {
@@ -583,14 +671,7 @@ export function endProfile(options: EndOptions): ProfileEnd {
 
   const startedAt = Date.parse(last.startedAt)
   const marker: StoredMarker = { ...last, endedAt: now.toISOString() }
-  const written: ProfileMarker = {
-    label: marker.label,
-    startedAt: marker.startedAt,
-    endedAt: marker.endedAt,
-    run: marker.run,
-    executors: marker.executors,
-  }
-  writeMarker(marker.path, written)
+  writeMarker(marker.path, toMarker(marker))
 
   const durationMs = Math.max(0, now.getTime() - (Number.isNaN(startedAt) ? now.getTime() : startedAt))
   const pricing = options.pricing === undefined ? pricingOf(options.root) : options.pricing
@@ -601,7 +682,89 @@ export function endProfile(options: EndOptions): ProfileEnd {
     projectDir: options.root,
   })
 
-  return { marker, durationMs, ...window }
+  // фазы считаются по снимкам: без базы считать нечего, метки остаются в маркере
+  const phases = window.available ? phasesOf(marker, window.sessions, now.getTime()) : []
+
+  return { marker, durationMs, phases, ...window }
+}
+
+/**
+ * Поставить метку фазы: время и снимок по сессиям в окне замера.
+ * Снимок нужен по каждой сессии: длинная сессия растёт во всех фазах, и по
+ * общей сумме прирост не отделить. Без активного замера ставить некуда.
+ */
+export function markProfile(options: MarkOptions): { marker: StoredMarker; mark: ProfileMark } {
+  const now = options.now ?? new Date()
+  const last = lastProfile(options.root)
+  if (!last) throw new UserError(1, 'замеров нет: сначала profiler start')
+  if (last.endedAt !== null) {
+    throw new UserError(
+      1,
+      `замер «${last.label}» уже закрыт ${stamp(last.endedAt)}: метку ставить некуда`,
+    )
+  }
+
+  const label = options.label.trim()
+  if (!label) throw new UserError(3, 'нужна метка: profiler mark "создание"')
+
+  const startedAt = Date.parse(last.startedAt)
+  const pricing = options.pricing === undefined ? pricingOf(options.root) : options.pricing
+  const window = readWindow(options.dbPath ?? opencodeDbPath(), {
+    since: Number.isNaN(startedAt) ? now.getTime() : startedAt,
+    until: now.getTime(),
+    pricing,
+    projectDir: options.root,
+  })
+
+  // метка без цифр обманула бы отчёт: лучше отказать, чем записать нули
+  if (!window.available) throw new UserError(1, `метка без цифр не нужна: ${window.reason}`)
+
+  const mark: ProfileMark = { label, at: now.toISOString(), sessions: window.sessions }
+  const marker: StoredMarker = { ...last, marks: [...last.marks, mark] }
+  writeMarker(marker.path, toMarker(marker))
+
+  return { marker, mark }
+}
+
+/**
+ * Фазы между метками: прирост по каждой сессии отдельно, поэтому длинная
+ * сессия попадает в свою фазу, а новая считается целиком.
+ */
+function phasesOf(marker: ProfileMarker, end: ProfileSession[], endedAt: number): ProfilePhase[] {
+  if (marker.marks.length === 0) return []
+
+  const bounds = [
+    { at: Date.parse(marker.startedAt), sessions: [] as ProfileSession[] },
+    ...marker.marks.map((mark) => ({ at: Date.parse(mark.at), sessions: mark.sessions })),
+    { at: endedAt, sessions: end },
+  ]
+  const labels = [...marker.marks.map((mark) => mark.label), 'хвост']
+
+  const phases: ProfilePhase[] = []
+  for (let index = 1; index < bounds.length; index++) {
+    const from = bounds[index - 1]!
+    const to = bounds[index]!
+    const before = new Map(from.sessions.map((session) => [session.id, session]))
+
+    let tokens = 0
+    let amount: number | null = 0
+    for (const session of to.sessions) {
+      const was = before.get(session.id)
+      tokens += Math.max(0, session.tokens - (was?.tokens ?? 0))
+      if (amount === null) continue
+      if (session.amount === null || (was !== undefined && was.amount === null)) amount = null
+      else amount += Math.max(0, session.amount - (was?.amount ?? 0))
+    }
+
+    const minutes = Math.max(0, Math.round((to.at - from.at) / 60_000))
+    const empty = minutes === 0 && tokens === 0 && (amount === null || amount === 0)
+    // хвост после последней метки часто пустой: end сразу за меткой — не печатаем
+    if (index === bounds.length - 1 && empty) continue
+
+    phases.push({ label: labels[index - 1]!, minutes, tokens, amount })
+  }
+
+  return phases
 }
 
 /** Текст таблицы замера: цифры по агенту, итог и оговорка про природу времени. */
@@ -654,6 +817,18 @@ export function renderProfile(end: ProfileEnd): string {
       .join('  ')
 
   lines.push(render(header), ...rows.map(render))
+
+  // фазы между метками: сколько минут, сколько токенов приросло и на сколько денег
+  if (end.phases.length > 0) {
+    const labelWidth = Math.max(...end.phases.map((phase) => phase.label.length))
+    lines.push('фазы:')
+    for (const phase of end.phases) {
+      lines.push(
+        `  ${phase.label.padEnd(labelWidth)}  ${String(phase.minutes).padStart(3)} мин  ` +
+          `${numText(phase.tokens).padStart(9)} токенов  ${moneyText(phase.amount)}`,
+      )
+    }
+  }
 
   // подпись про цену строится по агентам: в смешанной таблице один источник
   // для всех — враньё, поэтому называем каждый и говорим, что они смешаны

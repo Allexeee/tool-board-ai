@@ -1,14 +1,15 @@
 import { relative } from 'node:path'
 import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { endProfile, renderProfile, startProfile } from '../../core/profiler.ts'
+import { endProfile, markProfile, renderProfile, startProfile } from '../../core/profiler.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
 import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
 
 const USAGE =
-  'использование: profiler start [--label "2 агента"] · profiler end\n' +
-  'метка нужна, чтобы сравнивать замеры: «1 агент», «2 агента», «3 агента»'
+  'использование: profiler start [--label "2 агента"] · profiler mark "создание" · profiler end\n' +
+  'метка нужна, чтобы сравнивать замеры: «1 агент», «2 агента», «3 агента»;\n' +
+  'метки делят замер на фазы: создание, брифы, работа, слияние'
 
 function stamp(iso: string): string {
   const at = new Date(iso)
@@ -43,6 +44,21 @@ export default async function command(args: ParsedArgs) {
     ok(
       { ...marker, path: shown },
       `замер «${marker.label}» начат ${stamp(marker.startedAt)} · ${run} · ${executors}\nмаркер: ${shown}`,
+    )
+    return 0
+  }
+
+  if (sub === 'mark') {
+    // метка — позицией или флагом: args.ts знает про --label у start, не про mark
+    const label = rest[0] ?? stringFlag(args, 'label')
+    if (!label) throw new UserError(3, 'нужна метка: profiler mark "создание"')
+
+    const { marker, mark } = markProfile({ root: project.root, label })
+    const tokens = mark.sessions.reduce((sum, session) => sum + session.tokens, 0)
+    ok(
+      { marker, mark },
+      `метка «${mark.label}» ${stamp(mark.at)} · сессий ${mark.sessions.length} · ` +
+        `${Math.round(tokens).toLocaleString('ru-RU').replace(/\u00A0/g, ' ')} токенов в снимке`,
     )
     return 0
   }
