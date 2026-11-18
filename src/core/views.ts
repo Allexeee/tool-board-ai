@@ -9,6 +9,7 @@ import { getHand, dispatchHands, nextTask, stageOwner, type AssignSource } from 
 import { activeRun, lastClosedRun } from './runs.ts'
 import { listDecisions } from './decisions.ts'
 import { openRequests } from './requests.ts'
+import type { LiveSession } from './usage.ts'
 import { pendingRelease } from './git/release.ts'
 
 export interface QueueRow {
@@ -333,11 +334,15 @@ export interface NowView {
     session: string | null
     /** занятость без задачи: причина и срок; null — свободен */
     busy: { reason: string; until: string } | null
+    /** есть работа: держит задачу, имеет руку или (для worker-0) идёт прогон */
+    working: boolean
   }>
   requests: Array<{ id: string; title: string }>
   plans: Array<{ id: string; requestId: string; title: string }>
   /** Фичи, у которых все этапы слиты в dev и ещё не выпущены: они ждут main. */
   waitingMain: Array<{ id: string; name: string }>
+  /** Живые субагенты сессии: дочерние сессии OpenCode за последнее окно. */
+  sessions: LiveSession[]
   unreleased: number
   /** Как выдавались задачи: раздачей, руками, взятием без выдачи. */
   assignment: AssignStats
@@ -375,7 +380,7 @@ function waitingMainFeatures(db: DatabaseSync): Array<{ id: string; name: string
     .map(([id, entry]) => ({ id, name: entry.name }))
 }
 
-export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowView {
+export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: LiveSession[] } = {}): NowView {
   const features = listFeatures(db)
     .filter((feature) => options.all === true || (feature.status !== 'done' && feature.status !== 'cancelled'))
     .map((feature) => {
@@ -426,16 +431,22 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     .filter((task) => task.stageId === null)
     .map((task) => ({ id: task.id, title: task.title }))
 
+  const run = activeRun(db)
   const holders = listExecutors(db).map((executor) => {
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
+    const hand = getHand(db, executor.id).map((task) => task.id)
     const busy = busyOf(db, executor.id)
+    // оркестратор занят и без задачи: пока идёт прогон, он работает
+    const working =
+      active.length > 0 || hand.length > 0 || (executor.id === 'worker-0' && run !== null)
     return {
       executor: executor.id,
       session: executor.session,
       task: active[0]?.id ?? null,
       active: active.map((task) => task.id),
-      hand: getHand(db, executor.id).map((task) => task.id),
+      hand,
       busy: busy ? { reason: busy.reason, until: busy.until } : null,
+      working,
     }
   })
 
@@ -462,9 +473,22 @@ export function nowView(db: DatabaseSync, options: { all?: boolean } = {}): NowV
     requests,
     plans,
     waitingMain: waitingMainFeatures(db),
+    sessions: options.sessions ?? [],
     unreleased: pendingRelease(db).length,
     assignment: assignmentStats(db),
   }
+}
+
+const SESSION_TITLE_LIMIT = 40
+
+/**
+ * Строка живого субагента для доски: агент, занятость и короткий заголовок.
+ * Заголовок режется до 40 символов; многоточие входит в лимит.
+ */
+export function liveSessionLine(session: LiveSession): string {
+  const title = session.title || 'без названия'
+  const short = title.length > SESSION_TITLE_LIMIT ? `${title.slice(0, SESSION_TITLE_LIMIT - 1)}…` : title
+  return `${session.agent} · ${session.busy ? 'занят' : 'простаивает'} · ${short}`
 }
 
 // владельцу нужен не журнал, а картина работы: строка на каждый этап.

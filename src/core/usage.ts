@@ -364,3 +364,104 @@ export function readUsage(options: UsageOptions = {}): UsageResult {
     }
   }
 }
+
+/** Живой субагент: дочерняя сессия OpenCode, которая работала в последнее окно. */
+export interface LiveSession {
+  id: string
+  agent: string
+  title: string
+  /** Последняя отметка «занят» новее последней «простаивает». */
+  busy: boolean
+  updatedAt: number
+}
+
+export interface LiveSessionOptions {
+  /** Путь к базе OpenCode. В тестах подменяется: настоящую базу не трогаем. */
+  dbPath?: string
+  env?: NodeJS.ProcessEnv
+  /** Каталог проекта: субагенты чужих проектов на доску не попадают. */
+  projectDir?: string
+  /** Насколько свежей должна быть сессия; по умолчанию два часа. */
+  withinMs?: number
+  /** Текущее время в epoch ms: в тестах подменяется. */
+  now?: number
+}
+
+const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000
+
+/**
+ * Субагенты сессии — дочерние строки session_v2, обновлённые за последнее окно.
+ * База OpenCode чужая: открываем read-only, а любая беда с ней даёт пустой список,
+ * потому что доска должна печататься и без неё.
+ */
+export function readLiveSessions(options: LiveSessionOptions = {}): LiveSession[] {
+  const dbPath = options.dbPath ?? opencodeDbPath(options.env)
+  if (!existsSync(dbPath)) return []
+
+  const now = options.now ?? Date.now()
+  const within = options.withinMs ?? LIVE_WINDOW_MS
+  const project = options.projectDir ? normalizeDirectory(options.projectDir) : null
+
+  let db: DatabaseSync
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true })
+  } catch {
+    return []
+  }
+
+  try {
+    if (!hasTable(db, 'session_v2')) return []
+
+    const names = new Set(
+      (db.prepare('pragma table_info(session_v2)').all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
+    )
+    // без родителя и времени сессию не отличить от обычной и не проверить свежесть
+    if (!names.has('parent_id') || !names.has('time_updated')) return []
+
+    const optional = (name: string): string => (names.has(name) ? name : 'null')
+    const archived = names.has('time_archived') ? 'and time_archived is null' : ''
+    const rows = db
+      .prepare(
+        `select id,
+                ${optional('agent')} as agent,
+                ${optional('title')} as title,
+                ${optional('directory')} as directory,
+                time_updated as updatedAt,
+                ${optional('time_busy')} as busyAt,
+                ${optional('time_idle')} as idleAt
+           from session_v2
+          where parent_id is not null ${archived}`,
+      )
+      .all() as unknown as Array<{
+      id: string
+      agent: string | null
+      title: string | null
+      directory: string | null
+      updatedAt: number | null
+      busyAt: number | null
+      idleAt: number | null
+    }>
+
+    return rows
+      .filter((row) => typeof row.updatedAt === 'number' && row.updatedAt >= now - within)
+      .filter((row) => project === null || belongsToProject(row.directory, project))
+      .map((row) => ({
+        id: row.id,
+        agent: row.agent?.trim() || 'без агента',
+        title: (row.title ?? '').trim(),
+        busy: (row.busyAt ?? 0) > (row.idleAt ?? 0),
+        updatedAt: row.updatedAt as number,
+      }))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  } catch {
+    return []
+  } finally {
+    try {
+      db.close()
+    } catch {
+      /* битая база не повод падать */
+    }
+  }
+}

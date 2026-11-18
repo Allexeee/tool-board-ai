@@ -1,8 +1,9 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, taskQueue, queueFreeReason, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
+import { nowView, ownerView, taskQueue, queueFreeReason, liveSessionLine, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
 import { pendingRelease } from '../../core/git/release.ts'
+import { readLiveSessions } from '../../core/usage.ts'
 import { listTasks } from '../../core/tasks.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
 import { ok, paint, setColorMode, type ColorName } from '../output.ts'
@@ -35,7 +36,9 @@ export default async function command(args: ParsedArgs) {
   if (boolFlag(args, 'no-color')) setColorMode(false)
 
   const all = boolFlag(args, 'all')
-  const view = nowView(db, { all })
+  // живые субагенты — из базы OpenCode; без неё список пуст, доска печатается как раньше
+  const sessions = readLiveSessions({ projectDir: project.root })
+  const view = nowView(db, { all, sessions })
   const owner = ownerView(db, { all })
 
   // ownerView уже отдаёт по строке на каждую фичу, включая фичу без этапов
@@ -92,10 +95,13 @@ export default async function command(args: ParsedArgs) {
     if (holder.busy) {
       state.push(paint(`занят: ${holder.busy.reason} (до ${shortTime(holder.busy.until)})`, 'cyan'))
     }
-    if (state.length === 0) state.push(paint('свободен', 'gray'))
+    // worker-0 может работать без задачи: пока идёт прогон, он занят
+    if (state.length === 0) state.push(holder.working ? paint('работает', 'cyan') : paint('свободен', 'gray'))
 
     return `  ${holder.executor.padEnd(12)} ${state.join(' · ')}`
   })
+
+  const sessionLines = view.sessions.map((session) => `    ${liveSessionLine(session)}`)
 
   const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
 
@@ -115,7 +121,8 @@ export default async function command(args: ParsedArgs) {
     (queue.length ? `\n\nОЧЕРЕДЬ\n` + queueLines.join('\n') : '') +
     (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
-    (holders.length ? holders.join('\n') : '  нет')
+    (holders.length ? holders.join('\n') : '  нет') +
+    (sessionLines.length ? '\n\n  СУБАГЕНТЫ\n' + sessionLines.join('\n') : '')
 
   ok(view, '\n' + indent(text))
   return 0
