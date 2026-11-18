@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 12
+export const SCHEMA_VERSION = 13
 
 const DDL_V1 = `
 create table if not exists meta (
@@ -261,6 +261,14 @@ export function migrate(db: DatabaseSync): number {
         .prepare("select 1 as found from pragma_table_info('tasks') where name = 'spec'")
         .get()
       if (!hasSpec) db.exec('alter table tasks add column spec text')
+    }
+    if (from < 13) {
+      // прогон переживает сессии: сегмент растёт с каждой передачей эстафеты.
+      // у прогонов, начатых до схемы 13, сегмент первый — они не потеряны
+      const hasSegment = db
+        .prepare("select 1 as found from pragma_table_info('runs') where name = 'segment'")
+        .get()
+      if (!hasSegment) db.exec('alter table runs add column segment integer not null default 1')
     }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +
