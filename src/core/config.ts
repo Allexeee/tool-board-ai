@@ -12,6 +12,8 @@ export interface Config {
   ownerStaleDays: number
   branchRetentionDays: number
   wipLimit: number
+  /** Сколько рабочих каталогов держать в пуле; 0 — свой каталог на каждую фичу. */
+  worktreePool: number
   branches: { main: string; dev: string }
   locale: string
 }
@@ -26,8 +28,16 @@ export const DEFAULT_CONFIG: Config = {
   ownerStaleDays: 3,
   branchRetentionDays: 30,
   wipLimit: 1,
+  worktreePool: 2,
   branches: { main: 'main', dev: 'dev' },
   locale: 'ru',
+}
+
+/** Размер пула: целое не меньше нуля; мусор в конфиге читается как значение по умолчанию. */
+function worktreePoolOf(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+    ? value
+    : DEFAULT_CONFIG.worktreePool
 }
 
 export function readConfig(path: string): Config {
@@ -42,6 +52,7 @@ export function readConfig(path: string): Config {
   return {
     ...DEFAULT_CONFIG,
     ...parsed,
+    worktreePool: worktreePoolOf(parsed.worktreePool),
     branches: { ...DEFAULT_CONFIG.branches, ...(parsed.branches ?? {}) },
   }
 }
