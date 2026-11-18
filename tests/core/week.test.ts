@@ -1,4 +1,4 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../../src/core/db.ts'
 import { addRequest } from '../../src/core/requests.ts'
@@ -33,6 +33,7 @@ function fixture() {
 test('review week считает переоткрытия, блокировки и срочные', () => {
   const { db, feature, first, second } = fixture()
   updateTask(db, first.id, { status: 'done' })
+  appendEvent(db, { type: 'task.done', actor: 'w1', subject: first.id })
   appendEvent(db, { type: 'task.reopened', actor: 'owner', subject: first.id })
   appendEvent(db, { type: 'task.blocked', actor: 'w1', subject: second.id, note: 'needs_decision' })
 
@@ -110,6 +111,7 @@ test('переоткрытия и блокировки до окна в неде
   // задача осталась в окне другим событием: переоткрытие старое, а работа свежая
   appendEvent(db, { type: 'task.taken', actor: 'w1', subject: first.id })
   updateTask(db, first.id, { status: 'done' })
+  appendEvent(db, { type: 'task.done', actor: 'w1', subject: first.id })
 
   const report = reviewWeek(db, { days: 7, now })
   const row = report.features.find((item) => item.featureId === feature.id)!
@@ -119,3 +121,19 @@ test('переоткрытия и блокировки до окна в неде
   assert.equal(row.tasks, 1, 'в окне трогали только первую задачу')
   assert.equal(row.done, 1)
 })
+
+test('неделя считает закрытие по событию в окне, а не по статусу', () => {
+  const { db, feature, first } = fixture()
+  updateTask(db, first.id, { status: 'done' })
+  appendEvent(db, { type: 'task.done', actor: 'w1', subject: first.id })
+  // старая задача: закрыта давно, но на этой неделе её правили
+  db.prepare("update events set at = '2020-01-01T00:00:00.000Z' where type = 'task.done'").run()
+  appendEvent(db, { type: 'task.edited', actor: 'w1', subject: first.id })
+
+  const report = reviewWeek(db, { days: 7 })
+  const row = report.features.find((item) => item.featureId === feature.id)!
+
+  assert.equal(row.done, 0, 'закрытие в окне не было — не засчитываем')
+})
+
+
