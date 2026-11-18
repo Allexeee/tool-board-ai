@@ -11,9 +11,9 @@ import {
   hibernateFile,
   appendPowerLog,
   hibernateInstalled,
-  hibernateSupported,
   orderRunPower,
   planRunPower,
+  powerCommand,
   reportFile,
   schedulePower,
   setRunPower,
@@ -21,7 +21,7 @@ import {
 } from '../../src/core/power.ts'
 import { makeRepo } from '../helpers/repo.ts'
 
-/** Настоящие shutdown и powercfg в тестах не зовутся: шпион записывает команды. */
+/** Настоящие shutdown в тестах не зовутся: шпион записывает команды. */
 function spy() {
   const calls: Array<{ command: string; args: string[] }> = []
   const runner = (command: string, args: string[]): CommandResult => {
@@ -87,18 +87,20 @@ test('гибернация считается доступной только п
   const missing = disk(false)
   assert.equal(hibernateInstalled(missing.hasFile, { SystemDrive: 'D:' }), false)
   assert.equal(missing.seen.at(-1), file, 'спрашивают именно файл на системном диске')
-  assert.equal(
-    hibernateSupported('Доступны следующие состояния сна:\n    Гибернация', missing.hasFile),
-    false,
-    'текст powercfg /a не делает гибернацию доступной',
-  )
 
   // файл на месте — гибернация есть
   assert.equal(hibernateInstalled(disk(true).hasFile, { SystemDrive: 'D:' }), true)
-  assert.equal(hibernateSupported('', disk(true).hasFile), true)
 
   // без инжекции смотрим системный диск из окружения, а не выдуманный C:
   assert.match(hibernateFile(), /hiberfil\.sys$/)
+})
+
+test('run power не спрашивает powercfg: доступность гибернации — только из файла', () => {
+  // Ревью нашло, что run.ts всё ещё считал гибернацию по `powercfg /a`.
+  // Проба убрана: в команде остаётся проверка файла, а не текста.
+  const source = readFileSync(resolve('src/cli/commands/run.ts'), 'utf8')
+  assert.doesNotMatch(source, /['"]powercfg['"]/, 'powercfg больше не зовётся')
+  assert.match(source, /hibernateAvailable:\s*hibernateInstalled\(\)/, 'решает файл hiberfil.sys')
 })
 
 test('файла гибернации нет — план выбирает выключение, файл есть — гибернацию', () => {
@@ -190,7 +192,7 @@ test('гибернация ждёт локальный таймер и отме�
   assert.deepEqual(calls, [], 'отмена не зовёт shutdown')
 })
 
-test('гибернация по таймеру зовёт shutdown /h, выключение — shutdown /s /t 0', async () => {
+test('гибернация зовёт shutdown /h, выключение — shutdown /s /t 90', async () => {
   const hibernate = spy()
   const outcome = await schedulePower({
     action: 'hibernate',
@@ -200,39 +202,50 @@ test('гибернация по таймеру зовёт shutdown /h, выкл�
   assert.equal(outcome, 'hibernate')
   assert.deepEqual(hibernate.calls, [{ command: 'shutdown', args: ['/h'] }])
 
+  // срок выключения живёт в аргументах команды: /t 90 ставит таймер Windows
   const shutdown = spy()
-  const second = await schedulePower({ action: 'shutdown', runner: shutdown.runner, seconds: 0 })
+  const second = await schedulePower({ action: 'shutdown', runner: shutdown.runner })
   assert.equal(second, 'shutdown')
-  assert.deepEqual(shutdown.calls, [{ command: 'shutdown', args: ['/s', '/t', '0'] }])
+  assert.deepEqual(shutdown.calls, [{ command: 'shutdown', args: ['/s', '/t', '90'] }])
+
+  // тот же срок, но короче: число в команде меняется, а не игнорируется
+  assert.deepEqual(powerCommand('shutdown', 5).args, ['/s', '/t', '5'])
+  assert.deepEqual(powerCommand('hibernate').args, ['/h'], 'у гибернации таймера нет')
 })
 
-test('выключение ждёт тот же таймер и отменяется без команд', async () => {
+test('выключение не спит в процессе: таймер ставит Windows', async () => {
   const { calls, runner } = spy()
-  const ticks: Array<[number, string]> = []
+  const ticks: number[] = []
+
+  const started = Date.now()
+  const outcome = await schedulePower({
+    action: 'shutdown',
+    runner,
+    seconds: 90,
+    onTick: (left) => ticks.push(left),
+  })
+  const elapsed = Date.now() - started
+
+  assert.equal(outcome, 'shutdown')
+  assert.equal(calls.length, 1, 'команда выключения ушла сразу')
+  assert.deepEqual(calls[0], { command: 'shutdown', args: ['/s', '/t', '90'] })
+  assert.ok(elapsed < 1000, `ждать в процессе нечего: ${elapsed} мс`)
+  assert.deepEqual(ticks, [], 'отсчёт идёт в Windows, а не в консоли процесса')
+})
+
+test('отменённое до запуска выключение команду не зовёт', async () => {
+  const { calls, runner } = spy()
   const controller = new AbortController()
+  controller.abort()
 
   const outcome = await schedulePower({
     action: 'shutdown',
     runner,
-    seconds: 3,
     signal: controller.signal,
-    onTick: (left, action) => {
-      ticks.push([left, action])
-      if (left === 1) controller.abort()
-    },
   })
 
   assert.equal(outcome, 'cancelled')
-  assert.deepEqual(
-    ticks,
-    [
-      [3, 'shutdown'],
-      [2, 'shutdown'],
-      [1, 'shutdown'],
-    ],
-    'отсчёт идёт и для выключения, действие названо в тике',
-  )
-  assert.deepEqual(calls, [], 'отмена не зовёт shutdown')
+  assert.deepEqual(calls, [], 'Ctrl+C до таймера не ставит выключение')
 })
 
 test('питание none ничего не делает', async () => {
@@ -329,8 +342,8 @@ test('run power --power открытому прогону отказывает',
 
 // ─── тот же путь через CLI ──────────────────────────────────────────────────
 //
-// run power на win32 зовёт powercfg /a — это чтение, а не выключение. Все
-// проверки ниже отказывают до shutdown, поэтому настоящая машина не гаснет.
+// run power теперь решает по hiberfil.sys — это чтение файла. Все проверки
+// ниже отказывают до питания, поэтому настоящая машина не гаснет.
 
 const bin = resolve('bin/toolbox-al.ts')
 
