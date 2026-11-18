@@ -9,7 +9,7 @@ import { appendEvent } from './events.ts'
 import { releaseTask } from './lease.ts'
 import { ownerHand, type OwnerItem } from './questions.ts'
 import { getTask, type TaskSize, type TaskStatus } from './tasks.ts'
-import { activeRun, bumpRunSegment, getRunRecord, type RunRecord } from './runs.ts'
+import { activeRun, bumpRunSegment, getRunRecord, runCursor, type RunRecord } from './runs.ts'
 
 // ─── эстафета прогона: состояние переезжает в новую сессию ───────────────────
 //
@@ -182,6 +182,9 @@ export function collectHandoff(
   const queue = tasksWithPlace(db, ['ready'])
   const owner = ownerHand(db)
 
+  const cursor = runCursor(db, run.id)
+  const step = nextStepOf(run, owner, inWork, queue)
+
   return {
     run,
     segment: run.segment,
@@ -190,7 +193,7 @@ export function collectHandoff(
     inWork,
     queue,
     owner,
-    nextStep: nextStepOf(run, owner, inWork, queue),
+    nextStep: cursor ? `${step} · осталось ${cursor.remaining} из ${cursor.total}` : step,
   }
 }
 

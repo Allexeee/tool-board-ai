@@ -159,3 +159,31 @@ test('run show печатает активный прогон и последн�
   assert.match(closed, /RUN1\s+закрыт/)
   assert.match(closed, /готов к релизу/)
 })
+
+test('run next отдаёт следующую задачу и остаток', () => {
+  const dir = project()
+  run(dir, ['request', 'add', 'Очередь'])
+  run(dir, ['feature', 'add', 'Фича', '--request', 'R1'])
+  run(dir, ['stage', 'add', 'F1', 'Этап', '--goal', 'g', '--appetite', '1 день'])
+  run(dir, ['stage', 'activate', 'F1.S1'])
+  run(dir, ['task', 'add', 'F1.S1', 'Шаг', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['run', 'start', '--mode', 'plan', '--request', 'R1'])
+
+  const next = run(dir, ['run', 'next'])
+  assert.equal(next.code, 0, next.err)
+  assert.match(next.out, /F1\.S1-1/)
+  assert.match(next.out, /осталось: 1 из 1/)
+
+  const show = run(dir, ['run', 'show'])
+  assert.match(show.out, /дальше: F1\.S1-1/)
+})
+
+test('run end принимает причину контекст', () => {
+  const dir = project()
+  run(dir, ['run', 'start', '--mode', 'plan'])
+  const ended = run(dir, ['run', 'end', 'RUN1', '--reason', 'context'])
+  assert.equal(ended.code, 0, ended.err)
+
+  const show = run(dir, ['run', 'show'])
+  assert.match(show.out, /предел контекста/)
+})
