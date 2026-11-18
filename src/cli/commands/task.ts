@@ -8,6 +8,7 @@ import { assumptionsForFeature } from '../../core/plans.ts'
 import { taskContext } from '../../core/context.ts'
 import { decisionsFor } from '../../core/decisions.ts'
 import { getExecutor } from '../../core/executors.ts'
+import { depsOf } from '../../core/deps.ts'
 import { agentRelativePath } from '../../core/agents.ts'
 import { unblockTask } from '../../core/block.ts'
 import { createTask, deferTask, editTask, getTask, listTasks, openTasks, setTaskSession, undeferTask, type EditableTask, type TaskClass, type TaskSize } from '../../core/tasks.ts'
@@ -46,6 +47,7 @@ export default async function command(args: ParsedArgs) {
       severity: stringFlag(args, 'severity') as 'S1' | 'S2' | 'S3' | 'S4' | undefined,
       review: (stringFlag(args, 'review') as 'none' | 'agent' | 'owner') ?? 'none',
       checkCmd: stringFlag(args, 'check'),
+      note: stringFlag(args, 'note'),
     })
 
     ok(task, `${task.id}  ${task.size}  ${task.skill}  ${task.title}`)
@@ -58,7 +60,7 @@ export default async function command(args: ParsedArgs) {
       throw new UserError(3, 'использование: task edit F1.S1-1 --dod "…" --scope "src/**"')
     }
 
-    const editable = ['title', 'dod', 'scope', 'size', 'size-reason', 'skill', 'class', 'kind', 'severity', 'check']
+    const editable = ['title', 'dod', 'scope', 'size', 'size-reason', 'skill', 'class', 'kind', 'severity', 'check', 'note']
     const service = ['json', 'as', 'help', 'project']
     const given = Object.keys(args.flags).filter((name) => !service.includes(name))
     const unknown = given.filter((name) => !editable.includes(name))
@@ -86,6 +88,7 @@ export default async function command(args: ParsedArgs) {
     if (given.includes('kind')) patch.kind = stringFlag(args, 'kind') as 'task' | 'defect' | 'incident'
     if (given.includes('severity')) patch.severity = stringFlag(args, 'severity') as 'S1' | 'S2' | 'S3' | 'S4'
     if (given.includes('check')) patch.checkCmd = stringFlag(args, 'check')
+    if (given.includes('note')) patch.note = stringFlag(args, 'note') ?? null
 
     const actor = stringFlag(args, 'as') ?? 'owner'
     const task = editTask(db, { id, actor, patch })
@@ -159,11 +162,12 @@ export default async function command(args: ParsedArgs) {
     const feature = stage ? getFeature(db, stage.featureId) : null
     const root = feature?.worktree ?? project.root
 
-    // Бриф — конверт задачи. Личность исполнителя живёт в .opencode/agents/<id>.md,
-    // поэтому навыки и правила здесь не пересказываются.
+    // Бриф — конверт задачи: всё, что нужно для работы, приходит из базы, а не из чата.
+    // Личность исполнителя живёт в .opencode/agents/<id>.md, поэтому правила там, а здесь — задача.
     const agent = stringFlag(args, 'as') ?? task.holder
     const executor = agent ? getExecutor(db, agent) : null
     const agentFile = agent && executor?.kind === 'agent' ? agentRelativePath(agent) : null
+    const deps = depsOf(db, task.id)
 
     const lines = [
       `id: ${task.id}`,
@@ -171,11 +175,34 @@ export default async function command(args: ParsedArgs) {
       ...(agentFile ? [`файл агента: ${agentFile}`] : []),
       ...(task.session ? [`сессия: ${task.session}`] : []),
       `каталог: ${root}`,
-      `дальше: node bin/toolbox-al.ts task show ${task.id}`,
-      `        node bin/toolbox-al.ts task context ${task.id}`,
+      // пустые поля не печатаем: строка без значения ничего не сообщает
+      ...(task.skill ? [`навык: ${task.skill}`] : []),
+      ...(task.dod.length > 0 ? [`DoD: ${task.dod.join('; ')}`] : []),
+      ...(task.scope === 'exclusive'
+        ? ['область: эксклюзивно']
+        : task.scope.length > 0
+          ? [`область: ${task.scope.join(', ')}`]
+          : []),
+      ...(deps.length > 0 ? [`зависит от: ${deps.join(', ')}`] : []),
+      ...(task.note ? [`заметка: ${task.note}`] : []),
+      `дальше: node bin/toolbox-al.ts task context ${task.id}`,
     ]
 
-    ok({ id: task.id, agent, root, agentFile, session: task.session }, lines.join('\n'))
+    ok(
+      {
+        id: task.id,
+        agent,
+        root,
+        agentFile,
+        session: task.session,
+        skill: task.skill,
+        dod: task.dod,
+        scope: task.scope,
+        deps,
+        note: task.note,
+      },
+      lines.join('\n'),
+    )
     return 0
   }
 
@@ -285,6 +312,8 @@ export default async function command(args: ParsedArgs) {
     ]
 
     if (spec) lines.push(`спека: ${spec}`)
+    // заметка — причина и подводные камни: пустую не печатаем
+    if (task.note) lines.push(`заметка: ${task.note}`)
 
     if (task.attempts > 0) lines.push(`попыток: ${task.attempts}`)
     if (task.reason) lines.push(`причина: ${task.reason}`)
