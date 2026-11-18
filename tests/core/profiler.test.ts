@@ -612,3 +612,42 @@ test('метка без активного замера — ошибка', () =>
 
   assert.throws(() => markProfile({ root, label: 'создание' }), /замеров нет: сначала profiler start/)
 })
+
+test('фаза считает прирост сессии, жившей до старта', () => {
+  const root = makeRoot()
+  const db = projectDb()
+
+  const dbPath = makeOpencodeDb([], {
+    schema: `
+      create table session_v2 (
+        id text primary key,
+        agent text,
+        tokens_input integer,
+        tokens_output integer,
+        cost real,
+        time_created integer,
+        time_updated integer,
+        directory text
+      )
+    `,
+  })
+  const writer = new DatabaseSync(dbPath)
+  const insert = writer.prepare(
+    'insert into session_v2 (id, agent, tokens_input, tokens_output, cost, time_created, time_updated, directory) values (?, ?, ?, ?, ?, ?, ?, ?)',
+  )
+  insert.run('ses_old', 'build', 100, 0, 0, START - 600_000, START - 300_000, root)
+  writer.close()
+
+  startProfile(db, { root, label: '1 агент', dbPath, now: new Date(START) })
+
+  const grow = new DatabaseSync(dbPath)
+  grow.prepare('update session_v2 set tokens_input = 300, time_updated = ? where id = ?').run(START + 30_000, 'ses_old')
+  grow.close()
+
+  markProfile({ root, dbPath, label: 'работа', now: new Date(START + 60_000) })
+  const end = endProfile({ root, dbPath, now: new Date(START + 120_000) })
+
+  assert.equal(end.available, true)
+  if (!end.available) return
+  assert.equal(end.phases[0]!.tokens, 200, 'в фазу идёт только прирост, а не вся история')
+})

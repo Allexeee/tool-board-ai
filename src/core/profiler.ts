@@ -72,6 +72,8 @@ export interface ProfileMarker {
   /** Прогон, если он был активен на старте замера. */
   run: string | null
   executors: ProfileExecutor[]
+  /** Снимок всех сессий проекта на старте: без него первая фаза считала бы историю целиком. */
+  baseline?: ProfileSession[]
   /** Метки фаз в порядке появления; пусто — замер без фаз. */
   marks: ProfileMark[]
 }
@@ -152,6 +154,8 @@ export interface StartOptions {
   root: string
   label?: string | undefined
   now?: Date
+  /** Путь к базе OpenCode: на старте снимаем сессии проекта. В тестах подменяется. */
+  dbPath?: string | undefined
 }
 
 export interface EndOptions {
@@ -224,6 +228,7 @@ function readMarker(path: string): ProfileMarker | null {
       endedAt: typeof parsed.endedAt === 'string' ? parsed.endedAt : null,
       run: typeof parsed.run === 'string' ? parsed.run : null,
       executors: Array.isArray(parsed.executors) ? (parsed.executors as ProfileExecutor[]) : [],
+      baseline: Array.isArray(parsed.baseline) ? (parsed.baseline as ProfileSession[]) : undefined,
       marks: marksOf(parsed.marks),
     }
   } catch {
@@ -267,6 +272,7 @@ function toMarker(marker: ProfileMarker): ProfileMarker {
     endedAt: marker.endedAt,
     run: marker.run,
     executors: marker.executors,
+    baseline: marker.baseline,
     marks: marker.marks,
   }
 }
@@ -298,6 +304,9 @@ export function startProfile(db: DatabaseSync, options: StartOptions): StoredMar
       skills: executor.skills,
       model: executor.model,
     })),
+    // база на старте: без неё сессия, впервые обновлённая внутри замера,
+    // попала бы в первую фазу целиком вместе со своей историей
+    baseline: snapshotSessions(options.dbPath ?? opencodeDbPath(), options.root),
     marks: [],
   }
 
@@ -394,6 +403,46 @@ const unavailable = (dbPath: string, reason: string): ProfileUnavailable => ({
   dbPath,
   reason: `учёт недоступен: ${reason}`,
 })
+
+/**
+ * Снимок всех сессий проекта: id, токены, цена. Окно здесь не нужно — снимок
+ * существует, чтобы считать прирост между фазами, а не «кто обновился».
+ */
+export function snapshotSessions(dbPath: string, projectDir: string): ProfileSession[] {
+  if (!existsSync(dbPath)) return []
+
+  let db: DatabaseSync
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true })
+  } catch {
+    return []
+  }
+
+  try {
+    if (!hasTable(db, 'session_v2')) return []
+    const columns = columnsOf(db, 'session_v2')
+    if (!columns.has('id')) return []
+
+    const value = (name: string): string => (columns.has(name) ? `coalesce(${name}, 0)` : '0')
+    const directory = columns.has('directory') ? 'directory' : 'null'
+    const rows = db
+      .prepare(
+        `select id, ${value('tokens_input')} + ${value('tokens_output')} + ${value('tokens_reasoning')} + ` +
+          `${value('tokens_cache_read')} + ${value('tokens_cache_write')} as tokens, ` +
+          `${value('cost')} as cost, ${directory} as directory from session_v2`,
+      )
+      .all() as unknown as Array<{ id: string; tokens: number; cost: number; directory: string | null }>
+
+    const project = normalizeDirectory(projectDir)
+    return rows
+      .filter((row) => (columns.has('directory') ? belongsToProject(row.directory, project) : true))
+      .map((row) => ({ id: row.id, tokens: row.tokens, amount: row.cost > 0 ? row.cost : null }))
+  } catch {
+    return []
+  } finally {
+    db.close()
+  }
+}
 
 /**
  * Статистика по агентам в окне замера: только сессии, у которых
@@ -683,7 +732,9 @@ export function endProfile(options: EndOptions): ProfileEnd {
   })
 
   // фазы считаются по снимкам: без базы считать нечего, метки остаются в маркере
-  const phases = window.available ? phasesOf(marker, window.sessions, now.getTime()) : []
+  const phases = window.available
+    ? phasesOf(marker, snapshotSessions(options.dbPath ?? opencodeDbPath(), options.root), now.getTime())
+    : []
 
   return { marker, durationMs, phases, ...window }
 }
@@ -719,7 +770,11 @@ export function markProfile(options: MarkOptions): { marker: StoredMarker; mark:
   // метка без цифр обманула бы отчёт: лучше отказать, чем записать нули
   if (!window.available) throw new UserError(1, `метка без цифр не нужна: ${window.reason}`)
 
-  const mark: ProfileMark = { label, at: now.toISOString(), sessions: window.sessions }
+  const mark: ProfileMark = {
+    label,
+    at: now.toISOString(),
+    sessions: snapshotSessions(options.dbPath ?? opencodeDbPath(), options.root),
+  }
   const marker: StoredMarker = { ...last, marks: [...last.marks, mark] }
   writeMarker(marker.path, toMarker(marker))
 
@@ -734,7 +789,7 @@ function phasesOf(marker: ProfileMarker, end: ProfileSession[], endedAt: number)
   if (marker.marks.length === 0) return []
 
   const bounds = [
-    { at: Date.parse(marker.startedAt), sessions: [] as ProfileSession[] },
+    { at: Date.parse(marker.startedAt), sessions: marker.baseline ?? ([] as ProfileSession[]) },
     ...marker.marks.map((mark) => ({ at: Date.parse(mark.at), sessions: mark.sessions })),
     { at: endedAt, sessions: end },
   ]
