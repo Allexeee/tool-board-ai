@@ -88,6 +88,26 @@ export function validatePlan(plan: Plan, options: { root?: string } = {}): strin
         if (missing) created.add(missing)
       }
 
+      // необязательная ссылка на спеку: путь к документу или его разделу.
+      // approve проверяет, что документ существует — иначе шаг ссылается в пустоту.
+      const spec = step.spec?.trim()
+      if (step.spec !== undefined && !spec) {
+        errors.push(`${place}: пустая ссылка на спеку`)
+      } else if (spec) {
+        const file = (spec.split('#')[0] ?? '').replace(/\\/g, '/')
+        if (!file) {
+          errors.push(`${place}: в ссылке на спеку нет файла: ${spec}`)
+        } else if (isAbsolute(file) || /^[A-Za-z]:/.test(file) || file.startsWith('/')) {
+          errors.push(`${place}: спека должна быть относительной, а не ${spec}`)
+        } else if (file.split('/').includes('..')) {
+          errors.push(`${place}: спека не может выходить за проект: ${spec}`)
+        } else if (options.root) {
+          const full = join(options.root, file)
+          if (!existsSync(full)) errors.push(`${place}: спеки ${file} нет`)
+          else if (statSync(full).isDirectory()) errors.push(`${place}: спека ${file} — каталог, нужен файл`)
+        }
+      }
+
       for (const dep of step.deps ?? []) {
         if (!Number.isInteger(dep) || dep < 0 || dep >= stage.steps.length) {
           errors.push(`${place}: зависимость ${dep} вне этапа (шагов ${stage.steps.length})`)
@@ -150,8 +170,8 @@ export function applyPlan(
       })
       stages.push(stage)
 
-      const created = stagePlan.steps.map((step) =>
-        createTask(db, {
+      const created = stagePlan.steps.map((step) => {
+        const task = createTask(db, {
           stageId: stage.id,
           title: step.title,
           dod: step.dod,
@@ -160,8 +180,12 @@ export function applyPlan(
           class: 'standard',
           scope: step.scope,
           review: 'none',
-        }),
-      )
+        })
+        // createTask не знает про спеку: дописываем ссылку сразу после создания
+        const spec = step.spec?.trim()
+        if (spec) db.prepare('update tasks set spec = ? where id = ?').run(spec, task.id)
+        return task
+      })
       tasks.push(...created)
 
       for (const [index, step] of stagePlan.steps.entries()) {
