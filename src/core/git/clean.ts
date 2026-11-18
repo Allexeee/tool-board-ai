@@ -3,9 +3,11 @@ import { dirname, isAbsolute, join, relative as relativePath } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
+import { DEFAULT_CONFIG } from '../config.ts'
 import { getFeature, listFeatures, type Feature } from '../features.ts'
 import { appendEvent } from '../events.ts'
 import { branchExists, isRepo, resolveBranches, runGit } from './git.ts'
+import { isRegisteredWorktree, poolSlotOf, resetSlot } from './worktree.ts'
 import { UserError } from '../../cli/errors.ts'
 
 export function featureSlug(feature: Feature): string {
@@ -18,6 +20,8 @@ export function archiveTag(feature: Feature): string {
 
 export interface CleanResult {
   removed: boolean
+  /** Каталог вернулся в пул: он на месте, но сброшен на dev. */
+  returned?: boolean
   rescued: boolean
   tag: string | null
   reason?: string
@@ -26,10 +30,18 @@ export interface CleanResult {
 /**
  * Убирает рабочий каталог фичи. Грязь не теряется: она коммитится в ветку,
  * а голова ветки получает тег archive/, чтобы наработки можно было забрать.
+ *
+ * При пуле каталог не удаляется, а возвращается в пул (сброс на dev): ветка
+ * остаётся у фичи, слот достаётся следующей. Без пула — прежнее удаление.
  */
 export function cleanWorktree(
   db: DatabaseSync,
-  input: { featureId: string; root: string; actor: string },
+  input: {
+    featureId: string
+    root: string
+    actor: string
+    config?: { branches: { main: string; dev: string }; worktreePool?: number | undefined }
+  },
 ): CleanResult {
   const feature = getFeature(db, input.featureId)
   if (!feature) throw new UserError(3, `фича ${input.featureId} не найдена`)
@@ -95,6 +107,37 @@ export function cleanWorktree(
     }
   }
 
+  // пул: каталог не удаляем, а сбрасываем на dev — слот достанется следующей фиче.
+  // Только при включённом пуле: merge и прямые вызовы без конфига убирают как раньше.
+  const poolSize = input.config?.worktreePool ?? 0
+  const slot = poolSize > 0 ? poolSlotOf(input.root, dir) : null
+  if (slot) {
+    const { dev } = resolveBranches(input.root, input.config ?? DEFAULT_CONFIG)
+    try {
+      resetSlot(input.root, slot, dev)
+    } catch (error) {
+      const reason =
+        `${(error as Error).message}. Слот ${slot} не вернулся в пул: ` +
+        'закройте процесс, который держит каталог, и повторите feature clean'
+      appendEvent(db, {
+        type: 'feature.cleanup_skipped',
+        actor: input.actor,
+        subject: feature.id,
+        note: reason,
+      })
+      return { removed: false, returned: false, rescued, tag, reason }
+    }
+
+    db.prepare('update features set worktree = null where id = ?').run(feature.id)
+    appendEvent(db, {
+      type: 'feature.slot_returned',
+      actor: input.actor,
+      subject: feature.id,
+      after: { slot, branch: feature.branch, dev },
+    })
+    return { removed: false, returned: true, rescued, tag }
+  }
+
   // каталог, снятый с учёта git, можно удалять напрямую — но только если он наш
   if (!registered) {
     const relative = relativePath(input.root, dir)
@@ -154,6 +197,7 @@ export interface SweepResult {
 interface SweepConfig {
   branches: { main: string; dev: string }
   branchRetentionDays?: number
+  worktreePool?: number | undefined
 }
 
 /** Убирает то, что уже не нужно: слитые старые ветки и отменённые фичи после выдержки. */
@@ -203,7 +247,12 @@ export function sweepBranches(
       continue
     }
 
-    const cleaned = cleanWorktree(db, { featureId: feature.id, root: input.root, actor: input.actor })
+    const cleaned = cleanWorktree(db, {
+      featureId: feature.id,
+      root: input.root,
+      actor: input.actor,
+      config: input.config,
+    })
     if (cleaned.reason) {
       if (feature.branch) result.kept.push(feature.branch)
       continue
@@ -262,16 +311,6 @@ export function staleBranches(
   return stale
 }
 
-function isRegisteredWorktree(root: string, dir: string): boolean {
-  const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase()
-  const wanted = normalize(dir)
-
-  return runGit(root, ['worktree', 'list', '--porcelain'])
-    .split('\n')
-    .filter((line) => line.startsWith('worktree '))
-    .some((line) => normalize(line.slice('worktree '.length).trim()) === wanted)
-}
-
 function isMergedInto(root: string, branch: string, dev: string): boolean {
   const result = spawnSync('git', ['merge-base', '--is-ancestor', branch, dev], {
     cwd: root,
@@ -292,7 +331,7 @@ export function cleanFeature(
     featureId: string
     root: string
     branch: boolean
-    config: { branches: { main: string; dev: string } }
+    config: { branches: { main: string; dev: string }; worktreePool?: number | undefined }
     actor: string
   },
 ): FeatureCleanResult {
@@ -302,7 +341,12 @@ export function cleanFeature(
     throw new UserError(1, `фича ${feature.id} в статусе ${feature.status}: clean не трогает незакрытые`)
   }
 
-  const cleaned = cleanWorktree(db, { featureId: feature.id, root: input.root, actor: input.actor })
+  const cleaned = cleanWorktree(db, {
+    featureId: feature.id,
+    root: input.root,
+    actor: input.actor,
+    config: input.config,
+  })
   if (!input.branch) return { ...cleaned, branchDeleted: false }
 
   const branch = feature.branch

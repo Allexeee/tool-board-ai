@@ -19,13 +19,16 @@ import { startFeature } from '../../src/core/git/worktree.ts'
 import { commitTask } from '../../src/core/git/commit.ts'
 import { mergeStage } from '../../src/core/git/merge.ts'
 import { cleanFeature, cleanWorktree, sweepBranches } from '../../src/core/git/clean.ts'
-import { branchExists, runGit } from '../../src/core/git/git.ts'
+import { branchExists, currentBranch, runGit } from '../../src/core/git/git.ts'
 
-function cancelledFixture() {
+function cancelledFixture(options: { pool?: number } = {}) {
   const root = makeRepoWithDev()
   initProject(root)
   const db = openDb(join(root, '.toolbox-al/tracker.db'))
-  const config = readConfig(join(root, '.toolbox-al/config.json'))
+  const config = {
+    ...readConfig(join(root, '.toolbox-al/config.json')),
+    worktreePool: options.pool ?? 2,
+  }
 
   const feature = addFeature(db, { name: 'Оплата', rank: 1 })
   addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
@@ -80,13 +83,26 @@ function mergedFixture(commitDate?: string) {
   return { root, db, config, feature, stage }
 }
 
-test('feature clean убирает каталог и оставляет ветку', () => {
+test('feature clean возвращает слот в пул и оставляет ветку', () => {
   const { root, db, config, feature, worktree, branch } = cancelledFixture()
 
   const result = cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
 
-  assert.equal(result.removed, true)
+  assert.equal(result.removed, false)
+  assert.equal(result.returned, true)
   assert.equal(result.branchDeleted, false)
+  assert.equal(existsSync(worktree), true, 'каталог остался: он вернулся в пул')
+  assert.equal(currentBranch(worktree), 'dev', 'слот сброшен на dev')
+  assert.equal(getFeature(db, feature.id)!.worktree, null)
+  assert.equal(branchExists(root, branch), true)
+})
+
+test('worktreePool: 0 — feature clean убирает каталог, как раньше', () => {
+  const { root, db, config, feature, worktree, branch } = cancelledFixture({ pool: 0 })
+
+  const result = cleanFeature(db, { featureId: feature.id, root, branch: false, config, actor: 'owner' })
+
+  assert.equal(result.removed, true)
   assert.equal(existsSync(worktree), false)
   assert.equal(getFeature(db, feature.id)!.worktree, null)
   assert.equal(branchExists(root, branch), true)
@@ -98,7 +114,8 @@ test('feature clean --branch ставит тег archive и удаляет не�
   const result = cleanFeature(db, { featureId: feature.id, root, branch: true, config, actor: 'owner' })
 
   assert.equal(result.branchDeleted, true)
-  assert.equal(existsSync(worktree), false)
+  assert.equal(existsSync(worktree), true, 'слот остаётся в пуле')
+  assert.equal(currentBranch(worktree), 'dev')
   assert.equal(branchExists(root, branch), false)
   assert.match(runGit(root, ['tag', '--list', 'archive/*']), /archive\//)
   assert.equal(getFeature(db, feature.id)!.branch, null)
@@ -149,7 +166,7 @@ test('свежая отменённая фича ждёт выдержки', () 
 })
 
 test('отменённая фича старше выдержки убирается с тегом archive', () => {
-  const { root, db, config, feature, branch, worktree } = cancelledFixture()
+  const { root, db, config, feature, branch, worktree } = cancelledFixture({ pool: 0 })
   db.prepare("update events set at = ? where type = 'feature.abandoned'").run(
     new Date(Date.now() - 40 * 86_400_000).toISOString(),
   )
@@ -164,7 +181,7 @@ test('отменённая фича старше выдержки убирает
 })
 
 test('грязный каталог отменённой фичи спасается, а не теряется', () => {
-  const { root, db, config, feature, branch, worktree } = cancelledFixture()
+  const { root, db, config, feature, branch, worktree } = cancelledFixture({ pool: 0 })
   writeFileSync(join(worktree, 'src', 'черновик.txt'), 'недоделка')
   db.prepare("update events set at = ? where type = 'feature.abandoned'").run(
     new Date(Date.now() - 40 * 86_400_000).toISOString(),
