@@ -361,3 +361,13 @@ test('скилл знает настройку параллельных тест
   assert.match(skill, /parallelTests: true/)
   assert.match(skill, /--experimental-test-isolation=none/)
 })
+
+test('плагин отдаёт задачи, запросы и план', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
+
+  assert.match(plugin, /name: 'tasks'/)
+  assert.match(plugin, /name: 'requests'/)
+  assert.match(plugin, /name: 'plan'/)
+})

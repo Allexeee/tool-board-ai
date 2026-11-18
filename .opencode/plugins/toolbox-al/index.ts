@@ -172,6 +172,27 @@ export default Plugin.define({
       })
 
       editor.add({
+        name: 'tasks',
+        description: 'Открытые задачи очереди: очередь, руки, ожидание',
+        input: schema({}),
+        execute: () => call(ctx, ['task', 'list']),
+      })
+
+      editor.add({
+        name: 'requests',
+        description: 'Открытые запросы',
+        input: schema({}),
+        execute: () => call(ctx, ['request', 'open']),
+      })
+
+      editor.add({
+        name: 'plan',
+        description: 'План по id: этапы, задачи, DoD',
+        input: schema({ id: { type: 'string' } }, ['id']),
+        execute: (input) => call(ctx, ['plan', 'show', input.id]),
+      })
+
+      editor.add({
         name: 'ask',
         description: 'Задать вопрос владельцу по задаче или запросу',
         input: schema({ subject: { type: 'string' }, text: { type: 'string' }, to: { type: 'string' } }, [
