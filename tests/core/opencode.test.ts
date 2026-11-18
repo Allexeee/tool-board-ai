@@ -64,6 +64,21 @@ test('скилл объясняет порядок и запрет на git', ()
   assert.match(skill, /dispatch/)
 })
 
+test('шаблон скилла содержит текущие разделы и правила', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
+
+  // RUN и новые команды прогона: шаблон не должен отставать от самого скилла
+  assert.match(skill, /^## RUN: как ведёт себя оркестратор$/m)
+  assert.match(skill, /run handoff/)
+  assert.match(skill, /hiberfil\.sys/)
+
+  // правила короткого брифа и короткого ответа агента
+  assert.match(skill, /Бриф — 2–3 строки/)
+  assert.match(skill, /Ответ агента — статус и число тестов/)
+})
+
 test('init создаёт файлы OpenCode', () => {
   const root = tmp()
   initProject(root)
@@ -93,38 +108,34 @@ test('doctor замечает отсутствие плагина', () => {
   )
 })
 
-test('скилл и AGENTS.md знают слова владельца', () => {
+test('AGENTS.md знает слова владельца', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
 
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
   const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
 
-  for (const text of [skill, agents]) {
-    assert.match(text, /Добавь задачу/i)
-    assert.match(text, /запрос в inbox/i)
-    assert.match(text, /Запиши идею/i)
-    assert.match(text, /иде[юя]/i)
-  }
+  assert.match(agents, /Добавь задачу/i)
+  assert.match(agents, /запрос в inbox/i)
+  assert.match(agents, /Запиши идею/i)
+  assert.match(agents, /иде[юя]/i)
 })
 
-test('скилл напоминает про tests в области шага', () => {
+test('скилл держит коммит в области задачи', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
 
-  assert.match(skill, /tests\//)
-  assert.match(skill, /област/i)
+  assert.match(skill, /Коммит делает приложение командой `done`/)
+  assert.match(skill, /по файлам своей области/)
 })
 
-test('скилл: уровень релиза выбирает агент с причиной', () => {
+test('скилл: релиз — отдельная команда, а не часть RUN', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
 
-  assert.match(skill, /release/)
-  assert.match(skill, /причин/i)
-  assert.match(skill, /major/)
+  assert.match(skill, /Релиз не входит в RUN/)
+  assert.match(skill, /`release` — отдельная команда/)
 })
 
 test('refresh обновляет блок AGENTS.md по маркерам', () => {
@@ -157,16 +168,16 @@ test('плагин обновляется построчно по версии �
   assert.equal(existsSync(`${path}.new`), false)
 })
 
-test('скилл: ревью задач не проводим, перед релизом три варианта', () => {
+test('скилл: ревью задачи не обходится, ревью прогона привязано к релизу', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
 
-  assert.match(skill, /Ревью задач не проводим/)
-  assert.match(skill, /--review same\|fresh\|none/)
-  assert.match(skill, /только изменения релиза/)
-  assert.match(skill, /критические находки/i)
-  assert.match(skill, /request add/)
+  assert.match(skill, /Не обходить ревью/)
+  assert.match(skill, /in_review/)
+  assert.match(skill, /Ревью привязано к релизу/)
+  assert.match(skill, /run review/)
+  assert.doesNotMatch(skill, /Ревью задач не проводим/, 'устаревшее правило не воскрешаем')
 })
 
 test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
