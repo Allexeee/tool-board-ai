@@ -68,8 +68,6 @@ export default async function command(args: ParsedArgs) {
     return [line, ...decisions.map((decision) => `   · ${decision.question} → ${decision.choice}`)].join('\n')
   })
 
-  const pool = view.pool.map((task) => `  ${task.id.padEnd(12)} ${task.title}`)
-
   // очередь вместо рук: владельцу нужен порядок задач, а не то, как они разложены по исполнителям
   const queue = taskQueue(db)
   const queueIdWidth = Math.max(0, ...queue.map((row) => row.taskId.length))
@@ -128,7 +126,6 @@ export default async function command(args: ParsedArgs) {
     (view.plans.length ? '\n\nПЛАНЫ НА УТВЕРЖДЕНИЕ\n' + plans.join('\n') : '') +
     (waitingMain.length ? '\n\nЖДЁТ MAIN\n' + waitingMain.join('\n') : '') +
     (queue.length ? `\n\nОЧЕРЕДЬ\n` + queueLines.join('\n') : '') +
-    (view.pool.length ? '\n\nПУЛ\n' + pool.join('\n') : '') +
     '\n\nИСПОЛНИТЕЛИ\n' +
     (executors.length ? executors.join('\n') : '  нет')
 

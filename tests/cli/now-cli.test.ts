@@ -285,6 +285,20 @@ test('фича без решений печатается как раньше', 
   assert.doesNotMatch(view.out, /→/)
 })
 
+test('пул-задача видна в ОЧЕРЕДИ, отдельного блока ПУЛ нет', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /ПУЛ/, 'блока ПУЛ больше нет')
+
+  const rows = view.out.split('\n').filter((line) => line.includes('T1'))
+  assert.equal(rows.length, 1, 'задача напечатана один раз — в очереди')
+  assert.match(rows[0]!, /T1\s+свободна\s+Пул/)
+})
+
 test('now показывает отдыхающего исполнителя и пустую руку', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
