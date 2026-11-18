@@ -76,12 +76,22 @@ export interface UsageUnavailable {
 
 export type UsageResult = UsageReport | UsageUnavailable
 
+/** Окно прогона в epoch ms: `from` — начало, `until` — конец открытого окна ещё не наступил. */
+export interface UsageWindow {
+  from?: number
+  until?: number
+}
+
 export interface UsageOptions {
   /** Путь к базе OpenCode. В тестах подменяется: настоящую базу не трогаем. */
   dbPath?: string
   pricing?: Pricing | null | undefined
   budget?: number | null | undefined
   env?: NodeJS.ProcessEnv
+  /** Каталог проекта: сессии чужих проектов в расход не попадают. */
+  projectDir?: string
+  /** Окно активного прогона: считается только то, что жило внутри него. */
+  window?: UsageWindow | null
 }
 
 /** База OpenCode лежит в каталоге данных пользователя, а не в проекте. */
@@ -101,22 +111,106 @@ interface Row {
   cost: number
 }
 
-const GROUP_SQL = `
-  select coalesce(nullif(trim(agent), ''), 'без агента') as agent,
-         count(*) as sessions,
-         coalesce(sum(tokens_input), 0) as input,
-         coalesce(sum(tokens_output), 0) as output,
-         coalesce(sum(tokens_reasoning), 0) as reasoning,
-         coalesce(sum(tokens_cache_read), 0) as cacheRead,
-         coalesce(sum(tokens_cache_write), 0) as cacheWrite,
-         coalesce(sum(cost), 0) as cost
-    from session_v2
-   group by 1
-   order by 1
-`
+/** Сессия как её пишет OpenCode: складываем сами, чтобы отфильтровать проект и окно. */
+interface SessionRow {
+  agent: string | null
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+  cost: number
+  directory: string | null
+  timeCreated: number | null
+  timeUpdated: number | null
+}
+
+/**
+ * Старые базы OpenCode могут не знать части колонок — читаем то, что есть.
+ * Без directory сессию не отнести к проекту, поэтому такая строка при фильтре отсеивается.
+ */
+function readSessions(db: DatabaseSync): SessionRow[] {
+  const names = new Set(
+    (db.prepare('pragma table_info(session_v2)').all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  )
+  const optional = (name: string): string => (names.has(name) ? name : 'null')
+
+  return db
+    .prepare(
+      `select agent,
+              coalesce(tokens_input, 0) as input,
+              coalesce(tokens_output, 0) as output,
+              coalesce(tokens_reasoning, 0) as reasoning,
+              coalesce(tokens_cache_read, 0) as cacheRead,
+              coalesce(tokens_cache_write, 0) as cacheWrite,
+              coalesce(cost, 0) as cost,
+              ${optional('directory')} as directory,
+              ${optional('time_created')} as timeCreated,
+              ${optional('time_updated')} as timeUpdated
+         from session_v2`,
+    )
+    .all() as unknown as SessionRow[]
+}
 
 const hasTable = (db: DatabaseSync, name: string): boolean =>
   Boolean(db.prepare("select 1 from sqlite_master where type = 'table' and name = ?").get(name))
+
+/** Путь проекта в одном виде: прямые слэши, без хвоста, Windows — без регистра. */
+function normalizeDirectory(value: string): string {
+  const slashed = value.replace(/\\/g, '/').replace(/\/+$/, '')
+  return /^[A-Za-z]:/.test(slashed) ? slashed.toLowerCase() : slashed
+}
+
+/**
+ * Свои сессии — каталог проекта и его рабочие каталоги фич.
+ * project_id не годится: у одного каталога в базе встречается несколько id.
+ */
+function belongsToProject(directory: string | null, project: string): boolean {
+  if (!directory) return false
+  const session = normalizeDirectory(directory)
+  return session === project || session.startsWith(`${project}/.worktrees/`)
+}
+
+/**
+ * Сессия попала в окно, если жила внутри него. Токены в сессии накопительные,
+ * поэтому сессия, начатая до прогона и обновлённая в нём, входит целиком.
+ */
+function insideWindow(row: SessionRow, window: UsageWindow): boolean {
+  const created = row.timeCreated
+  const updated = row.timeUpdated ?? created
+  if (window.from !== undefined && (updated === null || updated < window.from)) return false
+  if (window.until !== undefined && (created === null || created > window.until)) return false
+  return true
+}
+
+/** Свёртка сессий по агентам: пустое имя — «без агента», а не потерянная строка. */
+function groupByAgent(rows: SessionRow[]): Row[] {
+  const byAgent = new Map<string, Row>()
+  for (const row of rows) {
+    const agent = row.agent?.trim() ? row.agent.trim() : 'без агента'
+    const current = byAgent.get(agent) ?? {
+      agent,
+      sessions: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+    }
+    current.sessions += 1
+    current.input += row.input
+    current.output += row.output
+    current.reasoning += row.reasoning
+    current.cacheRead += row.cacheRead
+    current.cacheWrite += row.cacheWrite
+    current.cost += row.cost
+    byAgent.set(agent, current)
+  }
+  return [...byAgent.values()]
+}
 
 /** Цена токенов агента по тарифу; агент может переопределить тариф проекта. */
 function priceOf(tariff: Tariff | undefined, row: Row): number {
@@ -174,20 +268,20 @@ export function readUsage(options: UsageOptions = {}): UsageResult {
   }
 
   try {
+    // битый или чужой файл: любая ошибка sqlite здесь — это «учёт недоступен», а не падение
     if (!hasTable(db, 'session_v2')) {
       return { available: false, dbPath, reason: `учёт недоступен: в базе нет таблицы session_v2 — ${dbPath}` }
     }
 
-    let rows: Row[]
-    try {
-      rows = db.prepare(GROUP_SQL).all() as unknown as Row[]
-    } catch (error) {
-      return {
-        available: false,
-        dbPath,
-        reason: `учёт недоступен: таблица session_v2 не читается — ${(error as Error).message}`,
-      }
-    }
+    const project = options.projectDir ? normalizeDirectory(options.projectDir) : null
+    const window = options.window ?? null
+    const rows = groupByAgent(
+      readSessions(db).filter(
+        (row) =>
+          (project === null || belongsToProject(row.directory, project)) &&
+          (window === null || insideWindow(row, window)),
+      ),
+    )
 
     const agents = rows.map((row): AgentUsage => {
       const tokens = row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite
@@ -250,7 +344,18 @@ export function readUsage(options: UsageOptions = {}): UsageResult {
     agents.sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent))
 
     return { available: true, dbPath, agents, totals, budget, basis, note }
+  } catch (error) {
+    return {
+      available: false,
+      dbPath,
+      reason: `учёт недоступен: база OpenCode не читается — ${(error as Error).message}`,
+    }
   } finally {
-    db.close()
+    // битый файл может не закрыться; ответ уже сформирован, падать из-за этого нельзя
+    try {
+      db.close()
+    } catch {
+      /* закрытие — не повод менять ответ */
+    }
   }
 }
