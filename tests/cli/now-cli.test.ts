@@ -301,7 +301,7 @@ test('задача на ревью: этап в работе, в очереди 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
   assert.match(view.out, /^\tF1\s+0\/1\s+wip\s+Платежи$/m, 'этап в работе, а не pending')
-  assert.match(view.out, /F1\.S1-1\s+свободна\s+Шаг · на ревью/)
+  assert.match(view.out, /F1\.S1-1\s+Шаг · на ревью/)
   assert.doesNotMatch(view.out, /не готова: in_review/)
 })
 
@@ -316,7 +316,7 @@ test('пул-задача видна в ОЧЕРЕДИ, отдельного б�
 
   const rows = view.out.split('\n').filter((line) => line.includes('T1'))
   assert.equal(rows.length, 1, 'задача напечатана один раз — в очереди')
-  assert.match(rows[0]!, /T1\s+свободна\s+Пул/)
+  assert.match(rows[0]!, /T1\s+Пул/)
 })
 
 test('now показывает отдыхающего исполнителя и пустую руку', () => {
@@ -327,15 +327,16 @@ test('now показывает отдыхающего исполнителя и 
   assert.match(view.out, /w1\s+отдыхает/)
 })
 
-test('now показывает очередь руки исполнителя', () => {
+test('задача в руке не дублируется в очереди', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
-  run(dir, ['task', 'list'])
   run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
 
   const view = run(dir, ['now'])
-  assert.match(view.out, /T1\s+w1\s+Пул/)
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /ждёт: задача в руке \(T1\)/, 'задача видна у исполнителя')
+  assert.doesNotMatch(view.out, /ОЧЕРЕДЬ/, 'свободных задач нет — блока нет')
 })
 
 test('now показывает занятость исполнителя как ожидание с причиной и сроком', () => {
@@ -404,6 +405,34 @@ test('now с NO_COLOR печатает чистый текст', () => {
   assert.match(view.out, /Оплата/)
 })
 
+test('в очереди только свободные задачи: работа и рука — у исполнителей', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'В работе', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['task', 'add', 'Свободная', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
+
+  const db = new DatabaseSync(join(dir, '.toolbox-al/tracker.db'))
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = 'T1'").run()
+  db.close()
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /работает над T1 · В работе/, 'задача в работе видна у исполнителя')
+  assert.match(view.out, /T2\s+Свободная/, 'свободная задача — в очереди')
+  assert.doesNotMatch(view.out, /T1\s+В работе/, 'задача в работе в очередь не попадает')
+})
+
+test('пустая очередь не печатает блок', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /ОЧЕРЕДЬ/)
+})
+
 test('now показывает причину свободной задачи в строке очереди', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
@@ -414,14 +443,14 @@ test('now показывает причину свободной задачи в
   assert.equal(view.code, 0, view.err)
 
   // причина стоит в строке очереди вместо пустого места
-  assert.match(view.out, /T1\s+свободна\s+Пул · ждёт раздачи/)
-  assert.match(view.out, /T2\s+свободна\s+Звук · нет исполнителя: audio/)
+  assert.match(view.out, /T1\s+Пул · ждёт раздачи/)
+  assert.match(view.out, /T2\s+Звук · нет исполнителя: audio/)
 
   // сводки причин внизу больше нет
   assert.doesNotMatch(view.out, /НЕ РАЗДАНО/)
 })
 
-test('у назначенной задачи причины нет, и сводка её не считает', () => {
+test('у задачи в руке нет причины, и в очередь она не попадает', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
@@ -429,7 +458,8 @@ test('у назначенной задачи причины нет, и свод�
 
   const view = run(dir, ['now'])
   assert.equal(view.code, 0, view.err)
-  assert.match(view.out, /T1\s+w1\s+Пул/)
+  assert.match(view.out, /ждёт: задача в руке \(T1\)/)
+  assert.doesNotMatch(view.out, /ОЧЕРЕДЬ/)
   assert.doesNotMatch(view.out, /ждёт раздачи/)
   assert.doesNotMatch(view.out, /НЕ РАЗДАНО/)
 })
