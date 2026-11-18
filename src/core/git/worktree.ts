@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join, relative as relativePath } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { slugify } from '../ids.ts'
@@ -53,18 +53,28 @@ function addWorktree(root: string, worktree: string, dev: string): void {
 
 /**
  * Слот возвращается в пул: голова на dev, рабочая копия чистая (checkout,
- * reset --hard, clean -fdx). Ветка фичи остаётся в репозитории — её не трогаем.
+ * reset --hard, clean -ffdx). Ветка фичи остаётся в репозитории — её не трогаем.
+ *
+ * Каталог, которого git не знает, не затираем: это может быть чужая работа.
+ * Такой слот — ошибка с объяснением, а не тихая выдача.
  */
 export function resetSlot(root: string, slot: string, dev: string): void {
   if (!branchExists(root, dev)) {
     throw new UserError(3, `ветки ${dev} нет: слоту ${slot} некуда возвращаться`)
   }
 
-  if (!existsSync(slot) || !isRegisteredWorktree(root, slot)) {
-    if (existsSync(slot)) rmSync(slot, { recursive: true, force: true })
+  if (!existsSync(slot)) {
     runGit(root, ['worktree', 'prune'])
     addWorktree(root, slot, dev)
     return
+  }
+
+  if (!isRegisteredWorktree(root, slot)) {
+    throw new UserError(
+      1,
+      `слот ${slot} занят посторонним каталогом: git его не знает — ` +
+        'уберите каталог вручную, чтобы слот вернулся в пул',
+    )
   }
 
   try {
@@ -74,7 +84,8 @@ export function resetSlot(root: string, slot: string, dev: string): void {
     runGit(slot, ['checkout', '-f', '--detach', dev])
   }
   runGit(slot, ['reset', '--hard', dev])
-  runGit(slot, ['clean', '-fdx'])
+  // двойной -f убирает и вложенные репозитории: следов прошлой фичи не остаётся
+  runGit(slot, ['clean', '-ffdx'])
 }
 
 function poolSizeOf(config: WorktreeConfig): number {
