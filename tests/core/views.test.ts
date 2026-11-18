@@ -309,7 +309,7 @@ test('строка исполнителя: работает над задаче�
   assert.deepEqual(by('w3').state, { kind: 'rest' }, 'ничего нет — отдыхает')
 })
 
-test('задача в руке без блокировки — ожидание, а не выдуманная работа', () => {
+test('задача в руке без блокировки — резерв со всеми задачами, а не выдуманная работа', () => {
   const db = openDb(':memory:')
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
   const base = {
@@ -327,8 +327,49 @@ test('задача в руке без блокировки — ожидание,
   setHand(db, 'w1', [first.id, second.id], 'owner')
 
   const state = nowView(db).holders.find((holder) => holder.executor === 'w1')!.state
-  assert.equal(state.kind, 'wait')
-  if (state.kind === 'wait') assert.match(state.reason, new RegExp(first.id.replace('.', '\\.')))
+  assert.equal(state.kind, 'reserved')
+  if (state.kind === 'reserved') {
+    assert.deepEqual(state.taskIds, [first.id, second.id], 'видны все задачи руки, а не первая')
+    assert.match(state.reason ?? '', new RegExp(first.id.replace('.', '\\.')), 'причина называет блокера')
+  }
+})
+
+test('исполнитель без связи — «нет связи», а не отдых', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const state = (sessions: LiveSession[] = []) =>
+    nowView(db, { sessions }).holders.find((holder) => holder.executor === 'w1')!.state
+  const setSeen = (agoMs: number) =>
+    db
+      .prepare('update executors set last_seen = ? where id = ?')
+      .run(new Date(Date.now() - agoMs).toISOString(), 'w1')
+
+  setSeen(5 * 60 * 60_000)
+  const offline = state()
+  assert.equal(offline.kind, 'offline', 'пять часов без связи — не отдых')
+  if (offline.kind === 'offline') {
+    assert.ok(offline.sinceMs >= 5 * 3_600_000 - 2000, 'нет связи считается от last_seen')
+  }
+
+  setSeen(30 * 60_000)
+  assert.deepEqual(state(), { kind: 'rest' }, 'полчаса без связи — ещё живой')
+
+  // свежая сессия — тоже связь, даже если last_seen старый
+  setSeen(5 * 60 * 60_000)
+  const session: LiveSession = {
+    id: 'ses_1',
+    agent: 'w1',
+    title: 'т',
+    busy: false,
+    updatedAt: Date.now() - 60_000,
+    lastAssistantAt: null,
+    tool: null,
+  }
+  assert.deepEqual(state([session]), { kind: 'rest' }, 'свежая сессия снимает офлайн')
+
+  // без last_seen данных нет — не выдумываем ни офлайн, ни работу
+  db.prepare('update executors set last_seen = null where id = ?').run('w1')
+  assert.deepEqual(state(), { kind: 'rest' }, 'нет отметки связи — отдых, а не догадка')
 })
 
 test('занятая свежая сессия исполнителя — работа, даже без задачи', () => {
@@ -369,7 +410,7 @@ test('состояние по последнему инструменту: ра�
   const tool = (over: Partial<LiveTool>): LiveTool => ({
     name: 'shell',
     command: null,
-    status: 'completed',
+    status: 'running',
     at: now,
     background: false,
     ...over,
@@ -386,13 +427,39 @@ test('состояние по последнему инструменту: ра�
   assert.deepEqual(
     stateWith({ ...base, busy: false, tool: tool({ command: 'node --test tests/core/views.test.ts' }) }),
     { kind: 'test', taskId: task.id },
-    'простой и последний shell — тесты',
+    'простой и идущие тесты — ждём результата',
   )
   assert.deepEqual(
     stateWith({ ...base, busy: false, tool: tool({ command: 'npm run dev', background: true }) }),
     { kind: 'command', taskId: task.id },
-    'простой и команда в фоне',
+    'простой и команда идёт в фоне',
   )
+
+  // завершённый инструмент — прошедшее время: доска не выдаёт его за ожидание
+  const completed = stateWith({
+    ...base,
+    busy: false,
+    tool: tool({ command: 'node --test tests/core/views.test.ts', status: 'completed' }),
+  })
+  assert.equal(completed.kind, 'silent', 'завершённый тест — молчание')
+
+  const completedBackground = stateWith({
+    ...base,
+    busy: false,
+    tool: tool({ command: 'npm run dev', background: true, status: 'completed' }),
+  })
+  assert.equal(completedBackground.kind, 'silent', 'завершённая фоновая команда — молчание')
+
+  // сессия сорок минут назад: инструмент «running» в базе уже не ожидание
+  const stale = stateWith({
+    ...base,
+    busy: false,
+    updatedAt: now - 40 * 60_000,
+    lastAssistantAt: now - 40 * 60_000,
+    tool: tool({ command: 'node --test tests/core/views.test.ts' }),
+  })
+  assert.equal(stale.kind, 'silent', 'старая сессия — молчание, даже если инструмент running')
+  if (stale.kind === 'silent') assert.ok(stale.silentMs >= 39 * 60_000, 'молчание считается от последнего сообщения')
 
   const silent = stateWith({ ...base, busy: false, tool: tool({ name: 'write' }) })
   assert.equal(silent.kind, 'silent', 'простой без тестов и фона — молчание')
@@ -400,6 +467,10 @@ test('состояние по последнему инструменту: ра�
     assert.equal(silent.taskId, task.id)
     assert.ok(silent.silentMs >= 299_000, 'молчание считается от последнего сообщения ассистента')
   }
+
+  // откат без данных остаётся: инструмента нет — молчание, а не выдуманное ожидание
+  const noData = stateWith({ ...base, busy: false, tool: null })
+  assert.equal(noData.kind, 'silent', 'нет данных об инструменте — молчание')
 
   assert.deepEqual(
     stateWith(null),
@@ -426,7 +497,7 @@ test('сданная на ревью задача видна у исполнит
   assert.deepEqual(state, { kind: 'review', taskId: task.id }, 'кто сдал — тот и на ревью')
 })
 
-test('задача на ревью — работа этапа, в очереди причина «на ревью»', () => {
+test('задача на ревью — работа этапа, но не задача очереди', () => {
   const db = openDb(':memory:')
   seed(db)
   const first = db.prepare('select id from tasks order by id limit 1').get() as { id: string }
@@ -442,8 +513,8 @@ test('задача на ревью — работа этапа, в очеред�
   assert.equal(review.status, active.status)
   assert.deepEqual(review.progress, active.progress, 'счёт этапа как у активной')
 
-  const row = taskQueue(db).find((item) => item.taskId === first.id)!
-  assert.equal(row.reason, 'на ревью')
+  // взять её нельзя, а у исполнителя она уже показана: в очереди ей не место
+  assert.equal(taskQueue(db).find((item) => item.taskId === first.id), undefined, 'ревью не в очереди')
 })
 
 test('снятая занятость исчезает из now', () => {
@@ -826,8 +897,36 @@ test('последний инструмент читается из session_mess
   })
 })
 
-test('фон виден по выводу, а битый JSON и отсутствие таблицы — откат без падения', () => {
+test('статус инструмента берётся из metadata, если в state его нет', () => {
   const now = Date.now()
+  const dbPath = liveDb([{ id: 'ses_meta', parentId: 'root', agent: 'worker-1', updatedAt: now }], {
+    messages: [
+      {
+        sessionId: 'ses_meta',
+        seq: 1,
+        at: now,
+        data: JSON.stringify({
+          content: [
+            {
+              type: 'tool',
+              name: 'shell',
+              state: {
+                input: { command: 'node --test tests/core/views.test.ts' },
+                metadata: { status: 'running' },
+              },
+              time: { created: now },
+            },
+          ],
+        }),
+      },
+    ],
+  })
+
+  const [session] = readLiveSessions({ dbPath, now })
+  assert.equal(session!.tool!.status, 'running', 'metadata.status — запасной источник статуса')
+})
+
+test('фон виден по выводу, а битый JSON и отсутствие таблицы — откат без падения', () => {  const now = Date.now()
   const background = JSON.stringify({
     content: [
       {

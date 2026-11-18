@@ -95,9 +95,12 @@ export default async function command(args: ParsedArgs) {
     ...freeSessions.map((session) => session.agent.length),
   )
 
-  const holders = view.holders.map(
-    (holder) => `  ${holder.executor.padEnd(nameWidth)} ${stateText(holder.state)}`,
-  )
+  const holders = view.holders.map((holder) => {
+    // занятость и рука — две правды: печатаем обе в одной строке.
+    // у «работа зарезервирована» рука уже внутри состояния, второй раз её не дублируем.
+    const hand = holder.state.kind === 'reserved' ? '' : handText(holder.hand)
+    return `  ${holder.executor.padEnd(nameWidth)} ${[stateText(holder.state), hand].filter(Boolean).join(' · ')}`
+  })
 
   // живая сессия без исполнителя — такая же строка списка, а не отдельный блок.
   // сюда попадают только занятые и свежие: заголовок не печатаем, он не обновляется
@@ -142,17 +145,33 @@ function stateText(state: ExecutorState): string {
       return paint(`ждёт результата теста: ${state.taskId}`, 'cyan')
     case 'command':
       return paint(`ждёт команды: ${state.taskId}`, 'cyan')
-    case 'reserved':
-      return paint(`работа зарезервирована: ${state.taskId}`, 'cyan')
+    case 'reserved': {
+      const reason = state.reason ? ` · ждёт: ${state.reason}` : ''
+      return paint(`работа зарезервирована: ${state.taskIds.join(', ')}${reason}`, 'cyan')
+    }
     case 'review':
       return paint(`на ревью: ${state.taskId}`, 'cyan')
     case 'wait': {
       const until = state.until ? ` (до ${shortTime(state.until)})` : ''
       return paint(`ждёт: ${state.reason}${until}`, 'cyan')
     }
+    case 'offline':
+      return paint(`нет связи ${connectionAge(state.sinceMs)}`, 'gray')
     default:
       return paint('отдыхает', 'gray')
   }
+}
+
+/** Рука в строке исполнителя: все задачи, а не только первая. */
+function handText(hand: string[]): string {
+  return hand.length > 0 ? `рука: ${hand.join(', ')}` : ''
+}
+
+/** «нет связи N»: часы до двух суток, дальше дни — минуты тут не читаются. */
+function connectionAge(ms: number): string {
+  const hours = Math.floor(ms / 3_600_000)
+  if (hours < 48) return `${Math.max(2, hours)} ч`
+  return `${Math.floor(hours / 24)} дн`
 }
 
 /** «молчит N мин»: минута — минимальная единица, ноль минут читается как ошибка. */
