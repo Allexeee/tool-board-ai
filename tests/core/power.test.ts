@@ -1,13 +1,16 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDb, type DatabaseSync } from '../../src/core/db.ts'
 import { endRun, getRunRecord, startRun } from '../../src/core/runs.ts'
 import {
   effectivePower,
+  hibernateFile,
+  appendPowerLog,
+  hibernateInstalled,
   hibernateSupported,
   orderRunPower,
   planRunPower,
@@ -64,31 +67,69 @@ test('run end --power запоминает питание в записи про
   assert.throws(() => setRunPower(db, { runId: ended.id, power: 'sleep' as 'none' }), /none, hibernate или shutdown/)
 })
 
-test('гибернация недоступна — выполняется выключение', () => {
-  assert.equal(effectivePower('hibernate', true), 'hibernate')
-  assert.equal(effectivePower('hibernate', false), 'shutdown')
-  assert.equal(effectivePower('shutdown', true), 'shutdown')
-  assert.equal(effectivePower('none', true), 'none')
+/** Проверка файла без диска: видит только те пути, что ей назвали. */
+function disk(exists: boolean) {
+  const seen: string[] = []
+  const hasFile = (path: string) => {
+    seen.push(path)
+    return exists
+  }
+  return { seen, hasFile }
+}
 
-  // powercfg /a перечисляет состояния сна; вывод локализован
-  assert.equal(hibernateSupported('The following sleep states are available: Hibernate'), true)
-  assert.equal(hibernateSupported('Доступны следующие состояния сна:\n    Гибернация'), true)
-  assert.equal(hibernateSupported('S0 Low Power Idle\nS3\nFast Startup'), false)
+test('гибернация считается доступной только при наличии hiberfil.sys', () => {
+  // путь — от системного диска из окружения: hiberfil.sys не всегда на C:
+  const file = hibernateFile({ SystemDrive: 'D:' })
+  assert.match(file, /^D:[\\/]+hiberfil\.sys$/)
+  assert.equal(hibernateFile({ SystemDrive: 'D:\\' }), file, 'хвостовой слеш не ломает путь')
 
+  // файла нет — гибернации нет, даже если powercfg /a её упоминает
+  const missing = disk(false)
+  assert.equal(hibernateInstalled(missing.hasFile, { SystemDrive: 'D:' }), false)
+  assert.equal(missing.seen.at(-1), file, 'спрашивают именно файл на системном диске')
+  assert.equal(
+    hibernateSupported('Доступны следующие состояния сна:\n    Гибернация', missing.hasFile),
+    false,
+    'текст powercfg /a не делает гибернацию доступной',
+  )
+
+  // файл на месте — гибернация есть
+  assert.equal(hibernateInstalled(disk(true).hasFile, { SystemDrive: 'D:' }), true)
+  assert.equal(hibernateSupported('', disk(true).hasFile), true)
+
+  // без инжекции смотрим системный диск из окружения, а не выдуманный C:
+  assert.match(hibernateFile(), /hiberfil\.sys$/)
+})
+
+test('файла гибернации нет — план выбирает выключение, файл есть — гибернацию', () => {
   const db = openDb(':memory:')
   const run = closedRun(db, 'hibernate')
   const dir = root()
   const report = writeReport(dir, run.id)
 
-  const plan = planRunPower(db, dir, run.id, { hibernateAvailable: false })
-  assert.equal(plan.requested, 'hibernate')
-  assert.equal(plan.action, 'shutdown')
-  assert.equal(plan.reportPath, report)
-  assert.match(plan.note ?? '', /гибернация недоступна/)
+  // гибернации нет: выключаемся, и план называет причину
+  const withoutFile = planRunPower(db, dir, run.id, {
+    hibernateAvailable: hibernateInstalled(disk(false).hasFile),
+  })
+  assert.equal(withoutFile.requested, 'hibernate')
+  assert.equal(withoutFile.action, 'shutdown')
+  assert.equal(withoutFile.reportPath, report)
+  assert.match(withoutFile.note ?? '', /гибернация недоступна/)
+  assert.match(withoutFile.note ?? '', /hiberfil\.sys/, 'в причине назван файл')
 
-  const available = planRunPower(db, dir, run.id, { hibernateAvailable: true })
+  // файл на месте — остаётся гибернация, замечания нет
+  const available = planRunPower(db, dir, run.id, {
+    hibernateAvailable: hibernateInstalled(disk(true).hasFile),
+  })
   assert.equal(available.action, 'hibernate')
   assert.equal(available.note, null)
+})
+
+test('effectivePower переводит гибернацию в выключение, остальное не трогает', () => {
+  assert.equal(effectivePower('hibernate', true), 'hibernate')
+  assert.equal(effectivePower('hibernate', false), 'shutdown')
+  assert.equal(effectivePower('shutdown', true), 'shutdown')
+  assert.equal(effectivePower('none', true), 'none')
 })
 
 test('питание без отчёта не выполняется', () => {
@@ -160,9 +201,38 @@ test('гибернация по таймеру зовёт shutdown /h, выкл�
   assert.deepEqual(hibernate.calls, [{ command: 'shutdown', args: ['/h'] }])
 
   const shutdown = spy()
-  const second = await schedulePower({ action: 'shutdown', runner: shutdown.runner, seconds: 90 })
+  const second = await schedulePower({ action: 'shutdown', runner: shutdown.runner, seconds: 0 })
   assert.equal(second, 'shutdown')
   assert.deepEqual(shutdown.calls, [{ command: 'shutdown', args: ['/s', '/t', '0'] }])
+})
+
+test('выключение ждёт тот же таймер и отменяется без команд', async () => {
+  const { calls, runner } = spy()
+  const ticks: Array<[number, string]> = []
+  const controller = new AbortController()
+
+  const outcome = await schedulePower({
+    action: 'shutdown',
+    runner,
+    seconds: 3,
+    signal: controller.signal,
+    onTick: (left, action) => {
+      ticks.push([left, action])
+      if (left === 1) controller.abort()
+    },
+  })
+
+  assert.equal(outcome, 'cancelled')
+  assert.deepEqual(
+    ticks,
+    [
+      [3, 'shutdown'],
+      [2, 'shutdown'],
+      [1, 'shutdown'],
+    ],
+    'отсчёт идёт и для выключения, действие названо в тике',
+  )
+  assert.deepEqual(calls, [], 'отмена не зовёт shutdown')
 })
 
 test('питание none ничего не делает', async () => {
@@ -321,3 +391,15 @@ test(
     assert.equal(powerOf('RUN3').endedAt, null, 'прогон остался открытым')
   },
 )
+
+test('журнал питания пишет команду и код возврата', () => {
+  const root = mkdtempSync(join(tmpdir(), 'al-power-log-'))
+
+  const file = appendPowerLog(root, 'shutdown /h → 1')
+  appendPowerLog(root, 'итог: cancelled')
+
+  const text = readFileSync(file, 'utf8')
+  assert.match(text, /shutdown \/h → 1/)
+  assert.match(text, /итог: cancelled/)
+  assert.equal(text.split('\n').filter(Boolean).length, 2)
+})
