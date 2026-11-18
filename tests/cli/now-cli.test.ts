@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { queueColor } from '../../src/cli/commands/now.ts'
-import { queueFreeReason, type QueueRow } from '../../src/core/views.ts'
+import { queueFreeReason, sessionIsWorthShowing, type QueueRow } from '../../src/core/views.ts'
 
 const bin = resolve('bin/toolbox-al.ts')
 
@@ -32,7 +32,14 @@ function project() {
  */
 function liveSessions(
   dataHome: string,
-  rows: Array<{ id: string; agent: string; title: string; directory: string; busy: boolean }>,
+  rows: Array<{
+    id: string
+    agent: string
+    title: string
+    directory: string
+    busy: boolean
+    updatedAt?: number
+  }>,
 ) {
   mkdirSync(join(dataHome, 'opencode'), { recursive: true })
   const db = new DatabaseSync(join(dataHome, 'opencode', 'opencode.db'))
@@ -55,15 +62,16 @@ function liveSessions(
   )
   const now = Date.now()
   for (const row of rows) {
+    const at = row.updatedAt ?? now
     insert.run(
       row.id,
       'root',
       row.agent,
       row.title,
       row.directory,
-      now,
-      row.busy ? now : null,
-      row.busy ? null : now - 1000,
+      at,
+      row.busy ? at : null,
+      row.busy ? null : at - 1000,
       null,
     )
   }
@@ -465,24 +473,76 @@ test('живая сессия не подписывает строку испо�
   assert.equal(lines.length, 1, 'сессия не заводит вторую строку')
 })
 
-test('живая сессия без исполнителя — своя строка в ИСПОЛНИТЕЛЯХ, без заголовка', () => {
+test('живая сессия без исполнителя видна, только пока занята', () => {
   const dir = project()
   run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
   const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
   liveSessions(dataHome, [
     { id: 'ses_1', agent: 'w1', title: 'шаг', directory: dir, busy: true },
-    { id: 'ses_2', agent: 'general', title: 'Ревью', directory: dir, busy: false },
+    { id: 'ses_2', agent: 'general', title: 'Ревью', directory: dir, busy: true },
   ])
 
   const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
   assert.equal(view.code, 0, view.err)
   assert.doesNotMatch(view.out, /СУБАГЕНТЫ/)
-  assert.match(view.out, /^\t {2}general\s+отдыхает$/m, 'сессия без исполнителя — своя строка')
+  assert.match(view.out, /^\t {2}general\s+работает$/m, 'занятая сессия без исполнителя — своя строка')
   assert.doesNotMatch(view.out, /Ревью/, 'заголовок сессии не печатается')
 
   const header = view.out.indexOf('ИСПОЛНИТЕЛИ')
   const session = view.out.indexOf('general')
   assert.ok(header !== -1 && session > header, 'сессия стоит в списке исполнителей, а не отдельным блоком')
+})
+
+test('сессия без исполнителя видна только занятой и свежей', () => {
+  const now = Date.now()
+  const session = (busy: boolean, agoMs: number) => ({
+    id: 's',
+    agent: 'general',
+    title: 'Ревью',
+    busy,
+    updatedAt: now - agoMs,
+  })
+
+  assert.equal(sessionIsWorthShowing(session(true, 60_000), now), true, 'занята и обновлялась минуту назад')
+  assert.equal(sessionIsWorthShowing(session(false, 60_000), now), false, 'простаивает — не печатаем')
+  assert.equal(sessionIsWorthShowing(session(true, 20 * 60_000), now), false, 'старая — не печатаем')
+})
+
+test('простаивающая сессия без исполнителя не печатается', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(dataHome, [{ id: 'ses_2', agent: 'build', title: 'Сборка', directory: dir, busy: false }])
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /build/, 'простаивающая сессия ничего не говорит владельцу')
+})
+
+test('старая занятая сессия без исполнителя не печатается', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  const dataHome = mkdtempSync(join(tmpdir(), 'al-live-'))
+  liveSessions(dataHome, [
+    // занята, но обновлялась 20 минут назад: для доски это уже история
+    { id: 'ses_2', agent: 'general', title: 'Ревью', directory: dir, busy: true, updatedAt: Date.now() - 20 * 60 * 1000 },
+  ])
+
+  const view = run(dir, ['now'], { XDG_DATA_HOME: dataHome })
+  assert.equal(view.code, 0, view.err)
+  assert.doesNotMatch(view.out, /general/, 'старая сессия не печатается, даже если занята')
+})
+
+test('задача в руке без блокировки: ожидание называет её, а не упрекает', () => {
+  const dir = project()
+  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
+  run(dir, ['task', 'add', 'Пул', '--dod', 'готово', '--skill', 'backend', '--scope', 'src/**'])
+  run(dir, ['hand', 'set', 'T1', '--as', 'w1'])
+
+  const view = run(dir, ['now'])
+  assert.equal(view.code, 0, view.err)
+  assert.match(view.out, /w1\s+ждёт: задача в руке \(T1\)/)
+  assert.doesNotMatch(view.out, /не взял/)
 })
 
 test('цвет очереди: зелёный — брать, жёлтый — в руке, циан — в работе, серый — ждёт', () => {

@@ -1,7 +1,7 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
 import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, taskQueue, queueFreeReason, type ExecutorState, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
+import { nowView, ownerView, taskQueue, queueFreeReason, sessionIsWorthShowing, type ExecutorState, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
 import { pendingRelease } from '../../core/git/release.ts'
 import { readLiveSessions } from '../../core/usage.ts'
 import { listTasks } from '../../core/tasks.ts'
@@ -91,7 +91,10 @@ export default async function command(args: ParsedArgs) {
   // исполнители и живые субагенты — один список: субагент и есть исполнитель.
   // сессия агента, который уже есть в списке, своей строки не заводит.
   const holderNames = new Set(view.holders.map((holder) => holder.executor))
-  const freeSessions = view.sessions.filter((session) => !holderNames.has(session.agent))
+  // сессия без исполнителя — только живая работа: занята и обновлялась недавно
+  const freeSessions = view.sessions.filter(
+    (session) => !holderNames.has(session.agent) && sessionIsWorthShowing(session),
+  )
   const nameWidth = Math.max(
     12,
     ...view.holders.map((holder) => holder.executor.length),
@@ -103,10 +106,9 @@ export default async function command(args: ParsedArgs) {
   )
 
   // живая сессия без исполнителя — такая же строка списка, а не отдельный блок.
-  // заголовок сессии не печатаем: он не обновляется и врёт о работе
+  // сюда попадают только занятые и свежие: заголовок не печатаем, он не обновляется
   const sessionRows = freeSessions.map(
-    (session) =>
-      `  ${session.agent.padEnd(nameWidth)} ${paint(session.busy ? 'работает' : 'отдыхает', session.busy ? 'cyan' : 'gray')}`,
+    (session) => `  ${session.agent.padEnd(nameWidth)} ${paint('работает', 'cyan')}`,
   )
   const executors = [...holders, ...sessionRows]
 

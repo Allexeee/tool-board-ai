@@ -22,6 +22,17 @@ export type ExecutorState =
   | { kind: 'wait'; reason: string; until?: string }
   | { kind: 'rest' }
 
+/** Сколько сессия без исполнителя считается свежей: дальше это уже история. */
+export const LIVE_SESSION_TTL_MS = 15 * 60 * 1000
+
+/**
+ * Сессия без исполнителя говорит владельцу только о живой работе: занята и
+ * обновлялась за последние 15 минут. Простаивающие и старые не печатаются вовсе.
+ */
+export function sessionIsWorthShowing(session: LiveSession, now = Date.now()): boolean {
+  return session.busy && now - session.updatedAt <= LIVE_SESSION_TTL_MS
+}
+
 export interface QueueRow {
   taskId: string
   title: string
@@ -439,7 +450,7 @@ function holderState(
       .map((held) => ({ id: held.id, reason: handWaitReason(db, held) }))
       .find((item) => item.reason !== null)
     if (waiting) return { kind: 'wait', reason: waiting.reason! }
-    return { kind: 'wait', reason: `не взял ${input.hand[0]!.id}` }
+    return { kind: 'wait', reason: `задача в руке (${input.hand[0]!.id})` }
   }
 
   // у оркестратора работа бывает без задачи: пока идёт прогон, он работает
