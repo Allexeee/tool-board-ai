@@ -3,7 +3,7 @@ import { advanceTime } from './clock.ts'
 import { listFeatures } from './features.ts'
 import { listStages, type StageStatus } from './stages.ts'
 import { busyOf, listExecutors } from './executors.ts'
-import { listTasks, type TaskStatus } from './tasks.ts'
+import { listTasks, type Task, type TaskStatus } from './tasks.ts'
 import { depsOf, isSatisfied } from './deps.ts'
 import { getHand, dispatchHands, nextTask, stageOwner, type AssignSource } from './hands.ts'
 import { activeRun, lastClosedRun } from './runs.ts'
@@ -11,6 +11,27 @@ import { listDecisions } from './decisions.ts'
 import { openRequests } from './requests.ts'
 import type { LiveSession } from './usage.ts'
 import { pendingRelease } from './git/release.ts'
+
+/**
+ * Что делает исполнитель. Три состояния и ничего больше: работа, ожидание
+ * с причиной и отдых. Заголовок сессии сюда не входит — он не обновляется.
+ */
+export type ExecutorState =
+  /** taskId null — работа без задачи: у оркестратора идёт прогон. */
+  | { kind: 'work'; taskId: string | null; title: string | null }
+  | { kind: 'wait'; reason: string; until?: string }
+  | { kind: 'rest' }
+
+/** Сколько сессия без исполнителя считается свежей: дальше это уже история. */
+export const LIVE_SESSION_TTL_MS = 15 * 60 * 1000
+
+/**
+ * Сессия без исполнителя говорит владельцу только о живой работе: занята и
+ * обновлялась за последние 15 минут. Простаивающие и старые не печатаются вовсе.
+ */
+export function sessionIsWorthShowing(session: LiveSession, now = Date.now()): boolean {
+  return session.busy && now - session.updatedAt <= LIVE_SESSION_TTL_MS
+}
 
 export interface QueueRow {
   taskId: string
@@ -336,6 +357,8 @@ export interface NowView {
     busy: { reason: string; until: string } | null
     /** есть работа: держит задачу, имеет руку или (для worker-0) идёт прогон */
     working: boolean
+    /** Что показать в строке: работает над задачей, ждёт причину или отдыхает. */
+    state: ExecutorState
   }>
   requests: Array<{ id: string; title: string }>
   plans: Array<{ id: string; requestId: string; title: string }>
@@ -378,6 +401,62 @@ function waitingMainFeatures(db: DatabaseSync): Array<{ id: string; name: string
     .filter(([id, entry]) => entry.stages === totals.get(id))
     .sort((a, b) => b[1].fresh.localeCompare(a[1].fresh) || a[0].localeCompare(b[0]))
     .map(([id, entry]) => ({ id, name: entry.name }))
+}
+
+/**
+ * Почему задача из руки ещё не в работе: зависимость, блокировка, неактивный
+ * этап или решение владельца. null — брать можно, ждать нечего.
+ */
+function handWaitReason(db: DatabaseSync, task: Task): string | null {
+  if (task.status === 'blocked') return 'блокировка'
+  if (task.status === 'needs_owner') return 'нужно решение владельца'
+  if (task.status === 'deferred') return 'отложена'
+  if (task.status === 'done' || task.status === 'cancelled') return null
+
+  const waits = depsOf(db, task.id).filter((dep) => !isSatisfied(db, dep))
+  if (waits.length > 0) return waits.join(', ')
+
+  if (task.stageId !== null) {
+    const stage = db.prepare('select status from stages where id = ?').get(task.stageId) as
+      | { status: string }
+      | undefined
+    if (!stage || stage.status !== 'active') return 'этап не активен'
+  }
+
+  if (task.status !== 'ready') return `не готова: ${task.status}`
+  return null
+}
+
+/** Состояние строки: работа сильнее ожидания, ожидание сильнее отдыха. */
+function holderState(
+  db: DatabaseSync,
+  input: {
+    active: Task[]
+    hand: Task[]
+    busy: { reason: string; until: string } | null
+    running: boolean
+  },
+): ExecutorState {
+  const task = input.active[0]
+  if (task) return { kind: 'work', taskId: task.id, title: task.title }
+
+  // занятость без задачи — это причина не брать работу, а не работа
+  if (input.busy) return { kind: 'wait', reason: input.busy.reason, until: input.busy.until }
+
+  // рука не пуста, но в работу ещё не пошла: называем первую причину, а если
+  // всё можно брать — говорим, что задача лежит в руке и её ещё не взяли
+  if (input.hand.length > 0) {
+    const waiting = input.hand
+      .map((held) => ({ id: held.id, reason: handWaitReason(db, held) }))
+      .find((item) => item.reason !== null)
+    if (waiting) return { kind: 'wait', reason: waiting.reason! }
+    return { kind: 'wait', reason: `задача в руке (${input.hand[0]!.id})` }
+  }
+
+  // у оркестратора работа бывает без задачи: пока идёт прогон, он работает
+  if (input.running) return { kind: 'work', taskId: null, title: null }
+
+  return { kind: 'rest' }
 }
 
 export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: LiveSession[] } = {}): NowView {
@@ -434,20 +513,23 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
   const run = activeRun(db)
   const holders = listExecutors(db).map((executor) => {
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
-    const hand = getHand(db, executor.id).map((task) => task.id)
+    const handTasks = getHand(db, executor.id)
+    const hand = handTasks.map((task) => task.id)
     const busy = busyOf(db, executor.id)
+    const busyState = busy ? { reason: busy.reason, until: busy.until } : null
     // работа — это своя задача, непустая рука или (у оркестратора) идущий прогон.
     // субагенты считаются чужой работой: пока они живы, worker-0 сам не работает.
-    const working =
-      active.length > 0 || hand.length > 0 || (executor.id === 'worker-0' && run !== null)
+    const running = executor.id === 'worker-0' && run !== null
+    const working = active.length > 0 || hand.length > 0 || running
     return {
       executor: executor.id,
       session: executor.session,
       task: active[0]?.id ?? null,
       active: active.map((task) => task.id),
       hand,
-      busy: busy ? { reason: busy.reason, until: busy.until } : null,
+      busy: busyState,
       working,
+      state: holderState(db, { active, hand: handTasks, busy: busyState, running }),
     }
   })
 
@@ -478,20 +560,6 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
     unreleased: pendingRelease(db).length,
     assignment: assignmentStats(db),
   }
-}
-
-const SESSION_TITLE_LIMIT = 40
-
-/**
- * Состояние живого субагента без имени агента: «занят · заголовок».
- * Одна и та же строка идёт и в строку исполнителя, и в строку сессии без исполнителя:
- * имя агента стоит в начале строки, второй раз его не печатаем.
- * Заголовок режется до 40 символов; многоточие входит в лимит.
- */
-export function sessionState(session: LiveSession): string {
-  const title = session.title || 'без названия'
-  const short = title.length > SESSION_TITLE_LIMIT ? `${title.slice(0, SESSION_TITLE_LIMIT - 1)}…` : title
-  return `${session.busy ? 'занят' : 'простаивает'} · ${short}`
 }
 
 // владельцу нужен не журнал, а картина работы: строка на каждый этап.

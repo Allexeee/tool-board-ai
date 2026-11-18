@@ -17,7 +17,7 @@ import { takeTask } from '../../src/core/lease.ts'
 import { endRun, startRun } from '../../src/core/runs.ts'
 import { collectRunReport, renderRunReport } from '../../src/core/run-report.ts'
 import { readLiveSessions } from '../../src/core/usage.ts'
-import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats, sessionState } from '../../src/core/views.ts'
+import { nowView, dispatchPlan, ownerView, taskQueue, queueFreeReason, assignmentStats } from '../../src/core/views.ts'
 
 function seed(db: DatabaseSync): string {
   addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
@@ -279,6 +279,55 @@ test('now отдаёт занятость рядом с рукой', () => {
   // у двух других занятости нет: строка говорит «свободен», а не падает
   assert.equal(holders.find((holder) => holder.executor === 'w2')!.busy, null)
   assert.equal(holders.find((holder) => holder.executor === 'w3')!.busy, null)
+})
+
+test('строка исполнителя: работает над задачей, ждёт причину или отдыхает', () => {
+  const db = openDb(':memory:')
+  seed(db)
+  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
+  addExecutor(db, { id: 'w3', kind: 'agent', skills: ['backend'] })
+
+  const first = db.prepare('select id, title from tasks order by id limit 1').get() as {
+    id: string
+    title: string
+  }
+
+  // w1 работает: задача у него в руках
+  db.prepare("update tasks set status = 'active', holder = 'w1' where id = ?").run(first.id)
+  // w2 не берёт работу: владелец занял его разбором
+  setBusy(db, { executorId: 'w2', reason: 'разбор F41', until: '30m', actor: 'owner' })
+
+  const by = (id: string) => nowView(db).holders.find((holder) => holder.executor === id)!
+
+  assert.deepEqual(by('w1').state, { kind: 'work', taskId: first.id, title: first.title })
+
+  const wait = by('w2').state
+  assert.equal(wait.kind, 'wait')
+  if (wait.kind === 'wait') assert.equal(wait.reason, 'разбор F41')
+
+  assert.deepEqual(by('w3').state, { kind: 'rest' }, 'ничего нет — отдыхает')
+})
+
+test('задача в руке без блокировки — ожидание, а не выдуманная работа', () => {
+  const db = openDb(':memory:')
+  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
+  const base = {
+    dod: ['a'],
+    size: 'S' as const,
+    skill: 'backend',
+    class: 'standard' as const,
+    scope: ['src/**'],
+  }
+  const first = createTask(db, { ...base, title: 'Блокер' })
+  const second = createTask(db, { ...base, title: 'Зависимая' })
+  addDep(db, second.id, first.id)
+  refreshReady(db)
+  // цепочка в руке: зависимая ждёт блокера, который тоже лежит в руке
+  setHand(db, 'w1', [first.id, second.id], 'owner')
+
+  const state = nowView(db).holders.find((holder) => holder.executor === 'w1')!.state
+  assert.equal(state.kind, 'wait')
+  if (state.kind === 'wait') assert.match(state.reason, new RegExp(first.id.replace('.', '\\.')))
 })
 
 test('снятая занятость исчезает из now', () => {
@@ -583,26 +632,5 @@ test('нет базы OpenCode: живых субагентов просто н�
   const dbPath = join(tmpdir(), `al-live-missing-${process.pid}-${Date.now()}`, 'opencode.db')
 
   assert.deepEqual(readLiveSessions({ dbPath, now: Date.now() }), [])
-})
-
-test('состояние сессии: занятость и заголовок до 40 символов, без имени агента', () => {
-  const state = sessionState({
-    id: 's',
-    agent: 'worker-2',
-    title: 'x'.repeat(60),
-    busy: true,
-    updatedAt: 0,
-  })
-
-  const [busy, title] = state.split(' · ')
-  assert.equal(busy, 'занят')
-  assert.equal(title!.length, 40)
-  assert.match(title!, /…$/)
-  assert.doesNotMatch(state, /worker-2/, 'имя агента печатается в начале строки, а не в состоянии')
-
-  assert.equal(
-    sessionState({ id: 's', agent: 'general', title: 'Ревью', busy: false, updatedAt: 0 }),
-    'простаивает · Ревью',
-  )
 })
 
