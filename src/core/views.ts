@@ -436,9 +436,13 @@ export function nowView(db: DatabaseSync, options: { all?: boolean; sessions?: L
     const active = listTasks(db, { holder: executor.id, status: 'active' as TaskStatus })
     const hand = getHand(db, executor.id).map((task) => task.id)
     const busy = busyOf(db, executor.id)
-    // оркестратор занят и без задачи: пока идёт прогон, он работает
+    // оркестратор занят и без задачи: идёт прогон или только что работал его субагент
+    const liveSessions = options.sessions ?? []
+    const freshSubagent = liveSessions.some((item) => Date.now() - item.updatedAt < 15 * 60 * 1000)
     const working =
-      active.length > 0 || hand.length > 0 || (executor.id === 'worker-0' && run !== null)
+      active.length > 0 ||
+      hand.length > 0 ||
+      (executor.id === 'worker-0' && (run !== null || freshSubagent))
     return {
       executor: executor.id,
       session: executor.session,
