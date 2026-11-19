@@ -14,7 +14,7 @@ export const COMMANDS_WITH_SUB = new Set([
 // Флаги CLI из спецификации §12. Неизвестный флаг — ошибка ввода (код 3).
 const KNOWN_FLAGS = new Set([
   'json', 'help', 'version', 'as', 'group', 'title', 'body', 'skill', 'skills',
-  'phase', 'status', 'importance', 'urgency', 'needs-merge', 'no-needs-merge',
+  'phase', 'status', 'holder', 'importance', 'urgency', 'needs-merge', 'no-needs-merge',
   'review', 'no-review', 'scope', 'from', 'kind', 'value', 'reason', 'note',
   'summary', 'waive-dependents', 'done', 'reopen', 'severity', 'text', 'verdict',
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',

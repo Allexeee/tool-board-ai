@@ -1,0 +1,196 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { openDb } from '../../src/core/db.ts'
+import { listEvents } from '../../src/core/events.ts'
+
+const bin = resolve('bin/board.ts')
+
+function run(dir: string, args: string[]) {
+  const result = spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  return { code: result.status, out: result.stdout, err: result.stderr }
+}
+
+function project(t: { after: (fn: () => void) => void }): string {
+  const dir = mkdtempSync(join(tmpdir(), 'board-cli-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+
+  const init = run(dir, ['init'])
+  assert.equal(init.code, 0, init.err)
+  return dir
+}
+
+function json(dir: string, args: string[]) {
+  const result = run(dir, [...args, '--json'])
+  assert.equal(result.code, 0, result.err)
+  return JSON.parse(result.out)
+}
+
+test('card add заводит запрос и печатает его в json', (t) => {
+  const dir = project(t)
+
+  const card = json(dir, [
+    'card', 'add',
+    '--group', 'UI',
+    '--title', 'Форма входа',
+    '--skill', 'dev',
+  ])
+
+  assert.equal(card.id, 'UI-1')
+  assert.equal(card.title, 'Форма входа')
+  assert.equal(card.phase, 'request')
+  assert.equal(card.status, 'new')
+  assert.equal(card.skill, 'dev')
+  assert.equal(card.needsMerge, true)
+  assert.equal(card.reviewRequired, false)
+})
+
+test('card add с навыком owner создаёт задачу в ready', (t) => {
+  const dir = project(t)
+
+  const card = json(dir, [
+    'card', 'add',
+    '--group', 'OPS',
+    '--title', 'Создать VK группу',
+    '--skill', 'owner',
+  ])
+
+  assert.equal(card.id, 'OPS-1')
+  assert.equal(card.phase, 'task')
+  assert.equal(card.status, 'ready')
+  assert.equal(card.needsMerge, false)
+  assert.equal(card.reviewRequired, false)
+})
+
+test('card add пишет --as в журнал, по умолчанию owner', (t) => {
+  const dir = project(t)
+
+  const byDeveloper = json(dir, [
+    'card', 'add',
+    '--group', 'UI',
+    '--title', 'Форма входа',
+    '--skill', 'dev',
+    '--as', 'developer',
+  ])
+  const byOwner = json(dir, ['card', 'add', '--group', 'UI', '--title', 'Валидация', '--skill', 'dev'])
+
+  const db = openDb(join(dir, '.board', 'board.db'))
+  try {
+    assert.equal(listEvents(db, byDeveloper.id)[0].actor, 'developer')
+    assert.equal(listEvents(db, byOwner.id)[0].actor, 'owner')
+  } finally {
+    db.close()
+  }
+})
+
+test('card add требует --group, --title и --skill', (t) => {
+  const dir = project(t)
+
+  const noGroup = run(dir, ['card', 'add', '--title', 'x', '--skill', 'dev'])
+  assert.equal(noGroup.code, 3)
+  assert.match(noGroup.err, /--group/)
+
+  const noTitle = run(dir, ['card', 'add', '--group', 'UI', '--skill', 'dev'])
+  assert.equal(noTitle.code, 3)
+  assert.match(noTitle.err, /--title/)
+
+  const noSkill = run(dir, ['card', 'add', '--group', 'UI', '--title', 'x'])
+  assert.equal(noSkill.code, 3)
+  assert.match(noSkill.err, /--skill/)
+})
+
+test('card show печатает id, статус, навык, оценки, scope и body', (t) => {
+  const dir = project(t)
+
+  json(dir, [
+    'card', 'add',
+    '--group', 'UI',
+    '--title', 'Форма входа',
+    '--skill', 'dev',
+    '--body', 'Подробное описание задачи',
+  ])
+  json(dir, [
+    'card', 'edit', 'UI-1',
+    '--importance', '2',
+    '--urgency', '3',
+    '--scope', 'src/**',
+  ])
+
+  const shown = run(dir, ['card', 'show', 'UI-1'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /UI-1/)
+  assert.match(shown.out, /Форма входа/)
+  assert.match(shown.out, /статус: new/)
+  assert.match(shown.out, /фаза: request/)
+  assert.match(shown.out, /навык: dev/)
+  assert.match(shown.out, /важность: 2/)
+  assert.match(shown.out, /срочность: 3/)
+  assert.match(shown.out, /мерж: да/)
+  assert.match(shown.out, /ревью: нет/)
+  assert.match(shown.out, /scope: src\/\*\*/)
+  assert.match(shown.out, /Подробное описание задачи/)
+
+  const missing = run(dir, ['card', 'show', 'UI-9'])
+  assert.equal(missing.code, 3)
+  assert.match(missing.err, /не найдена/)
+})
+
+test('card edit меняет поля и признак ревью', (t) => {
+  const dir = project(t)
+  json(dir, ['card', 'add', '--group', 'UI', '--title', 'Форма', '--skill', 'dev'])
+
+  const edited = json(dir, [
+    'card', 'edit', 'UI-1',
+    '--title', 'Форма регистрации',
+    '--body', 'Текст',
+    '--importance', '2',
+    '--urgency', '1',
+    '--no-needs-merge',
+    '--review',
+    '--scope', 'src/**',
+    '--scope', 'tests/**',
+  ])
+
+  assert.equal(edited.title, 'Форма регистрации')
+  assert.equal(edited.body, 'Текст')
+  assert.equal(edited.importance, 2)
+  assert.equal(edited.urgency, 1)
+  assert.equal(edited.needsMerge, false)
+  assert.equal(edited.reviewRequired, true)
+  assert.deepEqual(edited.scope, ['src/**', 'tests/**'])
+})
+
+test('card list фильтрует и печатает карточки', (t) => {
+  const dir = project(t)
+  json(dir, ['card', 'add', '--group', 'UI', '--title', 'Форма', '--skill', 'dev'])
+  json(dir, ['card', 'add', '--group', 'UI', '--title', 'Валидация', '--skill', 'dev'])
+  json(dir, ['card', 'add', '--group', 'OPS', '--title', 'Группа', '--skill', 'owner'])
+
+  const requests = json(dir, ['card', 'list', '--status', 'new'])
+  assert.deepEqual(
+    requests.map((card: { id: string }) => card.id),
+    ['UI-1', 'UI-2'],
+  )
+
+  const owned = json(dir, ['card', 'list', '--skill', 'owner'])
+  assert.deepEqual(
+    owned.map((card: { id: string }) => card.id),
+    ['OPS-1'],
+  )
+
+  const all = json(dir, ['card', 'list'])
+  assert.equal(all.length, 3)
+
+  const human = run(dir, ['card', 'list'])
+  assert.equal(human.code, 0, human.err)
+  assert.match(human.out, /UI-2/)
+  assert.match(human.out, /OPS-1/)
+  assert.match(human.out, /new/)
+})

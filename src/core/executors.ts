@@ -2,197 +2,109 @@
 import { UserError } from '../cli/errors.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
+import type { Executor, ExecutorKind } from './types.ts'
 
-export type ExecutorKind = 'human' | 'agent'
-
-export type PermissionEffect = 'allow' | 'deny'
-
-/**
- * Правило прав агента. Хранится как JSON-массив и годится для frontmatter
- * агента OpenCode: действие (edit, shell, webfetch), ресурс (шаблон) и эффект.
- */
-export interface PermissionRule {
-  action: string
-  resource: string
-  effect: PermissionEffect
-}
-
-/**
- * Лимит шагов агента по умолчанию. Двадцати не хватало: агент упирался в лимит
- * на середине задачи и не доходил до тестов.
- */
-export const DEFAULT_STEPS = 60
-export const MAX_STEPS = 500
-
-export interface Executor {
+export interface NewExecutorInput {
   id: string
   kind: ExecutorKind
   skills: string[]
-  wipLimit: number
-  handSize: number
-  session: string | null
-  lastSeen: string | null
-  model: string | null
-  permissions: PermissionRule[]
-  steps: number
+  runSize?: number
 }
+
+export interface ExecutorPatch {
+  skills?: string[]
+  runSize?: number
+}
+
+/** Исполнители заводятся владельцем: отдельного --as у команд нет. */
+const OWNER = 'owner'
+
+const ID = /^[a-z0-9][a-z0-9._-]*$/i
+const MIN_RUN_SIZE = 1
+const MAX_RUN_SIZE = 3
+const DEFAULT_RUN_SIZE = 3
 
 interface Row {
   id: string
-  kind: ExecutorKind
+  kind: string
   skills: string
-  wip_limit: number
-  hand_size: number
-  session: string | null
+  run_size: number
+  worktree: string | null
   last_seen: string | null
-  model: string | null
-  permissions: string
-  steps: number | null
 }
-
-/**
- * Шаги из строки базы. Пустое или испорченное значение (старая база, ручная правка)
- * читается как текущий дефолт: файл агента получает 60 без правки строки.
- */
-const stepsOf = (value: number | null | undefined): number =>
-  value === null || value === undefined || !Number.isInteger(value) || value < 1 || value > MAX_STEPS
-    ? DEFAULT_STEPS
-    : value
 
 const toExecutor = (row: Row): Executor => ({
   id: row.id,
-  kind: row.kind,
+  kind: row.kind as ExecutorKind,
   skills: JSON.parse(row.skills) as string[],
-  wipLimit: row.wip_limit,
-  handSize: row.hand_size,
-  session: row.session,
+  runSize: row.run_size,
+  worktree: row.worktree,
   lastSeen: row.last_seen,
-  model: row.model,
-  permissions: JSON.parse(row.permissions) as PermissionRule[],
-  steps: stepsOf(row.steps),
 })
 
-/** Модель хранится как provider/model; null — агент наследует модель родителя. */
-export function normalizeModel(value: string | null | undefined): string | null {
-  if (value === undefined || value === null) return null
-  const model = value.trim()
-  if (!model || model === 'inherit' || model === 'parent') return null
-  if (!/^[^\s/]+\/[^\s/]+$/.test(model)) {
+function normalizeId(raw: string): string {
+  const id = raw.trim()
+  if (!ID.test(id)) {
     throw new UserError(
       3,
-      `модель «${model}»: нужен формат provider/model, например opencode/gpt-5 (или inherit — наследовать модель родителя)`,
+      `недопустимый id исполнителя «${raw}»: одно слово из латиницы, цифр, точки, дефиса или подчёркивания`,
     )
   }
-  return model
+  return id
 }
 
-export function normalizeSteps(value: number | string | undefined): number {
-  if (value === undefined) return DEFAULT_STEPS
-  const steps = typeof value === 'number' ? value : Number(String(value).trim())
-  if (!Number.isInteger(steps) || steps < 1 || steps > MAX_STEPS) {
-    throw new UserError(3, `шагов должно быть целое число от 1 до ${MAX_STEPS}`)
+function normalizeKind(raw: string): ExecutorKind {
+  if (raw !== 'human' && raw !== 'agent') {
+    throw new UserError(3, `kind исполнителя — human или agent, а не «${raw}»`)
   }
-  return steps
+  return raw
 }
 
-/** Правило задаётся строкой action:resource, эффект берётся из флага. */
-export function parsePermission(value: string, effect: PermissionEffect): PermissionRule {
-  const raw = value.trim()
-  const colon = raw.indexOf(':')
-  if (colon === -1) {
+/** Навыки — набор: пустые отбрасываются, дубликаты схлопываются. */
+function normalizeSkills(raw: string[]): string[] {
+  const skills = [...new Set(raw.map((skill) => skill.trim()).filter(Boolean))]
+  if (skills.length === 0) throw new UserError(3, 'нужен хотя бы один навык исполнителя')
+  return skills
+}
+
+function normalizeRunSize(raw: number | undefined): number {
+  const runSize = raw ?? DEFAULT_RUN_SIZE
+  if (!Number.isInteger(runSize) || runSize < MIN_RUN_SIZE || runSize > MAX_RUN_SIZE) {
     throw new UserError(
       3,
-      `право «${raw}»: нужен формат action:resource, например shell:git * или edit:*`,
+      `размер забега — целое число от ${MIN_RUN_SIZE} до ${MAX_RUN_SIZE}`,
     )
   }
-
-  const action = raw.slice(0, colon).trim()
-  const resource = raw.slice(colon + 1).trim()
-  if (!action) throw new UserError(3, `право «${raw}»: пустое действие`)
-  if (!resource) throw new UserError(3, `право «${raw}»: пустой ресурс`)
-  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(action)) {
-    throw new UserError(3, `право «${raw}»: действие «${action}» должно быть одним словом, например shell`)
-  }
-
-  return { action, resource, effect }
+  return runSize
 }
 
-/**
- * --allow/--deny превращаются в упорядоченный список правил.
- * Одинаковые action:resource схлопываются: позже указанное правило побеждает.
- */
-export function parsePermissions(input: { allow?: string[]; deny?: string[] }): PermissionRule[] {
-  const rules = [
-    ...(input.allow ?? []).map((value) => parsePermission(value, 'allow')),
-    ...(input.deny ?? []).map((value) => parsePermission(value, 'deny')),
-  ]
+export function addExecutor(db: DatabaseSync, input: NewExecutorInput): Executor {
+  return tx(db, () => {
+    const id = normalizeId(input.id)
+    if (getExecutor(db, id)) throw new UserError(3, `исполнитель ${id} уже есть`)
 
-  const byKey = new Map<string, PermissionRule>()
-  for (const rule of rules) byKey.set(`${rule.action}:${rule.resource}`, rule)
-  return [...byKey.values()]
-}
+    const executor: Executor = {
+      id,
+      kind: normalizeKind(input.kind),
+      skills: normalizeSkills(input.skills),
+      runSize: normalizeRunSize(input.runSize),
+      worktree: null,
+      lastSeen: null,
+    }
 
-export function formatPermission(rule: PermissionRule): string {
-  return `${rule.effect} ${rule.action}:${rule.resource}`
-}
+    db.prepare(
+      'insert into executors (id, kind, skills, run_size) values (?, ?, ?, ?)',
+    ).run(executor.id, executor.kind, JSON.stringify(executor.skills), executor.runSize)
 
-export function addExecutor(
-  db: DatabaseSync,
-  input: {
-    id: string
-    kind: ExecutorKind
-    skills: string[]
-    wipLimit?: number
-    handSize?: number
-    model?: string | null
-    permissions?: PermissionRule[]
-    steps?: number
-  },
-): Executor {
-  if (getExecutor(db, input.id)) throw new UserError(3, `исполнитель ${input.id} уже есть`)
+    appendEvent(db, {
+      type: 'executor.added',
+      actor: OWNER,
+      subject: executor.id,
+      after: executor,
+    })
 
-  const executor: Executor = {
-    id: input.id,
-    kind: input.kind,
-    skills: input.skills,
-    wipLimit: input.wipLimit ?? 1,
-    handSize: input.handSize ?? 5,
-    session: null,
-    lastSeen: new Date().toISOString(),
-    model: normalizeModel(input.model),
-    permissions: input.permissions ?? [],
-    steps: normalizeSteps(input.steps),
-  }
-
-  db.prepare(
-    'insert into executors (id, kind, skills, wip_limit, hand_size, session, last_seen, model, permissions, steps) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-  ).run(
-    executor.id,
-    executor.kind,
-    JSON.stringify(executor.skills),
-    executor.wipLimit,
-    executor.handSize,
-    null,
-    executor.lastSeen,
-    executor.model,
-    JSON.stringify(executor.permissions),
-    executor.steps,
-  )
-
-  appendEvent(db, {
-    type: 'executor.added',
-    actor: 'system',
-    subject: executor.id,
-    after: {
-      skills: executor.skills,
-      kind: executor.kind,
-      model: executor.model,
-      permissions: executor.permissions,
-      steps: executor.steps,
-    },
+    return executor
   })
-
-  return executor
 }
 
 export function getExecutor(db: DatabaseSync, id: string): Executor | null {
@@ -205,299 +117,64 @@ export function listExecutors(db: DatabaseSync): Executor[] {
   return rows.map(toExecutor)
 }
 
-export function touchExecutor(db: DatabaseSync, id: string, at = new Date().toISOString()): void {
-  tx(db, () => {
-    db.prepare('update executors set last_seen = ? where id = ?').run(at, id)
-  })
-}
-
-export function assertSkill(executor: Executor, skill: string): void {
-  if (!executor.skills.includes(skill)) {
-    throw new UserError(3, `навык ${skill} не найден у исполнителя ${executor.id}`)
-  }
-}
-
-export function renameExecutor(
+export function updateExecutor(
   db: DatabaseSync,
-  input: { from: string; to: string; actor: string },
+  input: { id: string; patch: ExecutorPatch },
 ): Executor {
   return tx(db, () => {
-    const executor = getExecutor(db, input.from)
-    if (!executor) throw new UserError(3, `исполнитель ${input.from} не найден`)
-    if (!input.to.trim()) throw new UserError(3, 'нужно новое имя')
-    if (input.to === input.from) return executor
-    if (getExecutor(db, input.to)) throw new UserError(1, `исполнитель ${input.to} уже есть`)
+    const executor = getExecutor(db, input.id)
+    if (!executor) throw new UserError(3, `исполнитель ${input.id} не найден`)
 
-    db.prepare('update executors set id = ? where id = ?').run(input.to, input.from)
-    db.prepare('update tasks set holder = ? where holder = ?').run(input.to, input.from)
-    db.prepare('update hand set executor_id = ? where executor_id = ?').run(input.to, input.from)
+    const sets: string[] = []
+    const params: (string | number)[] = []
+
+    if (input.patch.skills !== undefined) {
+      sets.push('skills = ?')
+      params.push(JSON.stringify(normalizeSkills(input.patch.skills)))
+    }
+    if (input.patch.runSize !== undefined) {
+      sets.push('run_size = ?')
+      params.push(normalizeRunSize(input.patch.runSize))
+    }
+    if (sets.length === 0) return executor
+
+    params.push(executor.id)
+    db.prepare(`update executors set ${sets.join(', ')} where id = ?`).run(...params)
+
+    const updated = getExecutor(db, executor.id)!
     appendEvent(db, {
-      type: 'executor.renamed',
-      actor: input.actor,
-      subject: input.to,
-      before: { id: input.from },
+      type: 'executor.updated',
+      actor: OWNER,
+      subject: executor.id,
+      before: executor,
+      after: updated,
     })
-
-    return getExecutor(db, input.to)!
+    return updated
   })
 }
 
-export function removeExecutor(
-  db: DatabaseSync,
-  input: { executorId: string; actor: string },
-): Executor {
+/** Владелец неудаляем; исполнителя с карточками на руках сначала освобождают. */
+export function removeExecutor(db: DatabaseSync, id: string): Executor {
   return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
+    const executor = getExecutor(db, id)
+    if (!executor) throw new UserError(3, `исполнитель ${id} не найден`)
+    if (executor.id === OWNER) throw new UserError(3, 'владельца owner удалить нельзя')
 
-    const active = db
-      .prepare("select count(*) as c from tasks where holder = ? and status = 'active'")
-      .get(executor.id) as { c: number }
-    if (active.c > 0) {
-      throw new UserError(1, `у исполнителя ${executor.id} есть активная задача: сначала прервите её`)
+    const held = db
+      .prepare('select count(*) as n from cards where holder = ?')
+      .get(executor.id) as { n: number }
+    if (held.n > 0) {
+      throw new UserError(3, `исполнитель ${executor.id} держит карточки: сначала верните их в очередь`)
     }
 
-    db.prepare('delete from hand where executor_id = ?').run(executor.id)
     db.prepare('delete from executors where id = ?').run(executor.id)
-    appendEvent(db, { type: 'executor.removed', actor: input.actor, subject: executor.id })
+    appendEvent(db, {
+      type: 'executor.removed',
+      actor: OWNER,
+      subject: executor.id,
+      before: executor,
+    })
 
     return executor
-  })
-}
-
-export function setSkills(
-  db: DatabaseSync,
-  input: { executorId: string; skills: string[]; actor: string },
-): Executor {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-
-    const skills = [...new Set(input.skills.map((skill) => skill.trim()).filter(Boolean))]
-    if (skills.length === 0) throw new UserError(3, 'нужен хотя бы один навык')
-
-    db.prepare('update executors set skills = ? where id = ?').run(JSON.stringify(skills), executor.id)
-    appendEvent(db, {
-      type: 'executor.skills_changed',
-      actor: input.actor,
-      subject: executor.id,
-      before: { skills: executor.skills },
-      after: { skills },
-    })
-
-    return getExecutor(db, executor.id)!
-  })
-}
-
-export function setModel(
-  db: DatabaseSync,
-  input: { executorId: string; model: string | null; actor: string },
-): Executor {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-
-    const model = normalizeModel(input.model)
-    db.prepare('update executors set model = ? where id = ?').run(model, executor.id)
-    appendEvent(db, {
-      type: 'executor.model_changed',
-      actor: input.actor,
-      subject: executor.id,
-      before: { model: executor.model },
-      after: { model },
-    })
-
-    return getExecutor(db, executor.id)!
-  })
-}
-
-export function setPermissions(
-  db: DatabaseSync,
-  input: { executorId: string; permissions: PermissionRule[]; actor: string },
-): Executor {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-
-    db.prepare('update executors set permissions = ? where id = ?').run(
-      JSON.stringify(input.permissions),
-      executor.id,
-    )
-    appendEvent(db, {
-      type: 'executor.permissions_changed',
-      actor: input.actor,
-      subject: executor.id,
-      before: { permissions: executor.permissions },
-      after: { permissions: input.permissions },
-    })
-
-    return getExecutor(db, executor.id)!
-  })
-}
-
-export function setSteps(
-  db: DatabaseSync,
-  input: { executorId: string; steps: number | string; actor: string },
-): Executor {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-
-    const steps = normalizeSteps(input.steps)
-    db.prepare('update executors set steps = ? where id = ?').run(steps, executor.id)
-    appendEvent(db, {
-      type: 'executor.steps_changed',
-      actor: input.actor,
-      subject: executor.id,
-      before: { steps: executor.steps },
-      after: { steps },
-    })
-
-    return getExecutor(db, executor.id)!
-  })
-}
-
-export function bindSession(
-  db: DatabaseSync,
-  input: { executorId: string; session: string; actor: string },
-): Executor {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-    if (!input.session.trim()) throw new UserError(3, 'нужен идентификатор сессии: --session <id>')
-
-    db.prepare('update executors set session = ? where id = ?').run(input.session.trim(), executor.id)
-    appendEvent(db, {
-      type: 'executor.session_bound',
-      actor: input.actor,
-      subject: executor.id,
-      after: { session: input.session.trim() },
-    })
-
-    return getExecutor(db, executor.id)!
-  })
-}
-
-export function resetSession(db: DatabaseSync, input: { executorId: string; actor: string }): Executor {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-
-    db.prepare('update executors set session = null where id = ?').run(executor.id)
-    appendEvent(db, {
-      type: 'executor.session_reset',
-      actor: input.actor,
-      subject: executor.id,
-      before: { session: executor.session },
-    })
-
-    return getExecutor(db, executor.id)!
-  })
-}
-
-/**
- * Занятость без задачи: разбор кода, план, проверка чужой работы.
- * Живёт в журнале событий — истёкший срок не считается занятостью сам, без фоновых процессов.
- */
-export interface ExecutorBusy {
-  reason: string
-  until: string
-  since: string
-}
-
-const unitMs = (unit: string): number => {
-  const first = unit.toLowerCase()[0]
-  if (first === 'm' || first === 'м') return 60_000
-  if (first === 'h' || first === 'ч') return 3_600_000
-  if (first === 'd' || first === 'д') return 86_400_000
-  return 1_000
-}
-
-/**
- * Срок занятости: «30m», «2h», «1d», «45s» или момент ISO.
- * Возвращает ISO — в журнал и в ответы попадает один формат.
- */
-export function parseBusyUntil(value: string, now: Date = new Date()): string {
-  const raw = value.trim()
-  if (!raw) throw new UserError(3, 'нужен срок занятости: --until 30m (2h, 1d или дата ISO)')
-
-  const relative = /^(\d+)\s*(m|min|минут\w*|h|ч|час\w*|d|д|дн\w*|s|с|сек\w*)$/i.exec(raw)
-  const until = relative
-    ? new Date(now.getTime() + Number(relative[1]) * unitMs(relative[2]))
-    : new Date(raw)
-  if (Number.isNaN(until.getTime())) {
-    throw new UserError(3, `срок «${raw}»: нужен формат 30m, 2h, 1d (или дата ISO)`)
-  }
-  if (until.getTime() <= now.getTime()) {
-    throw new UserError(3, `срок «${raw}» уже прошёл: занятость должна кончаться в будущем`)
-  }
-  return until.toISOString()
-}
-
-/** Текущая занятость или null: снятая, истёкшая и отсутствующая — одно и то же. */
-export function busyOf(
-  db: DatabaseSync,
-  executorId: string,
-  at = new Date().toISOString(),
-): ExecutorBusy | null {
-  const row = db
-    .prepare(
-      `select at, type, note, after from events
-       where subject = ? and type in ('executor.busy', 'executor.free')
-       order by id desc limit 1`,
-    )
-    .get(executorId) as { at: string; type: string; note: string | null; after: string | null } | undefined
-
-  if (!row || row.type !== 'executor.busy') return null
-
-  const after = JSON.parse(row.after ?? '{}') as { reason?: string; until?: string }
-  if (!after.until) return null
-  if (Date.parse(after.until) <= Date.parse(at)) return null
-
-  return { reason: after.reason ?? row.note ?? '', until: after.until, since: row.at }
-}
-
-export function setBusy(
-  db: DatabaseSync,
-  input: { executorId: string; reason: string; until: string; actor: string; now?: Date },
-): ExecutorBusy {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-
-    const reason = input.reason.trim()
-    if (!reason) throw new UserError(3, 'нужна причина занятости: --note "разбор F41"')
-    const until = parseBusyUntil(input.until, input.now)
-
-    appendEvent(db, {
-      type: 'executor.busy',
-      actor: input.actor,
-      subject: executor.id,
-      note: reason,
-      after: { reason, until },
-    })
-
-    return busyOf(db, executor.id, (input.now ?? new Date()).toISOString())!
-  })
-}
-
-/** Снятие занятости: у свободного исполнителя это тихий no-op, а не ошибка. */
-export function clearBusy(db: DatabaseSync, input: { executorId: string; actor: string }): ExecutorBusy | null {
-  return tx(db, () => {
-    const executor = getExecutor(db, input.executorId)
-    if (!executor) throw new UserError(3, `исполнитель ${input.executorId} не найден`)
-
-    const busy = busyOf(db, executor.id)
-    if (!busy) return null
-
-    appendEvent(db, {
-      type: 'executor.free',
-      actor: input.actor,
-      subject: executor.id,
-      note: 'свободен',
-      before: { reason: busy.reason, until: busy.until },
-    })
-
-    return busy
   })
 }

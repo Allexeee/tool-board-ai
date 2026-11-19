@@ -15,9 +15,11 @@ export type CardStatus =
 
 export type Severity = 'critical' | 'important' | 'other'
 
+export type ExecutorKind = 'human' | 'agent'
+
 export interface Executor {
   id: string
-  kind: 'human' | 'agent'
+  kind: ExecutorKind
   skills: string[]
   runSize: number
   worktree: string | null
