@@ -1,9 +1,21 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
+import { readFileSync } from 'node:fs'
 import { createCard, editCard, getCard, listCards, type CardFilter, type CardPatch } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { addDep, isSatisfied, listDeps, removeDep } from '../../core/deps.ts'
 import { listDiscussion, type Discussion } from '../../core/discussion.ts'
 import { listEvents, type EventRecord } from '../../core/events.ts'
+import {
+  applyShapeFile,
+  approveCard,
+  cancelCard,
+  ownerDone,
+  rejectCard,
+  reopenCard,
+  shapeCard,
+  submitCard,
+  type ShapeFile,
+} from '../../core/lifecycle.ts'
 import { findProject } from '../../core/project.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
 import {
@@ -252,6 +264,108 @@ export default async function command(args: ParsedArgs) {
     throw new UserError(3, 'использование: board card dep add|remove|list UI-1 UI-5')
   }
 
+  const shape = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) {
+      throw new UserError(3, 'использование: board card shape UI-1 --as developer [--from card.json]')
+    }
+    const actor = stringFlag(args, 'as')
+    if (!actor) throw new UserError(3, 'нужен --as <исполнитель>')
+
+    const card = shapeCard(db, { id, actor })
+
+    const from = stringFlag(args, 'from')
+    if (from) {
+      const result = applyShapeFile(db, { id, actor, file: parseShapeFile(from) })
+      const created = result.newCards.length > 0
+        ? `; создано: ${result.newCards.map((item) => item.id).join(', ')}`
+        : ''
+      ok(result, `${result.card.id} разобрана из ${from}${created}`)
+      return 0
+    }
+
+    ok(card, `${card.id} в разборе: ${card.title}`)
+    return 0
+  }
+
+  const submit = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: board card submit UI-1 --as developer')
+    const actor = stringFlag(args, 'as')
+    if (!actor) throw new UserError(3, 'нужен --as <исполнитель>')
+
+    const card = submitCard(db, { id, actor })
+    ok(card, `${card.id} на утверждении: ${card.title}`)
+    return 0
+  }
+
+  const approve = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: board card approve UI-1')
+
+    const card = approveCard(db, { id, actor: stringFlag(args, 'as') ?? 'owner' })
+    ok(card, `${card.id} утверждена: ${card.status}`)
+    return 0
+  }
+
+  const reject = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: board card reject UI-1 --reason «...»')
+
+    const card = rejectCard(db, {
+      id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      reason: stringFlag(args, 'reason') ?? '',
+    })
+    ok(card, `${card.id} отклонена: ${card.status}`)
+    return 0
+  }
+
+  const done = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: board card done UI-9 --summary «...»')
+
+    const card = ownerDone(db, {
+      id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      summary: stringFlag(args, 'summary') ?? '',
+    })
+    ok(card, `${card.id} закрыта: ${card.title}`)
+    return 0
+  }
+
+  const cancel = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) {
+      throw new UserError(
+        3,
+        'использование: board card cancel UI-1 --reason «...» [--waive-dependents] --as ...',
+      )
+    }
+
+    const card = cancelCard(db, {
+      id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      reason: stringFlag(args, 'reason') ?? '',
+      waiveDeps: boolFlag(args, 'waive-dependents'),
+    })
+    ok(card, `${card.id} отменена: ${card.title}`)
+    return 0
+  }
+
+  const reopen = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: board card reopen UI-1 --reason «...»')
+
+    const card = reopenCard(db, {
+      id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      reason: stringFlag(args, 'reason') ?? '',
+    })
+    ok(card, `${card.id} переоткрыта: попытка ${card.attempt}`)
+    return 0
+  }
+
   try {
     if (args.sub === 'add') return add(args)
     if (args.sub === 'list') return list(args)
@@ -260,7 +374,17 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'step') return step(args)
     if (args.sub === 'ref') return ref(args)
     if (args.sub === 'dep') return dep(args)
-    throw new UserError(3, 'использование: board card add|list|show|edit|step|ref|dep')
+    if (args.sub === 'shape') return shape(args)
+    if (args.sub === 'submit') return submit(args)
+    if (args.sub === 'approve') return approve(args)
+    if (args.sub === 'reject') return reject(args)
+    if (args.sub === 'done') return done(args)
+    if (args.sub === 'cancel') return cancel(args)
+    if (args.sub === 'reopen') return reopen(args)
+    throw new UserError(
+      3,
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|approve|reject|done|cancel|reopen',
+    )
   } finally {
     db.close()
   }
@@ -271,6 +395,27 @@ function splitFlag(args: ParsedArgs, name: string): string[] {
     .flatMap((value) => value.split(','))
     .map((value) => value.trim())
     .filter(Boolean)
+}
+
+/** Читает и разбирает JSON пакетного разбора §10.1; ошибка — код 3. */
+function parseShapeFile(path: string): ShapeFile {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    throw new UserError(3, `файл ${path} не найден`)
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new UserError(3, `файл ${path}: невалидный JSON`)
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new UserError(3, `файл ${path}: ожидался объект JSON`)
+  }
+  return parsed as ShapeFile
 }
 
 /** Пара --x/--no-x: одновременный вызов — ошибка, иначе непонятно, что выбрали. */

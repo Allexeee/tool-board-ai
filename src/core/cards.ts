@@ -349,6 +349,10 @@ export function editCard(
       params.push(patch.needsMerge ? 1 : 0)
     }
     if (patch.reviewRequired !== undefined) {
+      const effectiveSkill = patch.skill !== undefined ? patch.skill.trim() : card.skill
+      if (patch.reviewRequired && effectiveSkill === OWNER_SKILL) {
+        throw new UserError(3, 'owner-карточка не ревьюится: review_required должен быть false')
+      }
       sets.push('review_required = ?')
       params.push(patch.reviewRequired ? 1 : 0)
     }

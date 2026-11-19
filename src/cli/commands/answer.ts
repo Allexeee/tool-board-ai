@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { answer, openQuestions } from '../../core/discussion.ts'
 import { openDb } from '../../core/db.ts'
 import { findProject } from '../../core/project.ts'
+import { resumeAfterAnswer } from '../../core/lifecycle.ts'
 import { numberFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { ok } from '../output.ts'
@@ -18,12 +19,16 @@ export default async function command(args: ParsedArgs) {
       throw new UserError(3, 'использование: board answer UI-1 "ответ" --as owner')
     }
 
+    const actor = stringFlag(args, 'as') ?? 'owner'
     const reply = answer(db, {
       cardId,
-      actor: stringFlag(args, 'as') ?? 'owner',
+      actor,
       questionId: resolveQuestion(db, cardId, numberFlag(args, 'question')),
       text,
     })
+    // Ответ на последний открытый вопрос снимает блокировку карточки (§4.1).
+    resumeAfterAnswer(db, cardId, actor)
+
     ok(
       reply,
       `${reply.cardId} · ответ #${reply.id} на вопрос #${reply.answerTo}: ${reply.text}`,
