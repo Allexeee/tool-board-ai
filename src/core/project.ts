@@ -1,80 +1,154 @@
-﻿import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+﻿import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { openDb } from './db.ts'
-import { DEFAULT_CONFIG, readConfig, writeConfig, type Config } from './config.ts'
-import { installHooks } from './git/hooks.ts'
-import { branchExists, isRepo, resolveBranches, runGit } from './git/git.ts'
-import { writeOpenCodeFiles } from './opencode.ts'
 
 export interface Project {
   root: string
   dbPath: string
-  configPath: string
-  config: Config
+  docsDir: string
+  boardDir: string
 }
 
-export function findProject(startDir: string): Project | null {
-  let dir = resolve(startDir)
+function projectAt(root: string): Project | null {
+  const dbPath = join(root, '.board', 'board.db')
+  if (!existsSync(dbPath)) return null
 
+  return {
+    root,
+    dbPath,
+    boardDir: join(root, '.board'),
+    docsDir: join(root, 'docs', 'board'),
+  }
+}
+
+/**
+ * Ищет `.board/board.db` вверх по дереву. BOARD_HOME перекрывает поиск.
+ * Worktree лежит внутри `<root>/.worktrees/<id>`, поэтому обход находит
+ * основной каталог сам: отдельной базы в worktree нет.
+ */
+export function findProject(
+  startDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Project | null {
+  const home = env.BOARD_HOME?.trim()
+  if (home) return projectAt(resolve(home))
+
+  let dir = resolve(startDir)
   for (;;) {
-    const configPath = join(dir, '.toolbox-al', 'config.json')
-    if (existsSync(configPath)) {
-      return {
-        root: dir,
-        dbPath: join(dir, '.toolbox-al', 'tracker.db'),
-        configPath,
-        config: readConfig(configPath),
-      }
-    }
+    const project = projectAt(dir)
+    if (project) return project
+
     const parent = dirname(dir)
     if (parent === dir) return null
     dir = parent
   }
 }
 
+const GITIGNORE_ENTRIES = ['.board/', '.worktrees/']
+
+function updateGitignore(root: string): boolean {
+  const path = join(root, '.gitignore')
+  const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  const lines = current.split(/\r?\n/)
+  const missing = GITIGNORE_ENTRIES.filter((entry) => !lines.includes(entry))
+  if (missing.length === 0) return false
+
+  if (current !== '' && !current.endsWith('\n')) appendFileSync(path, '\n')
+  appendFileSync(path, missing.join('\n') + '\n')
+  return true
+}
+
+function stripToolboxBlock(text: string): string {
+  const lines = text.split(/\r?\n/)
+  const kept: string[] = []
+  let inBlock = false
+  let inLegacy = false
+
+  for (const line of lines) {
+    if (/^\s*#\s*toolbox-al:begin\b/.test(line)) {
+      inBlock = true
+      continue
+    }
+    if (inBlock) {
+      if (/^\s*#\s*toolbox-al:end\b/.test(line)) inBlock = false
+      continue
+    }
+    // старый формат без маркеров: маркер и тело до exit 0
+    if (/^\s*#\s*toolbox-al:\s*protect main and dev\b/.test(line)) {
+      inLegacy = true
+      continue
+    }
+    if (inLegacy) {
+      if (/^\s*exit 0\s*$/.test(line)) inLegacy = false
+      continue
+    }
+    if (/^\s*#\s*toolbox-al\b/.test(line)) continue
+    kept.push(line)
+  }
+
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
+}
+
+function hasHookBody(text: string): boolean {
+  return text
+    .split(/\r?\n/)
+    .some((line) => line.trim() !== '' && !line.trim().startsWith('#!'))
+}
+
+function stripToolboxHook(root: string): void {
+  const path = join(root, '.git', 'hooks', 'pre-commit')
+  if (!existsSync(path)) return
+
+  const current = readFileSync(path, 'utf8')
+  if (!current.includes('toolbox-al')) return
+
+  const next = stripToolboxBlock(current)
+  if (hasHookBody(next)) {
+    writeFileSync(path, next)
+  } else {
+    rmSync(path, { force: true })
+  }
+}
+
 export function initProject(dir: string): { created: string[]; root: string } {
   const root = resolve(dir)
-  const alDir = join(root, '.toolbox-al')
   const created: string[] = []
 
-  if (!existsSync(alDir)) {
-    mkdirSync(alDir, { recursive: true })
-    created.push('.toolbox-al/')
+  const boardDir = join(root, '.board')
+  if (!existsSync(boardDir)) {
+    mkdirSync(boardDir, { recursive: true })
+    created.push('.board/')
   }
 
-  const configPath = join(alDir, 'config.json')
-  const hadConfig = existsSync(configPath)
-  writeConfig(configPath, DEFAULT_CONFIG)
-  if (!hadConfig) created.push('.toolbox-al/config.json')
-
-  const dbPath = join(alDir, 'tracker.db')
-  if (!existsSync(dbPath)) {
-    openDb(dbPath).close()
-    created.push('.toolbox-al/tracker.db')
+  const docsDir = join(root, 'docs', 'board')
+  if (!existsSync(docsDir)) {
+    mkdirSync(docsDir, { recursive: true })
+    created.push('docs/board/')
   }
 
-  if (isRepo(root)) {
-    const gitDir = runGit(root, ['rev-parse', '--absolute-git-dir'])
-    const { main, dev } = resolveBranches(root, DEFAULT_CONFIG)
-    const branches = new Set([main, dev])
-    if (branchExists(root, 'develop')) branches.add('develop')
+  const dbPath = join(boardDir, 'board.db')
+  if (!existsSync(dbPath)) created.push('.board/board.db')
 
-    installHooks(gitDir, { protectedBranches: [...branches] })
+  const db = openDb(dbPath)
+  try {
+    db.prepare(
+      "insert or ignore into executors (id, kind, skills) values ('owner', 'human', '[\"owner\"]')",
+    ).run()
+  } finally {
+    db.close()
   }
 
-  const opencode = writeOpenCodeFiles(root, DEFAULT_CONFIG.toolVersion)
-  created.push(...opencode.created)
+  if (updateGitignore(root)) created.push('.gitignore')
 
-  const gitignore = join(root, '.gitignore')
-  const entries = ['.toolbox-al/', '.worktrees/']
-  const current = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : ''
-  const missing = entries.filter((entry) => !current.split(/\r?\n/).includes(entry))
-  if (missing.length > 0) {
-    if (current && !current.endsWith('\n')) appendFileSync(gitignore, '\n')
-    appendFileSync(gitignore, missing.join('\n') + '\n')
-    created.push('.gitignore')
-  }
+  // Новый хук не ставим: доска не защищает ветки.
+  stripToolboxHook(root)
 
   return { created, root }
 }
-

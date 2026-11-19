@@ -9,7 +9,8 @@
     "README.md"
   ],
   "bin": {
-    "toolbox-al": "bin/toolbox-al.ts"
+    "toolbox-al": "bin/toolbox-al.ts",
+    "board": "bin/board.ts"
   },
   "scripts": {
     "test": "node --test"

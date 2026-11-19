@@ -1,35 +1,64 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseArgs } from '../../src/cli/args.ts'
+import { boolFlag, numberFlag, parseArgs, stringFlag, stringsFlag } from '../../src/cli/args.ts'
 
 test('разбирает команду, подкоманду, флаги и позиционные', () => {
-  const r = parseArgs(['task', 'add', 'F1.S1', '--size', 'S', '--json', '--dod', 'a'])
-  assert.equal(r.command, 'task')
-  assert.equal(r.sub, 'add')
-  assert.deepEqual(r.positionals, ['F1.S1'])
-  assert.equal(r.flags.size, 'S')
-  assert.equal(r.flags.json, true)
-  assert.equal(r.flags.dod, 'a')
+  const args = parseArgs(['card', 'add', '--group', 'UI', '--title', 'Форма входа', '--skill', 'dev'])
+  assert.equal(args.command, 'card')
+  assert.equal(args.sub, 'add')
+  assert.deepEqual(args.positionals, [])
+  assert.equal(stringFlag(args, 'group'), 'UI')
+  assert.equal(stringFlag(args, 'title'), 'Форма входа')
+  assert.equal(stringFlag(args, 'skill'), 'dev')
 })
 
-test('неизвестный флаг отвергается', () => {
-  assert.throws(() => parseArgs(['now', '--nope']), /неизвестный флаг/)
+test('--json известен всем командам и не съедает команду', () => {
+  const args = parseArgs(['--json', 'init'])
+  assert.equal(args.command, 'init')
+  assert.equal(boolFlag(args, 'json'), true)
 })
 
-test('--help без команды не требует команды', () => {
+test('повторный --scope собирается в массив', () => {
+  const args = parseArgs([
+    'card', 'edit', 'UI-1', '--scope', 'src/**', '--scope', 'tests/**', '--importance', '3',
+  ])
+  assert.deepEqual(stringsFlag(args, 'scope'), ['src/**', 'tests/**'])
+  assert.equal(numberFlag(args, 'importance'), 3)
+})
+
+test('подкоманды новых команд разбираются', () => {
+  for (const command of ['card', 'executor', 'queue', 'run', 'decision', 'term', 'command', 'review']) {
+    const args = parseArgs([command, 'list'])
+    assert.equal(args.command, command)
+    assert.equal(args.sub, 'list', `subcommand of ${command}`)
+  }
+
+  const now = parseArgs(['now', '3', '--group', 'UI'])
+  assert.equal(now.command, 'now')
+  assert.equal(now.sub, null)
+  assert.deepEqual(now.positionals, ['3'])
+})
+
+test('неизвестный флаг отвергается с кодом 3', () => {
+  assert.throws(
+    () => parseArgs(['now', '--nope']),
+    (error: { code?: number; message?: string }) => error.code === 3 && /неизвестный флаг/.test(error.message ?? ''),
+  )
+})
+
+test('булевы флаги не требуют значения', () => {
+  const args = parseArgs(['card', 'edit', 'UI-1', '--no-review', '--needs-merge'])
+  assert.equal(boolFlag(args, 'no-review'), true)
+  assert.equal(boolFlag(args, 'needs-merge'), true)
+  assert.equal(boolFlag(args, 'review'), false)
+})
+
+test('numberFlag отвергает мусор', () => {
+  const args = parseArgs(['card', 'edit', 'UI-1', '--urgency', 'много'])
+  assert.throws(() => numberFlag(args, 'urgency'), /urgency/)
+})
+
+test('--help и --version не требуют команды', () => {
   assert.equal(parseArgs(['--help']).command, 'help')
-})
-
-test('флаги новых команд известны парсеру', () => {
-  const review = parseArgs(['review', 'F1.S1-1', '--verdict', 'approved', '--as', 'w2'])
-  assert.equal(review.flags.verdict, 'approved')
-  const decide = parseArgs(['decide', 'add', 'вопрос', '--choice', 'ЮKassa', '--subject', 'F1'])
-  assert.equal(decide.flags.choice, 'ЮKassa')
-  assert.equal(decide.flags.subject, 'F1')
-})
-
-test('булев флаг не съедает команду', () => {
-  const parsed = parseArgs(['--json', 'now'])
-  assert.equal(parsed.command, 'now')
-  assert.equal(parsed.flags.json, true)
+  assert.equal(parseArgs(['--version']).command, 'version')
 })

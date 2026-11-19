@@ -1,4 +1,5 @@
 node_modules/
+.board/
 .toolbox-al/
 .opencode/agents/
 .worktrees/

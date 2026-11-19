@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { nowIso } from './clock.ts'
 
 export interface EventInput {
   type: string
@@ -20,14 +21,18 @@ export interface EventRecord {
   note: string | null
 }
 
-const json = (value: unknown): string | null =>
-  value === undefined ? null : JSON.stringify(value)
+export interface EventFilter {
+  subject?: string
+  since?: string
+}
+
+const json = (value: unknown): string | null => (value === undefined ? null : JSON.stringify(value))
 
 export function appendEvent(db: DatabaseSync, event: EventInput): void {
   db.prepare(
     'insert into events (at, type, actor, subject, before, after, note) values (?, ?, ?, ?, ?, ?, ?)',
   ).run(
-    new Date().toISOString(),
+    nowIso(),
     event.type,
     event.actor,
     event.subject,
@@ -37,25 +42,27 @@ export function appendEvent(db: DatabaseSync, event: EventInput): void {
   )
 }
 
+/** `listEvents(db, 'UI-1')` — журнал карточки, объект — фильтр; без аргумента — весь журнал. */
 export function listEvents(
   db: DatabaseSync,
-  filter: { subject?: string; since?: string } = {},
+  filter: string | EventFilter = {},
 ): EventRecord[] {
+  const options: EventFilter = typeof filter === 'string' ? { subject: filter } : filter
   const where: string[] = []
   const params: string[] = []
 
-  if (filter.subject) {
+  if (options.subject) {
     where.push('subject = ?')
-    params.push(filter.subject)
+    params.push(options.subject)
   }
-  if (filter.since) {
+  if (options.since) {
     where.push('at >= ?')
-    params.push(filter.since)
+    params.push(options.since)
   }
 
   const sql =
     'select id, at, type, actor, subject, before, after, note from events' +
-    (where.length ? ' where ' + where.join(' and ') : '') +
+    (where.length > 0 ? ' where ' + where.join(' and ') : '') +
     ' order by id'
 
   return db.prepare(sql).all(...params) as unknown as EventRecord[]

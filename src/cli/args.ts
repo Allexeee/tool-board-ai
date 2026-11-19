@@ -1,31 +1,32 @@
-﻿import { readFileSync } from 'node:fs'
-import { UserError } from './errors.ts'
+﻿import { UserError } from './errors.ts'
 
-const COMMANDS_WITH_SUB = new Set([
-  'task', 'request', 'feature', 'stage', 'plan', 'executor', 'hand',
-  'idea', 'decide', 'template', 'gate', 'scheduler', 'event', 'routine', 'plan', 'pool', 'release',
-  'run', 'profiler',
+export const COMMANDS_WITH_SUB = new Set([
+  'card',
+  'executor',
+  'queue',
+  'run',
+  'decision',
+  'term',
+  'command',
+  'review',
 ])
 
-const TEXT_FILE_COMMANDS = new Set(['idea', 'request'])
-
+// Флаги CLI из спецификации §12. Неизвестный флаг — ошибка ввода (код 3).
 const KNOWN_FLAGS = new Set([
-  'json', 'help', 'version', 'project', 'as', 'yes', 'dry-run', 'all',
-  'title', 'body', 'author', 'text', 'text-file', 'name', 'goal', 'rank', 'to',
-  'size', 'size-reason', 'dod', 'scope', 'skill', 'skills', 'class', 'kind',
-  'check', 'deps', 'dep', 'review', 'verdict', 'choice', 'subject', 'reason', 'note', 'report', 'severity', 'version',
-  'deadline', 'options', 'addressee', 'policy', 'timeout', 'appetite',
-  'schedule', 'window', 'guard', 'action', 'cmd', 'on-missing', 'once', 'days', 'history', 'until', 'for', 'pin',
-  'id', 'task', 'stage', 'feature', 'request', 'executor', 'session',
-  'limit', 'from', 'main', 'dev', 'branch', 'force-outside', 'summary', 'checks', 'left', 'status',
-  'write', 'brief', 'no-color', 'model', 'steps', 'allow', 'deny', 'clear',
-  // прогон (RUN): режим, добор ближайших, утверждение начального плана, питание
-  'mode', 'nearest', 'approve', 'power',
-  // профайлер прогона: метка замера («2 агента»)
-  'label',
+  'json', 'help', 'version', 'as', 'group', 'title', 'body', 'skill', 'skills',
+  'phase', 'status', 'importance', 'urgency', 'needs-merge', 'no-needs-merge',
+  'review', 'no-review', 'scope', 'from', 'kind', 'value', 'reason', 'note',
+  'summary', 'waive-dependents', 'done', 'reopen', 'severity', 'text', 'verdict',
+  'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
+  'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',
+  'merge-commit', 'block',
 ])
 
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'version', 'yes', 'dry-run', 'once', 'all', 'branch', 'pin', 'force-outside', 'write', 'brief', 'no-color', 'clear', 'nearest', 'approve'])
+const BOOLEAN_FLAGS = new Set([
+  'json', 'help', 'version', 'needs-merge', 'no-needs-merge', 'review', 'no-review',
+  'waive-dependents', 'done', 'reopen', 'top', 'bottom', 'mine', 'all', 'block',
+  'force', 'fresh', 'no-merge',
+])
 
 export type FlagValue = string | boolean | string[]
 
@@ -63,7 +64,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (token.startsWith('--')) {
       const eq = token.indexOf('=')
-      const name = (eq === -1 ? token.slice(2) : token.slice(2, eq))
+      const name = eq === -1 ? token.slice(2) : token.slice(2, eq)
       if (!KNOWN_FLAGS.has(name)) {
         throw new UserError(3, `неизвестный флаг --${name}`)
       }
@@ -100,72 +101,35 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError(3, 'не указана команда')
   }
 
-  if (flags['text-file'] !== undefined && !TEXT_FILE_COMMANDS.has(command)) {
-    throw new UserError(3, `флаг --text-file не принимается командой ${command}`)
-  }
-
   return { command, sub, flags, positionals }
 }
 
 export function stringFlag(args: ParsedArgs, name: string): string | undefined {
-  const v = args.flags[name]
-  if (Array.isArray(v)) return v[v.length - 1]
-  if (typeof v === 'string') return v
+  const value = args.flags[name]
+  if (Array.isArray(value)) return value[value.length - 1]
+  if (typeof value === 'string') return value
   return undefined
 }
 
-/**
- * Текст из `--text-file`: путь к файлу в UTF-8 или `-` для stdin.
- * Пустой ввод — ошибка: пустая идея или тело запроса никому не нужны.
- * Если рядом задан текстовый флаг (`--text`/`--body`), он игнорируется, о чём и сообщаем.
- */
-export function textFileFlag(
-  args: ParsedArgs,
-  name = 'text',
-  options: { positional?: string | undefined } = {},
-): string | undefined {
-  const raw = args.flags['text-file']
-  if (raw === undefined) return undefined
-  if (raw === true) throw new UserError(3, 'использование: --text-file <файл|->')
-
-  const path = stringFlag(args, 'text-file')!
-  const source = path === '-' ? 'stdin' : `файла ${path}`
-
-  let content: string
-  try {
-    content = readFileSync(path === '-' ? 0 : path, 'utf8')
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    const message =
-      code === 'ENOENT' ? `файл ${path} не найден` : `не удалось прочитать файл ${path}: ${(error as Error).message}`
-    throw new UserError(3, message)
-  }
-
-  const text = content.replace(/^\uFEFF/, '').replace(/[\r\n]+$/, '')
-  if (text.trim() === '') {
-    throw new UserError(3, path === '-' ? 'stdin пуст: текст не задан' : `файл ${path} пуст: текст не задан`)
-  }
-
-  if (stringFlag(args, name) !== undefined) {
-    process.stderr.write(`текст взят из ${source}: --${name} проигнорирован\n`)
-  }
-  if (options.positional?.trim()) {
-    process.stderr.write(`текст взят из ${source}: позиционный текст проигнорирован\n`)
-  }
-  return text
-}
-
-export function listFlag(args: ParsedArgs, name: string): string[] {
-  const v = args.flags[name]
-  if (v === undefined) return []
-  if (Array.isArray(v)) return v
-  return [String(v)]
+export function stringsFlag(args: ParsedArgs, name: string): string[] {
+  const value = args.flags[name]
+  if (value === undefined) return []
+  if (value === true) throw new UserError(3, `--${name} требует значения`)
+  if (Array.isArray(value)) return value
+  return [value]
 }
 
 export function boolFlag(args: ParsedArgs, name: string): boolean {
   return args.flags[name] === true || args.flags[name] === 'true'
 }
 
+export function numberFlag(args: ParsedArgs, name: string): number | undefined {
+  const raw = stringFlag(args, name)
+  if (raw === undefined) return undefined
 
-
-
+  const value = Number(raw)
+  if (raw.trim() === '' || !Number.isInteger(value)) {
+    throw new UserError(3, `--${name} должно быть целым числом`)
+  }
+  return value
+}

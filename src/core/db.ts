@@ -1,41 +1,35 @@
 import { DatabaseSync } from 'node:sqlite'
-import { migrate, schemaVersionOf, SCHEMA_VERSION } from './schema.ts'
 import { UserError } from '../cli/errors.ts'
+import { migrate, schemaVersionOf, SCHEMA_VERSION } from './schema.ts'
 
 export { migrate } from './schema.ts'
 
 const depth = new WeakMap<DatabaseSync, number>()
 
-export function openDb(path: string, options: { allowOutdated?: boolean } = {}): DatabaseSync {
+export function openDb(path: string): DatabaseSync {
   const db = new DatabaseSync(path)
   db.exec('pragma journal_mode = wal')
   db.exec('pragma busy_timeout = 5000')
   db.exec('pragma foreign_keys = on')
 
   const version = schemaVersionOf(db)
-
-  if (version === 0) {
-    migrate(db)
-    return db
-  }
-
   if (version > SCHEMA_VERSION) {
+    db.close()
     throw new UserError(
       3,
-      `схема ${version} новее, чем понимает инструмент (${SCHEMA_VERSION}): обновите сам инструмент — toolbox-al upgrade --yes`,
+      `схема ${version} новее, чем понимает инструмент (${SCHEMA_VERSION}): обновите инструмент`,
     )
   }
-
-  if (version < SCHEMA_VERSION && !options.allowOutdated) {
-    throw new UserError(
-      3,
-      `схема ${version} устарела (нужна ${SCHEMA_VERSION}): выполните toolbox-al upgrade --yes`,
-    )
-  }
+  if (version < SCHEMA_VERSION) migrate(db)
 
   return db
 }
 
+/**
+ * Вложенные вызовы не открывают вторую транзакцию: внешний вызов остаётся
+ * владельцем commit/rollback. Пишем сразу `begin immediate`, чтобы два
+ * процесса не выдали один ID.
+ */
 export function tx<T>(db: DatabaseSync, fn: () => T): T {
   const active = depth.get(db) ?? 0
   if (active > 0) return fn()
