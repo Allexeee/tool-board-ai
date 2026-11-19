@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { addExecutor, type NewExecutorInput } from '../../src/core/executors.ts'
-import { createCard, type NewCardInput } from '../../src/core/cards.ts'
+import { createCard, getCard, type NewCardInput } from '../../src/core/cards.ts'
 import { openDb } from '../../src/core/db.ts'
 import { initProject } from '../../src/core/project.ts'
-import type { Card, Executor } from '../../src/core/types.ts'
+import type { Card, CardPhase, CardStatus, Executor } from '../../src/core/types.ts'
 
 export interface BoardFixture {
   root: string
@@ -46,13 +46,43 @@ export function seedExecutor(
   })
 }
 
-/** Карточка для теста: по умолчанию `UI`/`dev` от имени владельца. */
-export function seedCard(db: DatabaseSync, input: Partial<NewCardInput> = {}): Card {
-  return createCard(db, {
+export interface SeedCardInput extends Partial<NewCardInput> {
+  phase?: CardPhase
+  status?: CardStatus
+  waiveDeps?: boolean
+}
+
+/**
+ * Карточка для теста: по умолчанию `UI`/`dev` от имени владельца.
+ * Фазу, статус и waive_deps можно выставить напрямую: createCard умеет только
+ * начальные состояния, а тестам нужны произвольные.
+ */
+export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
+  const card = createCard(db, {
     group: input.group ?? 'UI',
     title: input.title ?? 'Тестовая карточка',
     body: input.body,
     skill: input.skill ?? 'dev',
     author: input.author ?? 'owner',
   })
+
+  const sets: string[] = []
+  const params: Array<string | number> = []
+  if (input.phase !== undefined) {
+    sets.push('phase = ?')
+    params.push(input.phase)
+  }
+  if (input.status !== undefined) {
+    sets.push('status = ?')
+    params.push(input.status)
+  }
+  if (input.waiveDeps !== undefined) {
+    sets.push('waive_deps = ?')
+    params.push(input.waiveDeps ? 1 : 0)
+  }
+  if (sets.length === 0) return card
+
+  params.push(card.id)
+  db.prepare(`update cards set ${sets.join(', ')} where id = ?`).run(...params)
+  return getCard(db, card.id)!
 }

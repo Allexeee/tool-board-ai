@@ -1,5 +1,7 @@
-﻿import { createCard, editCard, getCard, listCards, type CardFilter, type CardPatch } from '../../core/cards.ts'
+﻿import type { DatabaseSync } from 'node:sqlite'
+import { createCard, editCard, getCard, listCards, type CardFilter, type CardPatch } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
+import { addDep, isSatisfied, listDeps, removeDep } from '../../core/deps.ts'
 import { listDiscussion, type Discussion } from '../../core/discussion.ts'
 import { listEvents, type EventRecord } from '../../core/events.ts'
 import { findProject } from '../../core/project.ts'
@@ -73,11 +75,15 @@ export default async function command(args: ParsedArgs) {
       ...card,
       steps: listSteps(db, card.id),
       refs: listRefs(db, card.id),
+      deps: listDeps(db, card.id),
       discussion: listDiscussion(db, card.id),
       events: listEvents(db, card.id),
     }
 
-    ok(detail, formatCard(card, detail.steps, detail.refs, detail.discussion, detail.events))
+    ok(
+      detail,
+      formatCard(db, card, detail.deps, detail.steps, detail.refs, detail.discussion, detail.events),
+    )
     return 0
   }
 
@@ -212,6 +218,39 @@ export default async function command(args: ParsedArgs) {
     throw new UserError(3, 'использование: board card ref add|remove|list UI-1 ...')
   }
 
+  const dep = (args: ParsedArgs): number => {
+    const action = args.positionals[0]
+    const card = requireCard(
+      args.positionals[1],
+      'использование: board card dep add|remove|list UI-1 UI-5',
+    )
+    const actor = stringFlag(args, 'as') ?? 'owner'
+
+    if (action === 'add' || action === 'remove') {
+      const other = args.positionals[2]
+      if (!other) {
+        throw new UserError(3, `использование: board card dep ${action} ${card.id} UI-5`)
+      }
+
+      if (action === 'add') {
+        addDep(db, card.id, other, actor)
+        ok({ from: card.id, to: other }, `${card.id} теперь зависит от ${other}`)
+      } else {
+        removeDep(db, card.id, other, actor)
+        ok({ from: card.id, to: other }, `${card.id} больше не зависит от ${other}`)
+      }
+      return 0
+    }
+
+    if (action === 'list') {
+      const deps = listDeps(db, card.id)
+      ok(deps, formatDeps(db, deps))
+      return 0
+    }
+
+    throw new UserError(3, 'использование: board card dep add|remove|list UI-1 UI-5')
+  }
+
   try {
     if (args.sub === 'add') return add(args)
     if (args.sub === 'list') return list(args)
@@ -219,7 +258,8 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'edit') return edit(args)
     if (args.sub === 'step') return step(args)
     if (args.sub === 'ref') return ref(args)
-    throw new UserError(3, 'использование: board card add|list|show|edit|step|ref')
+    if (args.sub === 'dep') return dep(args)
+    throw new UserError(3, 'использование: board card add|list|show|edit|step|ref|dep')
   } finally {
     db.close()
   }
@@ -261,7 +301,9 @@ function shortTime(iso: string): string {
 }
 
 function formatCard(
+  db: DatabaseSync,
   card: Card,
+  deps: string[],
   steps: Step[],
   refs: Ref[],
   discussion: Discussion[],
@@ -277,10 +319,26 @@ function formatCard(
   if (card.note !== null && card.note !== '') lines.push(`заметка: ${card.note}`)
   if (card.body !== '') lines.push('', card.body)
 
+  lines.push('', formatDeps(db, deps))
   lines.push('', formatSteps(steps, progressOf(steps)))
   lines.push('', formatRefs(refs))
   lines.push('', formatDiscussion(discussion))
   lines.push('', formatEvents(events))
+  return lines.join('\n')
+}
+
+function formatDeps(db: DatabaseSync, deps: string[]): string {
+  const lines = ['ЗАВИСИМОСТИ']
+  if (deps.length === 0) lines.push('  зависимостей нет')
+  for (const id of deps) {
+    const card = getCard(db, id)
+    if (!card) {
+      lines.push(`  ${id} · не найдена`)
+      continue
+    }
+    const satisfied = isSatisfied(db, id) ? 'закрыта' : 'не закрыта'
+    lines.push(`  ${id} · ${card.status} · ${satisfied}`)
+  }
   return lines.join('\n')
 }
 

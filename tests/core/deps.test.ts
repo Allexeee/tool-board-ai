@@ -1,136 +1,214 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { openDb, type DatabaseSync } from '../../src/core/db.ts'
-import { addRequest } from '../../src/core/requests.ts'
-import { addFeature } from '../../src/core/features.ts'
-import { addStage, activateNextStage } from '../../src/core/stages.ts'
-import { createTask, getTask, updateTask } from '../../src/core/tasks.ts'
-import { addDep, isReady, refreshReady, wouldCycle } from '../../src/core/deps.ts'
+import { getCard } from '../../src/core/cards.ts'
+import { listEvents } from '../../src/core/events.ts'
+import {
+  addDep,
+  isSatisfied,
+  listDeps,
+  refreshReadiness,
+  removeDep,
+  wouldCycle,
+} from '../../src/core/deps.ts'
+import type { CardPhase, CardStatus } from '../../src/core/types.ts'
+import { makeBoard, seedCard } from '../helpers/board.ts'
 
-function seed(db: DatabaseSync): string {
-  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
-  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
-  activateNextStage(db, feature.id)
+type Board = ReturnType<typeof makeBoard>
 
-  const base = {
-    stageId: stage.id,
-    dod: ['a'],
-    size: 'S' as const,
-    skill: 'backend',
-    class: 'standard' as const,
-    scope: ['src/**'],
+function board(t: { after: (fn: () => void) => void }): Board {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  return fixture
+}
+
+test('закрытая зависимость переводит задачу из waiting в ready', (t) => {
+  const { db } = board(t)
+  const done = seedCard(db, { phase: 'task', status: 'done' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+
+  addDep(db, waiting.id, done.id)
+
+  assert.equal(refreshReadiness(db), 1)
+  assert.equal(getCard(db, waiting.id)!.status, 'ready')
+
+  const event = listEvents(db, waiting.id).at(-1)!
+  assert.equal(event.type, 'card.readiness')
+  assert.equal(event.actor, 'system')
+  assert.equal(JSON.parse(event.before!).status, 'waiting')
+  assert.equal(JSON.parse(event.after!).status, 'ready')
+})
+
+test('ревью удовлетворяет зависимость', (t) => {
+  const { db } = board(t)
+  const review = seedCard(db, { phase: 'task', status: 'review' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+
+  addDep(db, waiting.id, review.id)
+  refreshReadiness(db)
+
+  assert.equal(getCard(db, waiting.id)!.status, 'ready')
+})
+
+test('cancelled без waive_deps не удовлетворяет зависимость, с waive_deps — удовлетворяет', (t) => {
+  const { db } = board(t)
+  const cancelled = seedCard(db, { phase: 'task', status: 'cancelled' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+  addDep(db, waiting.id, cancelled.id)
+
+  assert.equal(refreshReadiness(db), 0)
+  assert.equal(getCard(db, waiting.id)!.status, 'waiting')
+
+  const waived = seedCard(db, { phase: 'task', status: 'cancelled', waiveDeps: true })
+  const second = seedCard(db, { phase: 'task', status: 'waiting' })
+  addDep(db, second.id, waived.id)
+
+  assert.equal(refreshReadiness(db), 1)
+  assert.equal(getCard(db, second.id)!.status, 'ready')
+})
+
+test('isSatisfied: только review, done и waived cancelled', (t) => {
+  const { db } = board(t)
+  const expected: Array<[CardStatus, boolean]> = [
+    ['new', false],
+    ['shaping', false],
+    ['approval', false],
+    ['waiting', false],
+    ['ready', false],
+    ['booked', false],
+    ['in_progress', false],
+    ['blocked', false],
+    ['review', true],
+    ['done', true],
+    ['cancelled', false],
+  ]
+
+  for (const [status, satisfied] of expected) {
+    const card = seedCard(db, { phase: 'task', status })
+    assert.equal(isSatisfied(db, card.id), satisfied, status)
   }
-  createTask(db, { ...base, title: 'Первый шаг' })
-  createTask(db, { ...base, title: 'Второй шаг' })
-  return stage.id
-}
 
-test('прямой цикл отвергается с путём', () => {
-  const db = openDb(':memory:')
-  const stageId = seed(db)
-  addDep(db, `${stageId}-1`, `${stageId}-2`)
-
-  assert.deepEqual(wouldCycle(db, `${stageId}-2`, `${stageId}-1`), [
-    `${stageId}-1`,
-    `${stageId}-2`,
-    `${stageId}-1`,
-  ])
-  assert.throws(() => addDep(db, `${stageId}-2`, `${stageId}-1`), /цикл/)
+  const waived = seedCard(db, { phase: 'task', status: 'cancelled', waiveDeps: true })
+  assert.equal(isSatisfied(db, waived.id), true)
+  assert.throws(() => isSatisfied(db, 'UI-999'), /не найдена/)
 })
 
-test('задача готова только когда предшественник закрыт', () => {
-  const db = openDb(':memory:')
-  const stageId = seed(db)
-  addDep(db, `${stageId}-1`, `${stageId}-2`)
+test('refreshReadiness не трогает чужие фазы и статусы', (t) => {
+  const { db } = board(t)
+  const blocker = seedCard(db, { phase: 'task', status: 'in_progress' })
+  const cases: Array<[CardPhase, CardStatus]> = [
+    ['request', 'new'],
+    ['task', 'approval'],
+    ['task', 'booked'],
+    ['task', 'in_progress'],
+    ['task', 'review'],
+    ['task', 'done'],
+    ['task', 'cancelled'],
+  ]
 
-  assert.equal(isReady(db, `${stageId}-1`), false)
-  updateTask(db, `${stageId}-2`, { status: 'done' })
-  assert.equal(isReady(db, `${stageId}-1`), true)
-})
+  const cards = cases.map(([phase, status]) => seedCard(db, { phase, status }))
+  for (const card of cards) addDep(db, card.id, blocker.id)
 
-test('refreshReady переводит open в ready и обратно', () => {
-  const db = openDb(':memory:')
-  const stageId = seed(db)
-  assert.equal(refreshReady(db), 2)
-  assert.equal(isReady(db, `${stageId}-1`), true)
-})
-
-test('зависимость на несуществующий объект отвергается', () => {
-  const db = openDb(':memory:')
-  const stageId = seed(db)
-  assert.throws(() => addDep(db, `${stageId}-1`, 'NOPE'), /не найден/)
-})
-
-test('этап ждёт этап: задача не готова, пока предшествующий этап не слит', () => {
-  const db = openDb(':memory:')
-  const first = addRequest(db, { title: 'A', body: '', author: 'owner' })
-  const second = addRequest(db, { title: 'B', body: '', author: 'owner' })
-  const fa = addFeature(db, { requestId: first.id, name: 'A', rank: 1 })
-  const fb = addFeature(db, { requestId: second.id, name: 'B', rank: 2 })
-  const sa = addStage(db, { featureId: fa.id, name: 'S1', goal: 'g', appetite: '1 день' })
-  const sb = addStage(db, { featureId: fb.id, name: 'S1', goal: 'g', appetite: '1 день' })
-
-  addDep(db, sb.id, sa.id)
-  activateNextStage(db, fb.id)
-
-  const task = createTask(db, {
-    stageId: sb.id,
-    title: 'Сделать B',
-    dod: ['a'],
-    size: 'S',
-    skill: 'backend',
-    class: 'standard',
-    scope: ['src/**'],
+  assert.equal(refreshReadiness(db), 0)
+  cards.forEach((card, index) => {
+    assert.equal(getCard(db, card.id)!.status, cases[index][1])
   })
-  assert.equal(isReady(db, task.id), false)
-
-  db.prepare("update stages set status = 'merged' where id = ?").run(sa.id)
-  assert.equal(isReady(db, task.id), true)
+  assert.equal(getCard(db, blocker.id)!.status, 'in_progress')
 })
 
-function plannedStage(db: DatabaseSync): { featureId: string; stageId: string; taskId: string } {
-  const request = addRequest(db, { title: 'Оплата', body: '...', author: 'owner' })
-  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
-  const task = createTask(db, {
-    stageId: stage.id,
-    title: 'Первый шаг',
-    dod: ['a'],
-    size: 'S',
-    skill: 'backend',
-    class: 'standard',
-    scope: ['src/**'],
-  })
-  return { featureId: feature.id, stageId: stage.id, taskId: task.id }
-}
+test('ready с незакрытой зависимостью возвращается в waiting', (t) => {
+  const { db } = board(t)
+  const blocker = seedCard(db, { phase: 'task', status: 'booked' })
+  const ready = seedCard(db, { phase: 'task', status: 'ready' })
+  addDep(db, ready.id, blocker.id)
 
-test('задача неактивного этапа получает статус planned, а не ready', () => {
-  const db = openDb(':memory:')
-  const { taskId } = plannedStage(db)
-
-  assert.equal(refreshReady(db), 1)
-  assert.equal(getTask(db, taskId)!.status, 'planned')
-  assert.equal(isReady(db, taskId), false)
+  assert.equal(refreshReadiness(db), 1)
+  assert.equal(getCard(db, ready.id)!.status, 'waiting')
+  assert.equal(getCard(db, blocker.id)!.status, 'booked')
 })
 
-test('после активации этапа planned-задача становится ready', () => {
-  const db = openDb(':memory:')
-  const { featureId, taskId } = plannedStage(db)
-  refreshReady(db)
-  assert.equal(getTask(db, taskId)!.status, 'planned')
+test('waiting с несколькими зависимостями ждёт последнюю', (t) => {
+  const { db } = board(t)
+  const done = seedCard(db, { phase: 'task', status: 'done' })
+  const cancelled = seedCard(db, { phase: 'task', status: 'cancelled' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
 
-  activateNextStage(db, featureId)
-  assert.equal(refreshReady(db), 1)
-  assert.equal(getTask(db, taskId)!.status, 'ready')
+  addDep(db, waiting.id, done.id)
+  addDep(db, waiting.id, cancelled.id)
+
+  assert.equal(refreshReadiness(db), 0)
+  assert.equal(getCard(db, waiting.id)!.status, 'waiting')
 })
 
-test('в активном этапе незакрытая зависимость оставляет задачу open', () => {
-  const db = openDb(':memory:')
-  const stageId = seed(db)
-  addDep(db, `${stageId}-1`, `${stageId}-2`)
+test('refreshReadiness пишет событие только при смене статуса', (t) => {
+  const { db } = board(t)
+  const done = seedCard(db, { phase: 'task', status: 'done' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+  addDep(db, waiting.id, done.id)
 
-  refreshReady(db)
-  assert.equal(getTask(db, `${stageId}-1`)!.status, 'open')
-  assert.equal(getTask(db, `${stageId}-2`)!.status, 'ready')
+  assert.equal(refreshReadiness(db), 1)
+  const countAfterChange = listEvents(db, waiting.id).length
+
+  assert.equal(refreshReadiness(db), 0)
+  assert.equal(listEvents(db, waiting.id).length, countAfterChange)
+})
+
+test('добавление и удаление зависимости', (t) => {
+  const { db } = board(t)
+  const first = seedCard(db, { phase: 'task', status: 'done' })
+  const second = seedCard(db, { phase: 'task', status: 'done' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+
+  addDep(db, waiting.id, second.id)
+  addDep(db, waiting.id, first.id)
+  assert.deepEqual(listDeps(db, waiting.id), [first.id, second.id])
+
+  addDep(db, waiting.id, first.id)
+  assert.deepEqual(listDeps(db, waiting.id), [first.id, second.id])
+
+  removeDep(db, waiting.id, first.id)
+  assert.deepEqual(listDeps(db, waiting.id), [second.id])
+  assert.throws(() => removeDep(db, waiting.id, first.id), /не найдена/)
+})
+
+test('удаление последней зависимости делает задачу готовой', (t) => {
+  const { db } = board(t)
+  const blocker = seedCard(db, { phase: 'task', status: 'booked' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+  addDep(db, waiting.id, blocker.id)
+
+  assert.equal(refreshReadiness(db), 0)
+  removeDep(db, waiting.id, blocker.id)
+
+  assert.equal(refreshReadiness(db), 1)
+  assert.equal(getCard(db, waiting.id)!.status, 'ready')
+})
+
+test('цикл отвергается с путём, самозависимость тоже', (t) => {
+  const { db } = board(t)
+  const a = seedCard(db)
+  const b = seedCard(db)
+  const c = seedCard(db)
+
+  addDep(db, b.id, a.id)
+  addDep(db, c.id, b.id)
+
+  assert.deepEqual(wouldCycle(db, b.id, c.id), [c.id, b.id, c.id])
+  assert.throws(
+    () => addDep(db, b.id, c.id),
+    new RegExp(`цикл зависимостей: ${c.id} → ${b.id} → ${c.id}`),
+  )
+  assert.throws(() => addDep(db, a.id, a.id), /цикл/)
+
+  const x = seedCard(db)
+  const y = seedCard(db)
+  assert.equal(wouldCycle(db, x.id, y.id), null)
+})
+
+test('addDep проверяет существование карточек', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db)
+
+  assert.throws(() => addDep(db, card.id, 'UI-999'), /карточка UI-999 не найдена/)
+  assert.throws(() => addDep(db, 'UI-999', card.id), /карточка UI-999 не найдена/)
+  assert.deepEqual(listDeps(db, card.id), [])
 })
