@@ -256,21 +256,33 @@ export function isAncestor(root: string, commit: string, ref: string): boolean {
   }
 }
 
-/** Merge-коммит ветки в `dev`, если он есть; иначе null. */
+/**
+ * Merge-коммит ветки в `dev`, если он есть; иначе null. Ищем по родителю:
+ * merge-коммит, чей список родителей содержит кончик ветки, — именно тот,
+ * что влил эту ветку. Новее в диапазоне не подходит: при нескольких мержах
+ * он может принадлежать другой карточке.
+ */
 export function mergeCommitFor(root: string, branch: string): string | null {
   const { dev } = resolveBranches(root)
-  const commits = runGit(root, [
-    'log',
-    '--merges',
-    '--ancestry-path',
-    `${branch}..${dev}`,
-    '--format=%H',
-  ])
+
+  let tip: string
+  try {
+    tip = runGit(root, ['rev-parse', branch])
+  } catch {
+    return null
+  }
+
+  const lines = runGit(root, ['log', '--merges', '--format=%H %P', dev])
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
 
-  return commits[0] ?? null
+  for (const line of lines) {
+    const [hash, ...parents] = line.split(/\s+/)
+    if (parents.includes(tip)) return hash
+  }
+
+  return null
 }
 
 /** Откатывает влитую карточку revert-коммитом в `dev`; возвращает его. */

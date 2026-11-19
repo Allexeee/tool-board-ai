@@ -199,3 +199,60 @@ test('истёкший lease освобождает карточку, но не 
   assert.equal(existsSync(worktree), true)
   assert.doesNotThrow(() => runGit(root, ['rev-parse', '--verify', branch]))
 })
+
+test('ensureWorktree переиспользует зарегистрированный worktree', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+
+  const first = ensureWorktree(repo.root, 'developer')
+  const second = ensureWorktree(repo.root, 'developer')
+
+  assert.equal(first, second)
+  assert.equal(existsSync(first), true)
+})
+
+test('ensureWorktree отказывает, если каталог занят посторонними файлами', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+
+  const dir = join(repo.root, '.worktrees', 'developer')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'stray.txt'), 'x\n')
+
+  assert.throws(
+    () => ensureWorktree(repo.root, 'developer'),
+    /занят посторонними файлами/,
+  )
+})
+
+test('mergeCommitFor находит merge-коммит своей ветки при нескольких мержах', (t) => {
+  const boardFixture = makeBoard()
+  t.after(boardFixture.close)
+  const { db } = boardFixture
+  const cardA = seedCard(db, { phase: 'task', status: 'booked', skill: 'dev' })
+  const cardB = seedCard(db, { phase: 'task', status: 'booked', skill: 'dev' })
+
+  const repo = makeRepo()
+  t.after(repo.close)
+  const root = repo.root
+
+  const wtA = ensureWorktree(root, 'developer-a')
+  const { branch: branchA } = startCardBranch(root, 'developer-a', cardA)
+  mkdirSync(join(wtA, 'src'), { recursive: true })
+  writeFileSync(join(wtA, 'src', 'a.ts'), 'a\n')
+  runGit(wtA, ['add', '.'])
+  runGit(wtA, ['commit', '-m', 'A'])
+  const mergeA = mergeToDev(root, branchA, 'A')
+
+  const wtB = ensureWorktree(root, 'developer-b')
+  const { branch: branchB } = startCardBranch(root, 'developer-b', cardB)
+  mkdirSync(join(wtB, 'src'), { recursive: true })
+  writeFileSync(join(wtB, 'src', 'b.ts'), 'b\n')
+  runGit(wtB, ['add', '.'])
+  runGit(wtB, ['commit', '-m', 'B'])
+  const mergeB = mergeToDev(root, branchB, 'B')
+
+  assert.notEqual(mergeA, mergeB)
+  assert.equal(mergeCommitFor(root, branchA), mergeA)
+  assert.equal(mergeCommitFor(root, branchB), mergeB)
+})
