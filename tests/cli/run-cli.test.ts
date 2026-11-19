@@ -121,6 +121,39 @@ test('run start --cards, add, drop, next и end --review', (t) => {
   assert.equal(listed[0].status, 'ended')
 })
 
+test('run end: ревью после забега берётся из настройки, флаги перекрывают', (t) => {
+  const { root, db, cards } = project(t)
+
+  json(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])
+  const plain = run(root, ['run', 'end', '--as', 'developer'])
+  assert.equal(plain.code, 0, plain.err)
+  assert.match(plain.out, /ревью после забега выключено/)
+  assert.equal(getRun(db, 'RUN-1')!.review, false)
+
+  json(root, ['setup', '--review-after-run'])
+  json(root, ['run', 'start', '--as', 'developer', '--cards', cards[1].id])
+  const enabled = run(root, ['run', 'end', '--as', 'developer'])
+  assert.equal(enabled.code, 0, enabled.err)
+  assert.match(enabled.out, /ревью включено/)
+  assert.equal(getRun(db, 'RUN-2')!.review, true)
+
+  json(root, ['run', 'start', '--as', 'developer', '--cards', cards[2].id])
+  const disabled = run(root, ['run', 'end', '--as', 'developer', '--no-review'])
+  assert.equal(disabled.code, 0, disabled.err)
+  assert.match(disabled.out, /ревью после забега выключено/)
+  assert.equal(getRun(db, 'RUN-3')!.review, false)
+})
+
+test('run end: --review и --no-review вместе — код 3', (t) => {
+  const { root, db, cards } = project(t)
+  json(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])
+
+  const both = run(root, ['run', 'end', '--as', 'developer', '--review', '--no-review'])
+  assert.equal(both.code, 3)
+  assert.match(both.err, /только один флаг/)
+  assert.equal(getRun(db, 'RUN-1')!.status, 'active')
+})
+
 test('run list снимает просроченный lease', (t) => {
   const { root, db, cards } = project(t)
   json(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])

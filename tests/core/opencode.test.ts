@@ -8,11 +8,12 @@ import { initProject } from '../../src/core/project.ts'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'board-oc-'))
 
-test('initProject создаёт скилл, плагин, команду ревью и блок в AGENTS.md', () => {
+test('initProject создаёт скилл, плагин, команды и блок в AGENTS.md', () => {
   const { created, root } = initProject(tmp())
   assert.ok(existsSync(join(root, '.opencode', 'skills', 'board', 'SKILL.md')))
   assert.ok(existsSync(join(root, '.opencode', 'plugins', 'board', 'index.ts')))
   assert.ok(existsSync(join(root, '.opencode', 'command', 'review.md')))
+  assert.ok(existsSync(join(root, '.opencode', 'command', 'setup.md')))
   assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /board/)
   assert.ok(created.some((p) => p.includes('SKILL.md')))
 })
@@ -27,11 +28,12 @@ test('скилл ссылается на terminology.md и на порядок �
   assert.match(skill, /review list/)
 })
 
-test('плагин объявляет инструмент board_now и зовёт CLI', () => {
+test('плагин объявляет board_now и board_setup и зовёт CLI', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
   assert.match(plugin, /board_now/)
+  assert.match(plugin, /board_setup/)
   assert.match(plugin, /board\.ts/)
   assert.match(plugin, /BOARD_CLI/)
   assert.match(plugin, /Plugin\.define/)
@@ -47,10 +49,19 @@ test('команда ревью упоминает review list и review submit'
   assert.match(command, /review finding/)
 })
 
+test('команда setup показывает и переключает ревью после забега', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const command = readFileSync(join(root, '.opencode', 'command', 'setup.md'), 'utf8')
+  assert.match(command, /board setup --show/)
+  assert.match(command, /--review-after-run/)
+  assert.match(command, /--no-review-after-run/)
+})
+
 test('writeOpenCodeFiles идемпотентен: второй вызов ничего не создаёт', () => {
   const root = tmp()
   const first = writeOpenCodeFiles(root)
-  assert.ok(first.created.length >= 4)
+  assert.ok(first.created.length >= 5)
 
   const second = writeOpenCodeFiles(root)
   assert.deepEqual(second.created, [])

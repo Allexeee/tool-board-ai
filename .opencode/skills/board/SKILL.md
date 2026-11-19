@@ -28,7 +28,8 @@ description: Доска карточек: смотреть now, разбират
 3. Работаешь.
 4. `board finish <ID> --as <исполнитель> --summary "..."` — сдать (review или done).
 5. `board run next --as <исполнитель>` — следующая карточка.
-6. `board run end --as <исполнитель> [--review]` — закрыть забег.
+6. `board run end --as <исполнитель> [--review|--no-review]` — закрыть забег.
+   Если в ответе `review=true` (настройка включена), запусти `/review`.
 
 ## Если не можешь
 
@@ -42,6 +43,16 @@ description: Доска карточек: смотреть now, разбират
 `board review submit <ID> --verdict done|reopen --note "..." --reviewer <id>`.
 
 Находки: `board review finding <ID> --severity critical|important|other --text "..."`.
+
+## Настройки
+
+`board setup --show --json` — текущие настройки. Ревью после каждого забега:
+
+- `board setup --review-after-run` — включить;
+- `board setup --no-review-after-run` — выключить.
+
+Если включено, после `board run end` с `review=true` запусти `/review`.
+Если выключено, review-карточки ждут ручного ревью. По умолчанию выключено.
 
 ## Решения и термины
 

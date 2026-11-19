@@ -17,8 +17,8 @@ $env:Path += ";$env:USERPROFILE\tools\tool-board-ai"
 В корне лежит `board.cmd`; он запускает `node bin\board.ts`. Проверка:
 `board --version`.
 
-Скилл `board` и команда `/review` вызывают `board`, поэтому CLI должен быть в
-`PATH` (хотя бы в окружении, из которого стартует OpenCode). Если не хотите
+Скилл `board` и команды `/review`, `/setup` вызывают `board`, поэтому CLI
+должен быть в `PATH` (хотя бы в окружении, из которого стартует OpenCode). Если не хотите
 менять `PATH` глобально, запускайте CLI как `node <путь>\bin\board.ts ...`;
 `BOARD_CLI` перекрывает путь только для инструментов плагина:
 
@@ -45,11 +45,19 @@ board doctor
 board now
 ```
 
+Первый `init` в терминале запускает мастер настроек: спрашивает, включать ли
+ревью после каждого забега. По умолчанию выключено. Если `init` запускал агент
+(не-TTY), мастер не спрашивает — вызовите `/setup` в OpenCode или `board setup`
+в терминале.
+
 `init` создаёт:
 
 - `.board/board.db` — базу (истина доски) и исполнителя `owner`;
+- `.board/settings.json` — локальные настройки (в git не попадает);
 - `docs/board/terminology.md` — термины и команды владельца;
-- `.opencode/skills/board/SKILL.md`, `.opencode/plugins/board/index.ts`, `.opencode/command/review.md` — интеграция с OpenCode;
+- `.opencode/skills/board/SKILL.md`, `.opencode/plugins/board/index.ts`,
+  `.opencode/command/review.md`, `.opencode/command/setup.md` — интеграция с
+  OpenCode;
 - блок `board` в `AGENTS.md`;
 - записи `.board/`, `.worktrees/` в `.gitignore`.
 
@@ -75,14 +83,14 @@ board card add --group UI --title "Форма входа" --skill dev
 
 ## Очередь и забег
 
-После утверждения карточка встаёт в очередь задач по оценке. `now 3` показывает запросы и очередь; `now 1`/`now 2` — вероятные забеги.
+После утверждения карточка встаёт в очередь задач по оценке. `now 3` показывает запросы и очередь; `now 1` — текущий забег и вероятные следующие, `now 2` — все забеги.
 
 ```bash
 board run start --as developer --cards UI-1,UI-7   # или --suggest 1
 board take UI-1 --as developer
 board finish UI-1 --as developer --summary "готово"
 board run next --as developer
-board run end --as developer [--review]
+board run end --as developer [--review|--no-review]
 ```
 
 `take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` (если `review_required`) или `done`.
@@ -99,6 +107,22 @@ board review finding UI-1 --severity critical --text "..."
 ```
 
 CLI субагентов не порождает — он готовит пакет и принимает вердикты. Находки ревью становятся запросами; `critical` блокирует `main`, пока не закрыта.
+
+## Настройки
+
+Настройки лежат в `.board/settings.json` и не попадают в git. Мастер
+запускается один раз при первом `init`; позже его можно вызвать вручную
+командой `/setup` или `board setup`.
+
+```bash
+board setup --show                      # текущие настройки
+board setup --review-after-run          # включить ревью после каждого забега
+board setup --no-review-after-run       # выключить (по умолчанию)
+```
+
+`run end` берёт значение из настройки; флаги `--review`/`--no-review`
+перекрывают её для конкретного забега. Включённое ревью не блокирует закрытие
+забега: агент запускает `/review` после `run end`.
 
 ## Релиз
 
@@ -142,7 +166,8 @@ board command add "RUN" "начать забег по очереди" --as owner
 
 | Команда | Что делает |
 |---|---|
-| `init [каталог]` | скелет проекта |
+| `init [каталог] [--yes]` | скелет проекта и мастер настроек |
+| `setup [--show\|--review-after-run\|--no-review-after-run]` | настройки доски |
 | `executor add\|list\|edit\|remove` | исполнители и навыки |
 | `card add\|list\|show\|edit` | карточки |
 | `card shape\|submit\|approve\|reject\|verdict\|done\|cancel\|reopen` | жизненный цикл |
@@ -165,4 +190,4 @@ board command add "RUN" "начать забег по очереди" --as owner
 
 ## OpenCode
 
-`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term` и команду `/review`. Плагин не содержит логики: он вызывает `board … --json`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.
+`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_setup`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term`, команды `/review` и `/setup`. Плагин не содержит логики: он вызывает `board … --json`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.

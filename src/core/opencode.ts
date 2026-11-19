@@ -22,6 +22,7 @@ export const AGENTS_BLOCK = [
   '- Работа: `run start` → `take` → `finish --summary` → `run next` → `run end`.',
   '- Нужно решение владельца — `block`/`ask`; карточка ждёт.',
   '- Ревью — свежий субагент командой `/review`; CLI субагентов не порождает.',
+  '- Ревью после каждого забега — настройка `/setup` (по умолчанию выкл.); если `run end` вернул `review=true`, запусти `/review`.',
   '- Коммит и мерж делает `finish`; агент в git не пишет. `main` меняется только `release` владельцем.',
   AGENTS_END,
 ].join('\n')
@@ -56,7 +57,8 @@ description: Доска карточек: смотреть now, разбират
 3. Работаешь.
 4. \`board finish <ID> --as <исполнитель> --summary "..."\` — сдать (review или done).
 5. \`board run next --as <исполнитель>\` — следующая карточка.
-6. \`board run end --as <исполнитель> [--review]\` — закрыть забег.
+6. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег.
+   Если в ответе \`review=true\` (настройка включена), запусти \`/review\`.
 
 ## Если не можешь
 
@@ -71,6 +73,16 @@ description: Доска карточек: смотреть now, разбират
 
 Находки: \`board review finding <ID> --severity critical|important|other --text "..."\`.
 
+## Настройки
+
+\`board setup --show --json\` — текущие настройки. Ревью после каждого забега:
+
+- \`board setup --review-after-run\` — включить;
+- \`board setup --no-review-after-run\` — выключить.
+
+Если включено, после \`board run end\` с \`review=true\` запусти \`/review\`.
+Если выключено, review-карточки ждут ручного ревью. По умолчанию выключено.
+
 ## Решения и термины
 
 - \`board decision add [<ID>] "..." --kind decision|assumption --as <исполнитель>\`.
@@ -84,8 +96,9 @@ description: Доска карточек: смотреть now, разбират
 - Ревью своей карточки не давай: вердикт — свежий субагент.
 `
 
-export const PLUGIN_SOURCE = `// Инструменты: board_now, board_card, board_run, board_take, board_finish,
-// board_block, board_ask, board_answer, board_review, board_decision, board_term.
+export const PLUGIN_SOURCE = `// Инструменты: board_now, board_setup, board_card, board_run, board_take,
+// board_finish, board_block, board_ask, board_answer, board_review,
+// board_decision, board_term.
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -202,7 +215,8 @@ function runArgs(input) {
     flag(args, 'as', input.as)
   } else if (a === 'end') {
     flag(args, 'as', input.as)
-    if (input.review) args.push('--review')
+    if (input.review === true) args.push('--review')
+    else if (input.review === false) args.push('--no-review')
   } else if (a === 'release') {
     if (input.id) args.push(input.id)
     flag(args, 'reason', input.reason)
@@ -280,6 +294,19 @@ export default Plugin.define({
           if (input.mine) args.push('--mine')
           flag(args, 'as', input.as)
           return call(ctx, ['now', ...args])
+        },
+      })
+
+      editor.add({
+        name: 'setup',
+        description: 'Настройки доски: show|review-after-run|no-review-after-run',
+        input: schema({ action: { type: 'string' } }),
+        execute: (input) => {
+          const action = input.action ?? 'show'
+          if (action === 'show') return call(ctx, ['setup', '--show'])
+          if (action === 'review-after-run') return call(ctx, ['setup', '--review-after-run'])
+          if (action === 'no-review-after-run') return call(ctx, ['setup', '--no-review-after-run'])
+          return { content: 'неизвестное действие setup: ' + action, isError: true }
         },
       })
 
@@ -464,14 +491,31 @@ subagent: true
 5. Критические находки блокируют \`main\`, пока не закрыты.
 `
 
+export const SETUP_COMMAND_SOURCE = `---
+description: Настройки доски
+subagent: false
+---
+
+Спроси владельца, включать ли ревью после каждого забега. Покажи текущие
+настройки: \`board setup --show --json\`.
+
+Затем выполни одно:
+
+- \`board setup --review-after-run\` — включить;
+- \`board setup --no-review-after-run\` — выключить.
+
+Не меняй другие настройки.
+`
+
 export interface OpenCodeWriteResult {
   created: string[]
 }
 
 /**
- * Пишет в `root` скилл, плагин и команду ревью (если их нет), и ставит блок
- * `board:begin`/`board:end` в `AGENTS.md`. Идемпотентно: существующие файлы не
- * перезаписываются, блок между маркерами заменяется на канонический.
+ * Пишет в `root` скилл, плагин, команды ревью и настроек (если их нет), и
+ * ставит блок `board:begin`/`board:end` в `AGENTS.md`. Идемпотентно:
+ * существующие файлы не перезаписываются, блок между маркерами заменяется на
+ * канонический.
  */
 export function writeOpenCodeFiles(root: string): OpenCodeWriteResult {
   const created: string[] = []
@@ -480,6 +524,7 @@ export function writeOpenCodeFiles(root: string): OpenCodeWriteResult {
     ['.opencode/skills/board/SKILL.md', SKILL_SOURCE],
     ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
     ['.opencode/command/review.md', COMMAND_SOURCE],
+    ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
   ]
   for (const [relative, content] of files) {
     const path = join(root, relative)

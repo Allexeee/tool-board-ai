@@ -14,6 +14,7 @@
 import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { findProject } from '../../core/project.ts'
+import { readSettings } from '../../core/settings.ts'
 import type { Run } from '../../core/types.ts'
 import {
   boolFlag,
@@ -28,7 +29,7 @@ import { fail, ok } from '../output.ts'
 const USAGE =
   'использование: board run start --as developer --cards UI-1,UI-2 | --suggest 1; ' +
   'run add|drop UI-1 --as developer; run next --as developer; ' +
-  'run end --as developer [--review]; run release RUN-1 --reason "..."; run list'
+  'run end --as developer [--review|--no-review]; run release RUN-1 --reason "..."; run list'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
@@ -123,18 +124,21 @@ export default async function command(args: ParsedArgs) {
     }
 
     const count = listRunCards(db, run.id).length
-    const ended = endRun(db, {
-      executorId,
-      actor: executorId,
-      review: boolFlag(args, 'review'),
-    })
+    const reviewFlag = boolFlag(args, 'review')
+    const noReviewFlag = boolFlag(args, 'no-review')
+    if (reviewFlag && noReviewFlag) {
+      throw new UserError(3, 'укажите только один флаг: --review или --no-review')
+    }
+    const explicitReview = reviewFlag ? true : noReviewFlag ? false : undefined
+    const review = explicitReview ?? readSettings(project.root).reviewAfterRun
+    const ended = endRun(db, { executorId, actor: executorId, review })
 
     const human = [
       `${ended.id} закрыт · карточек ${count}`,
-      ended.review ? 'ревью запланировано: выполните board review list' : null,
-    ]
-      .filter(Boolean)
-      .join('\n')
+      ended.review
+        ? 'ревью включено: выполните board review list или /review'
+        : 'ревью после забега выключено',
+    ].join('\n')
     ok(ended, human)
     return 0
   }

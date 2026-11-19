@@ -615,7 +615,9 @@ board run end --as developer
   команда просит сначала разобраться;
 - `blocked` остаются как есть; из забега они снимаются;
 - run-запись получает `ended_at`, результат и список карточек;
-- `run end --review` ставит `review=1` и возвращает пакет для ревью. Забег
+- `run end` берёт ревью из настройки `reviewAfterRun` (`.board/settings.json`,
+  по умолчанию `false`); `--review`/`--no-review` перекрывают её для
+  конкретного забега. Если ревью включено, `runs.review=1`, и забег
   закрывается сразу, **не ждёт** вердиктов. Ревью — отдельная команда
   (§ 9.2), её можно запустить сразу после `run end` или позже.
 
@@ -679,12 +681,15 @@ CLI сам субагентов не порождает: он готовит п�
 
 ### 9.4 Ревью в забеге
 
-`run end --review` **закрывает забег сразу** и ставит `runs.review=1`.
-Пакет для ревью возвращается командой; само ревью — отдельная команда
-`review` (§ 9.2), которую можно запустить сразу или позже. Забег не ждёт
-вердиктов и не зависает, если ревьюер умер. Если ревьюер вернул только часть
-вердиктов, остальные карточки остаются `review`, а run-запись уже содержит
-факт запланированного ревью. Повторный `review` обрабатывает оставшиеся.
+Если настройка `reviewAfterRun` включена или передан `run end --review`,
+забег **закрывается сразу** и получает `runs.review=1`. Пакет для ревью
+возвращается командой; само ревью — отдельная команда `review` (§ 9.2),
+которую можно запустить сразу или позже. Забег не ждёт вердиктов и не
+зависает, если ревьюер умер. Если ревьюер вернул только часть вердиктов,
+остальные карточки остаются `review`, а run-запись уже содержит факт
+запланированного ревью. Повторный `review` обрабатывает оставшиеся.
+По умолчанию ревью после забега выключено; `--no-review` отключает его для
+конкретного забега.
 
 ### 9.5 Чужой навык
 
@@ -984,7 +989,7 @@ board run start --as developer --suggest 1
 board run add UI-12 --as developer
 board run drop UI-12 --as developer
 board run next --as developer
-board run end --as developer [--review]
+board run end --as developer [--review|--no-review]
 board run release RUN-1 --reason "..."
 board run list
 
@@ -1014,6 +1019,9 @@ board review submit UI-1 --verdict done|reopen --note "..." \
 board release
 board now [0|1|2|3] [фильтры]
 board doctor
+
+board setup [--show]
+board setup --review-after-run|--no-review-after-run
 ```
 
 Все команды принимают `--json`. Коды выхода: `0` успех, `1` делать нечего,
@@ -1045,6 +1053,10 @@ board doctor
 ## 13. Данные
 
 Новая база `.board/board.db`, схема v1. Старые базы не мигрируются.
+
+Локальные настройки — `.board/settings.json` (не в базе и не в git): версия
+файла, `reviewAfterRun` и `setupAt` (когда мастер настроек последний раз
+завершался).
 
 ```sql
 create table meta (key text primary key, value text not null);
@@ -1209,15 +1221,18 @@ create table reviews (
   задавать вопросы, закрывать, ревьюить; в начале сессии читает
   `docs/board/terminology.md` и раздел команд владельца;
 - команда `review` — запускает нового субагента с пакетом `review list`
-  после `run end --review` (или отдельно) и принимает `review submit` с
-  находками; забег при этом уже закрыт и не ждёт;
-- тонкий плагин с инструментами `board_now`, `board_card`, `board_run`,
-  `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`,
-  `board_review`, `board_decision`;
+  после `run end` с включённым ревью (или отдельно) и принимает
+  `review submit` с находками; забег при этом уже закрыт и не ждёт;
+- команда `setup` — мастер настроек; при первом `init` в TTY запускается
+  автоматически, позже вызывается вручную (`/setup` или `board setup`);
+- тонкий плагин с инструментами `board_now`, `board_setup`, `board_card`,
+  `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`,
+  `board_answer`, `board_review`, `board_decision`;
 - плагин не содержит логики: вызывает `node bin/board.ts … --json`.
 
 Файлы агентов OpenCode (`developer`, `marketer`) настраиваются вручную.
-`init` создаёт скилл, команду ревью и блок в `AGENTS.md` между маркерами.
+`init` создаёт скилл, команды ревью и настроек, плагин и блок в `AGENTS.md`
+между маркерами.
 
 ## 15. Что остаётся за builder'ом
 

@@ -1,5 +1,6 @@
-// Инструменты: board_now, board_card, board_run, board_take, board_finish,
-// board_block, board_ask, board_answer, board_review, board_decision, board_term.
+// Инструменты: board_now, board_setup, board_card, board_run, board_take,
+// board_finish, board_block, board_ask, board_answer, board_review,
+// board_decision, board_term.
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -116,7 +117,8 @@ function runArgs(input) {
     flag(args, 'as', input.as)
   } else if (a === 'end') {
     flag(args, 'as', input.as)
-    if (input.review) args.push('--review')
+    if (input.review === true) args.push('--review')
+    else if (input.review === false) args.push('--no-review')
   } else if (a === 'release') {
     if (input.id) args.push(input.id)
     flag(args, 'reason', input.reason)
@@ -194,6 +196,19 @@ export default Plugin.define({
           if (input.mine) args.push('--mine')
           flag(args, 'as', input.as)
           return call(ctx, ['now', ...args])
+        },
+      })
+
+      editor.add({
+        name: 'setup',
+        description: 'Настройки доски: show|review-after-run|no-review-after-run',
+        input: schema({ action: { type: 'string' } }),
+        execute: (input) => {
+          const action = input.action ?? 'show'
+          if (action === 'show') return call(ctx, ['setup', '--show'])
+          if (action === 'review-after-run') return call(ctx, ['setup', '--review-after-run'])
+          if (action === 'no-review-after-run') return call(ctx, ['setup', '--no-review-after-run'])
+          return { content: 'неизвестное действие setup: ' + action, isError: true }
         },
       })
 

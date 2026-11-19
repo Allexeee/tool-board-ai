@@ -12,7 +12,9 @@ const VERSION = (JSON.parse(
 
 const HELP = `board — доска карточек для людей и агентов
 
-  init                    создать .board/board.db и docs/board/
+  init [каталог] [--yes]   создать .board/board.db и docs/board/
+  setup                   мастер настроек: --show, --review-after-run,
+                          --no-review-after-run
 
   executor add|list|edit|remove
   card add|list|show|edit  карточки

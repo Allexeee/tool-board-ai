@@ -9,6 +9,7 @@
 import { dirname, join, resolve } from 'node:path'
 import { openDb } from './db.ts'
 import { writeOpenCodeFiles } from './opencode.ts'
+import { ensureSettings } from './settings.ts'
 import { ensureTerminology } from './terminology.ts'
 
 export interface Project {
@@ -142,6 +143,8 @@ export function initProject(dir: string): { created: string[]; root: string } {
     ensureTerminology(root)
     created.push('docs/board/terminology.md')
   }
+
+  if (ensureSettings(root).created) created.push('.board/settings.json')
 
   const db = openDb(dbPath)
   try {

@@ -27,6 +27,7 @@ function runCli(args: string[]) {
 
 const NEW_COMMANDS = [
   'init',
+  'setup',
   'executor',
   'card',
   'queue',
