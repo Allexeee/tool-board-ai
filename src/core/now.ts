@@ -5,8 +5,8 @@ import { todayStartIso } from './clock.ts'
 import { openQuestions, type Discussion } from './discussion.ts'
 import { listExecutors } from './executors.ts'
 import { listQueue } from './queue.ts'
-import { listRuns, reclaimExpired, suggestRuns } from './runs.ts'
-import type { Card, CardPhase, CardStatus, Run, RunSuggestion } from './types.ts'
+import { getActiveRun, listRunCards, listRuns, reclaimExpired, suggestRuns } from './runs.ts'
+import type { Card, CardPhase, CardStatus, Run, RunCard, RunSuggestion } from './types.ts'
 
 /** Вкладка доски `now` (§11): 0 — владельцу, 1 — мои забеги, 2 — все забеги, 3 — открытые карточки. */
 export type NowViewKind = 0 | 1 | 2 | 3
@@ -27,12 +27,19 @@ export interface NowFilters {
   all?: boolean
 }
 
+export interface NowRun {
+  run: Run
+  cards: RunCard[]
+}
+
 export interface NowView {
   view: NowViewKind
   header: NowHeader
+  executor?: string
   approvals?: Card[]
   ownerCards?: Card[]
   questions?: Discussion[]
+  currentRun?: NowRun | null
   suggestions?: RunSuggestion[]
   runs?: Run[]
   requests?: Card[]
@@ -109,8 +116,12 @@ function ownerView(db: DatabaseSync): Pick<NowView, 'approvals' | 'ownerCards' |
   return { approvals, ownerCards, questions }
 }
 
-/** Вкладка «мои забеги» §11.3: агенту три предложения, владельцу — по одному на агента. */
-function myRuns(db: DatabaseSync, executorId: string): Pick<NowView, 'suggestions'> {
+/**
+ * Вкладка «мои забеги» §11.3: текущий активный забег, затем вероятные следующие.
+ * Владельцу текущего забега не показываем: у него нет своих забегов, только
+ * по одному предложению на агента.
+ */
+function myRuns(db: DatabaseSync, executorId: string): Pick<NowView, 'executor' | 'currentRun' | 'suggestions'> {
   if (executorId === OWNER) {
     const suggestions: RunSuggestion[] = []
     for (const agent of listExecutors(db)) {
@@ -119,9 +130,19 @@ function myRuns(db: DatabaseSync, executorId: string): Pick<NowView, 'suggestion
       if (suggestion) suggestions.push(suggestion)
       if (suggestions.length >= 3) break
     }
-    return { suggestions }
+    return { executor: executorId, currentRun: null, suggestions }
   }
-  return { suggestions: suggestRuns(db, executorId, 3) }
+
+  const active = getActiveRun(db, executorId)
+  const currentRun: NowRun | null = active
+    ? { run: active, cards: listRunCards(db, active.id) }
+    : null
+
+  return {
+    executor: executorId,
+    currentRun,
+    suggestions: suggestRuns(db, executorId, 3),
+  }
 }
 
 /** Вкладка «все забеги» §11.4: активные и завершённые + по предложению на чужого. */
@@ -205,6 +226,15 @@ const RUN_STATUS_WORDS: Record<Run['status'], string> = {
   lease_expired: 'lease истёк',
 }
 
+const RUN_CARD_STATUS_WORDS: Record<RunCard['status'], string> = {
+  booked: 'забронирована',
+  in_progress: 'в работе',
+  done: 'done',
+  review: 'review',
+  blocked: 'blocked',
+  dropped: 'снята',
+}
+
 /** Текстовый набросок доски §11. Цвет не обязателен; вывод читается в пайпе. */
 export function renderNow(data: NowView): string {
   const lines: string[] = [titleLine(data)]
@@ -218,7 +248,13 @@ export function renderNow(data: NowView): string {
 function titleLine(data: NowView): string {
   if (data.view === 1) {
     const executors = [...new Set((data.suggestions ?? []).map((run) => run.executorId))]
-    return executors.length === 1 ? `[1] МОИ ЗАБЕГИ — ${executors[0]}` : '[1] МОИ ЗАБЕГИ'
+    const executor =
+      data.executor && data.executor !== OWNER
+        ? data.executor
+        : executors.length === 1
+          ? executors[0]
+          : undefined
+    return executor ? `[1] МОИ ЗАБЕГИ — ${executor}` : '[1] МОИ ЗАБЕГИ'
   }
   return `[${data.view}] ${VIEW_TITLES[data.view]}`
 }
@@ -278,13 +314,26 @@ function renderOwner(lines: string[], data: NowView): void {
 }
 
 function renderMyRuns(lines: string[], data: NowView): void {
+  const current = data.currentRun
+  if (current) {
+    const cards = current.cards
+      .map((card) => `${card.cardId} (${RUN_CARD_STATUS_WORDS[card.status]})`)
+      .join(', ')
+    lines.push(
+      `ТЕКУЩИЙ ЗАБЕГ  ${current.run.id}  ${cards || '—'}  ${RUN_STATUS_WORDS[current.run.status]}`,
+    )
+  }
+
   const suggestions = data.suggestions ?? []
+  if (suggestions.length > 0 && current) lines.push('СЛЕДУЮЩИЕ')
   const multi = new Set(suggestions.map((run) => run.executorId)).size > 1
   suggestions.forEach((run, index) => {
     const who = multi ? `  ${run.executorId}` : ''
     const cards = run.cards.map((card) => card.id).join(', ')
     lines.push(`ЗАБЕГ ${index + 1}  ${cards}  (${run.group ?? '—'})${who}`)
   })
+
+  if (!current && suggestions.length === 0) lines.push('забегов нет')
 }
 
 function renderAllRuns(lines: string[], data: NowView): void {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { DatabaseSync } from 'node:sqlite'
 import { nowIso } from '../../src/core/clock.ts'
 import { ask } from '../../src/core/discussion.ts'
-import { nowData } from '../../src/core/now.ts'
+import { nowData, renderNow } from '../../src/core/now.ts'
 import { makeBoard, seedCard, seedExecutor, seedRun } from '../helpers/board.ts'
 
 type Board = ReturnType<typeof makeBoard>
@@ -176,6 +176,27 @@ test('now 1: агенту — три предложения забега; вла
     owner.suggestions!.map((run) => run.executorId).sort(),
     ['developer', 'marketer'],
   )
+})
+
+test('now 1: показывает текущий активный забег, затем следующие', (t) => {
+  const { db, root } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  const current = readyCard(db, { position: 1 })
+  const next = readyCard(db, { position: 2 })
+  const run = seedRun(db, { executorId: 'developer', cardIds: [current.id] })
+
+  const data = nowData(db, { view: 1, executorId: 'developer', root })
+  assert.equal(data.executor, 'developer')
+  assert.equal(data.currentRun?.run.id, run.id)
+  assert.deepEqual(data.currentRun?.cards.map((card) => card.cardId), [current.id])
+  assert.ok(data.suggestions!.every((suggestion) => !suggestion.cards.some((card) => card.id === current.id)))
+  assert.ok(data.suggestions!.some((suggestion) => suggestion.cards.some((card) => card.id === next.id)))
+
+  const text = renderNow(data)
+  assert.match(text, /ТЕКУЩИЙ ЗАБЕГ/)
+  assert.match(text, new RegExp(run.id))
+  assert.match(text, /СЛЕДУЮЩИЕ/)
 })
 
 test('now 1: владельцу не больше трёх забегов', (t) => {
