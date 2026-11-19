@@ -6,21 +6,28 @@ export { migrate } from './schema.ts'
 
 const depth = new WeakMap<DatabaseSync, number>()
 
-export function openDb(path: string): DatabaseSync {
+export interface OpenDbOptions {
+  /** Не мигрировать устаревшую схему: открыть как есть (нужно doctor). */
+  allowOutdated?: boolean
+  /** Не бросать на более новой схеме: открыть как есть (нужно doctor). */
+  allowNewer?: boolean
+}
+
+export function openDb(path: string, options: OpenDbOptions = {}): DatabaseSync {
   const db = new DatabaseSync(path)
   db.exec('pragma journal_mode = wal')
   db.exec('pragma busy_timeout = 5000')
   db.exec('pragma foreign_keys = on')
 
   const version = schemaVersionOf(db)
-  if (version > SCHEMA_VERSION) {
+  if (version > SCHEMA_VERSION && !options.allowNewer) {
     db.close()
     throw new UserError(
       3,
       `схема ${version} новее, чем понимает инструмент (${SCHEMA_VERSION}): обновите инструмент`,
     )
   }
-  if (version < SCHEMA_VERSION) migrate(db)
+  if (version < SCHEMA_VERSION && !options.allowOutdated) migrate(db)
 
   return db
 }

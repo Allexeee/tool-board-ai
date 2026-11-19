@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { seedCard } from '../helpers/board.ts'
 import { makeRepo } from '../helpers/repo.ts'
 import { openDb } from '../../src/core/db.ts'
+import { DatabaseSync } from 'node:sqlite'
 
 const bin = resolve('bin/board.ts')
 
@@ -116,4 +117,48 @@ test('doctor: предупреждение — код 1', (t) => {
   const result = run(repo.root, ['doctor'])
   assert.equal(result.status, 1, result.stdout + result.stderr)
   assert.match(result.stdout, /ревью/)
+})
+
+function setSchemaVersion(dir: string, version: string): void {
+  const db = new DatabaseSync(join(dir, '.board', 'board.db'))
+  db.prepare("update meta set value = ? where key = 'schemaVersion'").run(version)
+  db.close()
+}
+
+function readSchemaVersion(dir: string): string {
+  const db = new DatabaseSync(join(dir, '.board', 'board.db'))
+  const row = db.prepare("select value from meta where key = 'schemaVersion'").get() as
+    | { value: string }
+    | undefined
+  db.close()
+  return row?.value ?? '0'
+}
+
+test('doctor --json: устаревшая схема — { errors } и без авто-миграции', (t) => {
+  const repo = makeRepo()
+  t.after(() => repo.close())
+  assert.equal(run(repo.root, ['init']).status, 0)
+  setSchemaVersion(repo.root, '0')
+
+  const result = run(repo.root, ['doctor', '--json'])
+  assert.equal(result.status, 3, result.stdout + result.stderr)
+  const data = JSON.parse(result.stdout) as { errors: string[]; warnings: string[] }
+  assert.deepEqual(Object.keys(data).sort(), ['errors', 'warnings'])
+  assert.ok(data.errors.some((e) => e.includes('схем')), data.errors.join(' | '))
+  // doctor не мигрирует устаревшую схему
+  assert.equal(readSchemaVersion(repo.root), '0')
+})
+
+test('doctor --json: новее схема — { errors }, без raw-ошибки на stderr', (t) => {
+  const repo = makeRepo()
+  t.after(() => repo.close())
+  assert.equal(run(repo.root, ['init']).status, 0)
+  setSchemaVersion(repo.root, '99')
+
+  const result = run(repo.root, ['doctor', '--json'])
+  assert.equal(result.status, 3, result.stdout + result.stderr)
+  const data = JSON.parse(result.stdout) as { errors: string[]; warnings: string[] }
+  assert.deepEqual(Object.keys(data).sort(), ['errors', 'warnings'])
+  assert.ok(data.errors.some((e) => e.includes('схем')), data.errors.join(' | '))
+  assert.equal(result.stderr, '')
 })

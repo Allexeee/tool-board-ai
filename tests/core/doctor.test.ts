@@ -142,7 +142,7 @@ test('doctorData: нет ветки dev — ошибка', () => {
   }
 })
 
-test('doctorData: расхождение схемы — ошибка', () => {
+test('doctorData: новее схема — ошибка', () => {
   const board = makeBoardRepo()
   try {
     board.db.prepare("update meta set value = '99' where key = 'schemaVersion'").run()
@@ -150,6 +150,18 @@ test('doctorData: расхождение схемы — ошибка', () => {
     assert.ok(data.errors.some((e) => e.includes('схем')), data.errors.join(' | '))
   } finally {
     board.close()
+  }
+})
+
+test('doctorData: устаревшая схема (пустая база) — ошибка без запросов к таблицам', () => {
+  const root = mkdtempSync(join(tmpdir(), 'board-old-schema-'))
+  const db = openDb(':memory:', { allowOutdated: true })
+  try {
+    const data = doctorData(db, root)
+    assert.ok(data.errors.some((e) => e.includes('схема 0')), data.errors.join(' | '))
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
   }
 })
 

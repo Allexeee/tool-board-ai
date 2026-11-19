@@ -8,7 +8,7 @@ import { ok } from '../output.ts'
 export default async function command(_args: ParsedArgs) {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
-  const db = openDb(project.dbPath)
+  const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
 
   try {
     const result = doctorData(db, project.root)

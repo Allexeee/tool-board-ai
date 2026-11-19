@@ -35,13 +35,15 @@ export function doctorData(db: DatabaseSync, root: string): DoctorResult {
     if (!branchExists(root, dev)) errors.push(`ветки ${dev} нет: карточкам некуда сливаться`)
   }
 
-  if (!getExecutor(db, 'owner')) {
-    errors.push('нет исполнителя owner: выполните board init')
-  }
-
+  // Схему проверяем до любых запросов к таблицам: при расхождении их может не быть.
   const version = schemaVersionOf(db)
   if (version !== SCHEMA_VERSION) {
     errors.push(`схема ${version} не совпадает с ожидаемой ${SCHEMA_VERSION}`)
+    return { errors, warnings }
+  }
+
+  if (!getExecutor(db, 'owner')) {
+    errors.push('нет исполнителя owner: выполните board init')
   }
 
   const reclaimed = reclaimExpired(db)
