@@ -76,15 +76,52 @@ test('suggestRuns собирает забег до run_size из карточе�
   assert.equal(new Set(all).size, all.length, 'предложения не пересекаются')
 })
 
-test('suggestRuns берёт задачи без position в порядке создания', (t) => {
+test('suggestRuns не предлагает карточки без позиции в очереди', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  const first = seedCard(db, { phase: 'task', status: 'ready' })
-  const second = seedCard(db, { phase: 'task', status: 'ready' })
-  const third = seedCard(db, { phase: 'task', status: 'ready' })
+  seedCard(db, { phase: 'task', status: 'ready' })
+  seedCard(db, { phase: 'task', status: 'ready' })
+  seedCard(db, { phase: 'task', status: 'ready' })
 
+  assert.deepEqual(suggestRuns(db, 'developer', 1), [])
+
+  const queued = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
   const [suggestion] = suggestRuns(db, 'developer', 1)
-  assert.deepEqual(ids(suggestion.cards), [first.id, second.id, third.id])
+  assert.deepEqual(ids(suggestion.cards), [queued.id])
+})
+
+test('owner-карточки не предлагаются и не бронируются', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const ownerCard = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    position: 1,
+    skill: 'owner',
+    title: 'Личная задача владельца',
+  })
+  const devCard = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+
+  const suggested = suggestRuns(db, 'owner', 3).flatMap((suggestion) =>
+    suggestion.cards.map((card) => card.id),
+  )
+  assert.ok(!suggested.includes(ownerCard.id), 'owner-карточка не предлагается')
+  assert.ok(suggested.includes(devCard.id), 'владелец может взять обычную карточку')
+
+  assert.throws(
+    () => startRun(db, { executorId: 'owner', cardIds: [ownerCard.id], actor: 'owner' }),
+    /owner-карточка/,
+  )
+  assert.throws(
+    () => startRun(db, { executorId: 'developer', cardIds: [ownerCard.id], actor: 'developer' }),
+    /owner-карточка/,
+  )
+  assert.equal(getCard(db, ownerCard.id)!.status, 'ready')
+  assert.equal(getCard(db, ownerCard.id)!.holder, null)
+
+  const run = startRun(db, { executorId: 'owner', cardIds: [devCard.id], actor: 'owner' })
+  assert.equal(run.status, 'active')
+  assert.equal(getCard(db, ownerCard.id)!.status, 'ready')
 })
 
 test('suggestRuns учитывает навык, удержание, бронь, фазу и позицию', (t) => {

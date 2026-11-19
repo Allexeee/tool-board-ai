@@ -136,6 +136,12 @@ function unmetDeps(db: DatabaseSync, card: Card, earlier: Set<string>): string[]
 function requireRunnableCard(db: DatabaseSync, executor: Executor, cardId: string): Card {
   const card = getCard(db, cardId)
   if (!card) throw new UserError(3, `карточка ${cardId} не найдена`)
+  if (card.skill === OWNER) {
+    throw new UserError(
+      3,
+      `карточка ${card.id} — owner-карточка: в забег не берётся, её закрывает владелец`,
+    )
+  }
   if (card.phase !== 'task') {
     throw new UserError(3, `карточка ${card.id} — запрос: в забег берутся только задачи`)
   }
@@ -306,12 +312,13 @@ export function suggestRuns(
   }
 
   const candidates = listCards(db, { phase: 'task', status: ['ready', 'waiting'] })
+    .filter((card) => card.position !== null)
+    .filter((card) => card.skill !== OWNER)
     .filter((card) => card.holder === null && card.runId === null)
     .filter((card) => canTake(executor, card))
     .sort(
       (left, right) =>
-        (left.position ?? Number.MAX_SAFE_INTEGER) -
-          (right.position ?? Number.MAX_SAFE_INTEGER) ||
+        left.position! - right.position! ||
         left.createdAt.localeCompare(right.createdAt) ||
         left.id.localeCompare(right.id),
     )
