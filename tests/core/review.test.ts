@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { editCard, getCard } from '../../src/core/cards.ts'
 import { openDb } from '../../src/core/db.ts'
 import { addDep, listDeps } from '../../src/core/deps.ts'
-import { finishCard } from '../../src/core/lifecycle.ts'
+import { finishCard, takeCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import {
@@ -14,7 +14,7 @@ import {
   revalidateDependents,
   submitVerdict,
 } from '../../src/core/review.ts'
-import { listRunCards, startRun } from '../../src/core/runs.ts'
+import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { makeRepo } from '../helpers/repo.ts'
 
@@ -247,4 +247,39 @@ test('revalidateDependents: booked → waiting + dropped, ready → waiting, in_
   assert.equal(getCard(db, booked.id)!.status, 'waiting')
   assert.equal(listRunCards(db, run.id).find((r) => r.cardId === booked.id)!.status, 'dropped')
   assert.equal(getCard(db, inProgress.id)!.status, 'in_progress')
+})
+
+test('reopen очищает run_id/lease: карточка из finish снова бронируется', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false, reviewRequired: true } })
+  const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  takeCard(db, { id: card.id, actor: 'developer', root: '' })
+  finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root: '' })
+
+  // finish в review сохраняет забег и аренду — так устроены finish и endRun.
+  assert.equal(getCard(db, card.id)!.status, 'review')
+  assert.equal(getCard(db, card.id)!.runId, run.id)
+  endRun(db, { executorId: 'developer', actor: 'developer' })
+
+  const result = submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    verdict: 'reopen',
+    note: 'переделать',
+  })
+
+  assert.equal(result.card.status, 'ready')
+  assert.equal(result.card.runId, null)
+  assert.equal(result.card.leaseUntil, null)
+  assert.equal(result.card.holder, null)
+  assert.equal(result.card.previousHolder, 'developer')
+
+  // переоткрытая карточка снова предлагается и бронируется
+  const suggested = suggestRuns(db, 'developer').flatMap((s) => s.cards.map((c) => c.id))
+  assert.ok(suggested.includes(card.id))
+  const second = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  assert.equal(getCard(db, card.id)!.status, 'booked')
+  assert.equal(getCard(db, card.id)!.runId, second.id)
 })

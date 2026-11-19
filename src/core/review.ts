@@ -161,7 +161,8 @@ export function submitVerdict(
       )
     } else {
       db.prepare(
-        `update cards set status = 'ready', previous_holder = ?, holder = null, updated_at = ? where id = ?`,
+        `update cards set status = 'ready', previous_holder = ?, holder = null, run_id = null,
+         lease_until = null, updated_at = ? where id = ?`,
       ).run(card.holder, at, card.id)
 
       // Переоткрытая карточка возвращается в начало очереди задач.

@@ -9,14 +9,17 @@ import {
   approveCard,
   blockCard,
   cancelCard,
+  finishCard,
   ownerDone,
   rejectCard,
   reopenCard,
   resumeAfterAnswer,
   shapeCard,
   submitCard,
+  takeCard,
 } from '../../src/core/lifecycle.ts'
-import { makeBoard, seedCard } from '../helpers/board.ts'
+import { endRun, startRun, suggestRuns } from '../../src/core/runs.ts'
+import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 
 type Board = ReturnType<typeof makeBoard>
 
@@ -367,6 +370,37 @@ test('reopen owner-карточки не ставит её в очередь', (
   assert.equal(reopened.status, 'ready')
   assert.equal(reopened.attempt, 2)
   assert.equal(reopened.position, null)
+})
+
+test('reopen очищает run_id/lease: карточка из finish снова бронируется', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false, reviewRequired: true } })
+  const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  takeCard(db, { id: card.id, actor: 'developer', root: '' })
+  finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root: '' })
+
+  // finish в review сохраняет забег и аренду — так устроены finish и endRun.
+  assert.equal(getCard(db, card.id)!.status, 'review')
+  assert.equal(getCard(db, card.id)!.runId, run.id)
+  endRun(db, { executorId: 'developer', actor: 'developer' })
+
+  const reopened = reopenCard(db, { id: card.id, actor: 'owner', reason: 'переделать' })
+
+  assert.equal(reopened.status, 'ready')
+  assert.equal(reopened.runId, null)
+  assert.equal(reopened.leaseUntil, null)
+  assert.equal(reopened.holder, null)
+  assert.equal(reopened.previousHolder, 'developer')
+  assert.equal(reopened.attempt, 2)
+
+  // переоткрытая карточка снова предлагается и бронируется
+  const suggested = suggestRuns(db, 'developer').flatMap((s) => s.cards.map((c) => c.id))
+  assert.ok(suggested.includes(card.id))
+  const second = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  assert.equal(getCard(db, card.id)!.status, 'booked')
+  assert.equal(getCard(db, card.id)!.runId, second.id)
 })
 
 test('block очищает run_id и аренду', (t) => {

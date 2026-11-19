@@ -382,7 +382,8 @@ export function reopenCard(
 
     db.prepare(
       `update cards set status = ?, attempt = attempt + 1, reverted_at = null,
-       previous_holder = ?, holder = null, updated_at = ? where id = ?`,
+       previous_holder = ?, holder = null, run_id = null, lease_until = null,
+       updated_at = ? where id = ?`,
     ).run(status, card.holder, at, card.id)
 
     // Owner-карточка не встаёт в очередь: её закрывает и переоткрывает владелец.
