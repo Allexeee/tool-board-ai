@@ -1,4 +1,4 @@
-﻿# toolbox-al
+﻿# tool-board-ai
 
 Доска карточек для владельца и ИИ-агентов. Одна сущность — карточка: сначала запрос, после разбора и утверждения — задача. Карточки берутся в забеги, выполняются, сдаются на ревью и заливаются в `main`.
 
@@ -10,8 +10,8 @@ CLI ставится один раз; в каждый проект его кла
 
 ```powershell
 # скопируйте/клонируйте этот репозиторий (ветку с доской) в удобное место
-git clone <repo-url> "$env:USERPROFILE\tools\board"
-$env:Path += ";$env:USERPROFILE\tools\board"
+git clone https://github.com/Allexeee/tool-board-ai.git "$env:USERPROFILE\tools\tool-board-ai"
+$env:Path += ";$env:USERPROFILE\tools\tool-board-ai"
 ```
 
 В корне лежит `board.cmd`; он запускает `node bin\board.ts`. Проверка:
@@ -23,15 +23,15 @@ $env:Path += ";$env:USERPROFILE\tools\board"
 `BOARD_CLI` перекрывает путь только для инструментов плагина:
 
 ```powershell
-[Environment]::SetEnvironmentVariable('BOARD_CLI', "$env:USERPROFILE\tools\board\bin\board.ts", 'User')
+[Environment]::SetEnvironmentVariable('BOARD_CLI', "$env:USERPROFILE\tools\tool-board-ai\bin\board.ts", 'User')
 ```
 
 `npm install` из git не работает: Node не обрабатывает TypeScript внутри `node_modules`. Запуск идёт из обычного каталога.
 
 ## Установка в существующий проект
 
-`toolbox-al` в проекте не нужен. `init` создаёт новую доску с нуля и не
-переносит старые данные.
+Старый `toolbox-al` или `.toolbox-al` в проекте не нужен. `init` создаёт
+новую доску с нуля и не переносит старые данные.
 
 В корне существующего проекта:
 

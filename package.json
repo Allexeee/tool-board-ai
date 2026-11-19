@@ -1,7 +1,8 @@
 {
-  "name": "toolbox-al",
-  "version": "2.0.0",
+  "name": "tool-board-ai",
+  "version": "1.0.0",
   "private": true,
+  "description": "Доска карточек для владельца и ИИ-агентов",
   "type": "module",
   "files": [
     "bin",
