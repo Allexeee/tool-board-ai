@@ -8,6 +8,7 @@
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { openDb } from './db.ts'
+import { writeOpenCodeFiles } from './opencode.ts'
 import { ensureTerminology } from './terminology.ts'
 
 export interface Project {
@@ -152,6 +153,8 @@ export function initProject(dir: string): { created: string[]; root: string } {
   }
 
   if (updateGitignore(root)) created.push('.gitignore')
+
+  created.push(...writeOpenCodeFiles(root).created)
 
   // Новый хук не ставим: доска не защищает ветки.
   stripToolboxHook(root)

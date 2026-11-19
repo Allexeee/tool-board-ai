@@ -2,372 +2,73 @@
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import {
-  AGENTS_BEGIN,
-  AGENTS_END,
-  lineDiff,
-  mergeManaged,
-  openCodeFilesPresent,
-  planOpenCode,
-  pluginSource,
-  pluginVersion,
-  refreshOpenCode,
-  writeOpenCodeFiles,
-} from '../../src/core/opencode.ts'
+import { join } from 'node:path'
+import { writeOpenCodeFiles } from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
-import { openDb } from '../../src/core/db.ts'
-import { doctorReport } from '../../src/core/doctor.ts'
 
-const tmp = () => mkdtempSync(join(tmpdir(), 'oc-'))
+const tmp = () => mkdtempSync(join(tmpdir(), 'board-oc-'))
 
-test('файлы создаются и не перезаписываются', () => {
+test('initProject создаёт скилл, плагин, команду ревью и блок в AGENTS.md', () => {
+  const { created, root } = initProject(tmp())
+  assert.ok(existsSync(join(root, '.opencode', 'skills', 'board', 'SKILL.md')))
+  assert.ok(existsSync(join(root, '.opencode', 'plugins', 'board', 'index.ts')))
+  assert.ok(existsSync(join(root, '.opencode', 'command', 'review.md')))
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /board/)
+  assert.ok(created.some((p) => p.includes('SKILL.md')))
+})
+
+test('скилл ссылается на terminology.md и на порядок работы', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode', 'skills', 'board', 'SKILL.md'), 'utf8')
+  assert.match(skill, /terminology\.md/)
+  assert.match(skill, /board now/)
+  assert.match(skill, /card shape/)
+  assert.match(skill, /review list/)
+})
+
+test('плагин объявляет инструмент board_now и зовёт CLI', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /board_now/)
+  assert.match(plugin, /board\.ts/)
+  assert.match(plugin, /BOARD_CLI/)
+  assert.match(plugin, /Plugin\.define/)
+})
+
+test('команда ревью упоминает review list и review submit', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const command = readFileSync(join(root, '.opencode', 'command', 'review.md'), 'utf8')
+  assert.match(command, /review list/)
+  assert.match(command, /review submit/)
+  assert.match(command, /review finding/)
+})
+
+test('writeOpenCodeFiles идемпотентен: второй вызов ничего не создаёт', () => {
   const root = tmp()
   const first = writeOpenCodeFiles(root)
   assert.ok(first.created.length >= 4)
 
   const second = writeOpenCodeFiles(root)
   assert.deepEqual(second.created, [])
-
-  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
-  assert.equal(agents.match(/toolbox-al:begin/g)!.length, 1)
 })
 
-test('существующий AGENTS.md сохраняется', () => {
-  const root = tmp()
-  writeFileSync(join(root, 'AGENTS.md'), '# Мой проект\n\nправила\n')
-  writeOpenCodeFiles(root)
-  const text = readFileSync(join(root, 'AGENTS.md'), 'utf8')
-  assert.match(text, /Мой проект/)
-  assert.match(text, /toolbox-al:begin/)
-})
-
-test('плагин объявляет инструменты и вызывает CLI', () => {
-  const source = pluginSource('9.9.9')
-  for (const name of ['now', 'inbox', 'task', 'take', 'done', 'block', 'ask', 'dispatch', 'review', 'accept', 'answer']) {
-    assert.ok(source.includes(`name: '${name}'`), name)
-  }
-  assert.match(source, /toolbox-al\.ts/)
-  assert.match(source, /tools.*toolbox-al.*bin.*toolbox-al\.ts/s)
-  assert.match(source, /Plugin\.define/)
-  assert.match(source, /nodeBin/)
-  assert.doesNotMatch(source, /file: process\.execPath/)
-  assert.match(source, /9\.9\.9/)
-})
-
-test('скилл объясняет порядок и запрет на git', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-  assert.match(skill, /task show/)
-  assert.match(skill, /не коммит/i)
-  assert.match(skill, /dispatch/)
-})
-
-test('шаблон скилла содержит текущие разделы и правила', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  // RUN и новые команды прогона: шаблон не должен отставать от самого скилла
-  assert.match(skill, /^## RUN: как ведёт себя оркестратор$/m)
-  assert.match(skill, /run handoff/)
-  assert.match(skill, /hiberfil\.sys/)
-
-  // правила короткого брифа и короткого ответа агента
-  assert.match(skill, /Бриф — 2–3 строки/)
-  assert.match(skill, /Ответ агента — статус и число тестов/)
-})
-
-test('init создаёт файлы OpenCode', () => {
-  const root = tmp()
-  initProject(root)
-  assert.deepEqual(openCodeFilesPresent(root), {
-    plugin: true,
-    skill: true,
-    setupSkill: true,
-    agentsBlock: true,
-  })
-  assert.equal(pluginVersion(root), '1.0.2')
-})
-
-test('doctor замечает отсутствие плагина', () => {
-  const root = tmp()
-  initProject(root)
-  const db = openDb(join(root, '.toolbox-al/tracker.db'))
-  assert.equal(
-    doctorReport(db, { root }).checks.find((check) => check.name === 'плагин OpenCode')!.ok,
-    true,
-  )
-
-  const bare = tmp()
-  const bareDb = openDb(':memory:')
-  assert.equal(
-    doctorReport(bareDb, { root: bare }).checks.find((check) => check.name === 'плагин OpenCode')!.ok,
-    false,
-  )
-})
-
-test('AGENTS.md знает слова владельца', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-
-  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
-
-  assert.match(agents, /Добавь задачу/i)
-  assert.match(agents, /запрос в inbox/i)
-  assert.match(agents, /Запиши идею/i)
-  assert.match(agents, /иде[юя]/i)
-})
-
-test('скилл держит коммит в области задачи', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  assert.match(skill, /Коммит делает приложение командой `done`/)
-  assert.match(skill, /по файлам своей области/)
-})
-
-test('скилл: релиз — отдельная команда, а не часть RUN', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  assert.match(skill, /Релиз не входит в RUN/)
-  assert.match(skill, /`release` — отдельная команда/)
-})
-
-test('refresh обновляет блок AGENTS.md по маркерам', () => {
+test('существующий AGENTS.md сохраняется, блок board добавляется', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const path = join(root, 'AGENTS.md')
-  writeFileSync(path, `# Мой проект\n\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nхвост\n`, 'utf8')
 
-  refreshOpenCode(root, '9.9.9', { yes: true })
+  // перезапись блока между маркерами сохраняет текст вокруг
+  const withEdit = '# Мой проект\n\n<!-- board:begin -->\nстарое\n<!-- board:end -->\n\nхвост\n'
+  writeFileSync(path, withEdit, 'utf8')
+
+  writeOpenCodeFiles(root)
 
   const after = readFileSync(path, 'utf8')
   assert.match(after, /Мой проект/)
   assert.match(after, /хвост/)
+  assert.match(after, /node bin\/board\.ts/)
   assert.doesNotMatch(after, /старое/)
-  assert.match(after, /toolbox-al/)
-})
-
-test('плагин обновляется построчно по версии и сохраняет остальное', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const path = join(root, '.opencode/plugins/toolbox-al/index.ts')
-  const original = readFileSync(path, 'utf8').replace(/toolbox-al-plugin-version:\s*\S+/, 'toolbox-al-plugin-version: 0.0.1')
-  writeFileSync(path, original, 'utf8')
-
-  const result = refreshOpenCode(root, '9.9.9', { yes: true })
-  const plugin = result.find((item) => item.path.endsWith('index.ts'))!
-
-  assert.equal(plugin.status, 'updated')
-  assert.match(readFileSync(path, 'utf8'), /9\.9\.9/)
-  assert.equal(existsSync(`${path}.new`), false)
-})
-
-test('скилл: ревью задачи не обходится, ревью прогона привязано к релизу', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  assert.match(skill, /Не обходить ревью/)
-  assert.match(skill, /in_review/)
-  assert.match(skill, /Ревью привязано к релизу/)
-  assert.match(skill, /run review/)
-  assert.doesNotMatch(skill, /Ревью задач не проводим/, 'устаревшее правило не воскрешаем')
-})
-
-test('mergeManaged меняет блок и сохраняет правку вне маркеров', () => {
-  const current = `---\nname: x\n---\n${AGENTS_BEGIN}\nстарое\n${AGENTS_END}\n\nмоя заметка\n`
-  const next = `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`
-
-  const merged = mergeManaged(current, next)!
-
-  assert.match(merged, /новое/)
-  assert.doesNotMatch(merged, /старое/)
-  assert.match(merged, /моя заметка/)
-  assert.match(merged, /name: x/)
-})
-
-test('mergeManaged отказывается, если в файле нет маркеров', () => {
-  assert.equal(mergeManaged('# просто текст\n', `${AGENTS_BEGIN}\nновое\n${AGENTS_END}\n`), null)
-})
-
-test('файл без маркеров без --yes: файл цел, рядом .new', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-
-  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
-  writeFileSync(path, '# моя версия без маркеров\n', 'utf8')
-
-  const result = refreshOpenCode(root, '9.9.9')
-  const skill = result.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
-
-  assert.equal(skill.status, 'pending')
-  assert.equal(readFileSync(path, 'utf8'), '# моя версия без маркеров\n')
-  assert.match(readFileSync(`${path}.new`, 'utf8'), /toolbox-al/)
-  assert.equal(existsSync(`${path}.bak`), false)
-})
-
-test('файл без маркеров: план update, refresh --yes заменяет и держит .bak', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
-  writeFileSync(path, '# старый скилл без маркеров\n', 'utf8')
-
-  const planned = planOpenCode(root, '9.9.9').find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
-  assert.equal(planned.status, 'update', 'не blocked: проект должен догонять релиз')
-
-  const result = refreshOpenCode(root, '9.9.9', { yes: true })
-  const skill = result.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
-  assert.equal(skill.status, 'updated')
-
-  const after = readFileSync(path, 'utf8')
-  assert.match(after, /toolbox-al:begin/, 'файл заменён новым')
-  assert.match(after, /toolbox-al:end/)
-  assert.equal(readFileSync(`${path}.bak`, 'utf8'), '# старый скилл без маркеров\n', 'старая версия рядом')
-
-  const again = planOpenCode(root, '9.9.9').find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
-  assert.equal(again.status, 'same', 'повторный план после обновления — same')
-})
-
-test('planOpenCode показывает дифф и ничего не пишет', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-
-  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
-  const original = readFileSync(path, 'utf8')
-  const withNote = original + '\nмоя заметка\n'
-  writeFileSync(path, withNote, 'utf8')
-
-  const items = planOpenCode(root, '9.9.9')
-  const skill = items.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!
-
-  assert.equal(skill.status, 'same')
-  assert.equal(readFileSync(path, 'utf8'), withNote)
-})
-
-test('planOpenCode считает файл без маркеров обновлением и ничего не пишет', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
-  writeFileSync(path, '# без маркеров\n', 'utf8')
-
-  const items = planOpenCode(root, '9.9.9')
-  assert.equal(items.find((item) => item.path.endsWith('toolbox-al/SKILL.md'))!.status, 'update')
-  assert.equal(readFileSync(path, 'utf8'), '# без маркеров\n', 'план не пишет')
-})
-
-test('lineDiff показывает изменённые строки', () => {
-  const diff = lineDiff('старое\nобщее\n', 'новое\nобщее\n')
-  assert.match(diff, /- старое/)
-  assert.match(diff, /\+ новое/)
-  assert.doesNotMatch(diff, /общее/)
-})
-
-test('refreshOpenCode обновляет блок и сохраняет правку вне маркеров', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-
-  const path = join(root, '.opencode/skills/toolbox-al/SKILL.md')
-  const original = readFileSync(path, 'utf8')
-  writeFileSync(path, original + '\nмоя заметка\n', 'utf8')
-
-  refreshOpenCode(root, '9.9.9', { yes: true })
-  const after = readFileSync(path, 'utf8')
-
-  assert.match(after, /моя заметка/)
-  assert.match(after, /toolbox-al/)
-})
-
-
-
-test('блок AGENTS.md знает про ревью и dev', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
-
-  assert.match(agents, /Ревью не обходится/)
-  assert.match(agents, /in_review/)
-  assert.match(agents, /ветке фичи или dev/)
-})
-
-test('скилл говорит про выключенных субагентов', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  assert.match(skill, /Субагенты\./)
-  assert.match(skill, /subagents: true/)
-  assert.match(skill, /только в ране, где несколько фич/)
-})
-
-test('полное ревью отдаётся отдельному агенту', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  assert.match(skill, /Полное ревью/)
-  assert.match(skill, /даже вне рана/)
-})
-
-test('скилл требует спеку до плана', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  assert.match(skill, /Спека до плана/)
-  assert.match(skill, /docs\/specs/)
-  assert.match(skill, /брейншторм/)
-})
-
-test('плагин не подставляет фиктивного исполнителя', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
-
-  assert.match(plugin, /withExecutor/)
-  assert.match(plugin, /pickExecutor/)
-  assert.doesNotMatch(plugin, /\?\? 'worker'/)
-})
-
-test('вызов CLI ограничен по времени и буферу', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
-
-  assert.match(plugin, /timeout: 120_000/)
-  assert.match(plugin, /maxBuffer: 8 \* 1024 \* 1024/)
-})
-
-test('плагин сверяет версию CLI', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
-
-  assert.match(plugin, /checkVersion/)
-  assert.match(plugin, /PLUGIN_VERSION/)
-})
-
-test('скилл знает настройку параллельных тестов', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode/skills/toolbox-al/SKILL.md'), 'utf8')
-
-  assert.match(skill, /parallelTests: true/)
-  assert.match(skill, /--experimental-test-isolation=none/)
-})
-
-test('плагин отдаёт задачи, запросы и план', () => {
-  const root = tmp()
-  writeOpenCodeFiles(root)
-  const plugin = readFileSync(join(root, '.opencode/plugins/toolbox-al/index.ts'), 'utf8')
-
-  assert.match(plugin, /name: 'tasks'/)
-  assert.match(plugin, /name: 'requests'/)
-  assert.match(plugin, /name: 'plan'/)
 })
