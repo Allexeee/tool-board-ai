@@ -9,7 +9,7 @@ import { runGit } from '../../src/core/git.ts'
 import { initProject } from '../../src/core/project.ts'
 import { getActiveRun, listRunCards } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
-import { makeRepo } from '../helpers/repo.ts'
+import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
 const bin = resolve('bin/board.ts')
 
@@ -38,6 +38,7 @@ function json(dir: string, args: string[]): Record<string, unknown> {
 function repoProject(t: { after: (fn: () => void) => void }): { root: string; cardId: string } {
   const repo = makeRepo()
   initProject(repo.root)
+  commitGenerated(repo.root)
   const db = openDb(join(repo.root, '.board', 'board.db'))
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
   const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })

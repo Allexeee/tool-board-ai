@@ -17,7 +17,7 @@ import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import type { Card } from '../../src/core/types.ts'
 import { seedCard } from '../helpers/board.ts'
-import { makeRepo } from '../helpers/repo.ts'
+import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
 interface RepoBoard {
   root: string
@@ -28,6 +28,7 @@ interface RepoBoard {
 function repoBoard(t: { after: (fn: () => void) => void }): RepoBoard {
   const repo = makeRepo()
   initProject(repo.root)
+  commitGenerated(repo.root)
   const db = openDb(join(repo.root, '.board', 'board.db'))
   t.after(() => {
     db.close()

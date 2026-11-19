@@ -11,7 +11,7 @@ import { blockCard, finishCard, takeCard, touchCard } from '../../src/core/lifec
 import { initProject } from '../../src/core/project.ts'
 import { endRun, getActiveRun, listRunCards, nextCard, startRun } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
-import { makeRepo } from '../helpers/repo.ts'
+import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
 type Board = ReturnType<typeof makeBoard>
 
@@ -25,6 +25,7 @@ function board(t: { after: (fn: () => void) => void }): Board {
 function repoBoard(t: { after: (fn: () => void) => void }): { root: string; db: DatabaseSync } {
   const repo = makeRepo()
   initProject(repo.root)
+  commitGenerated(repo.root)
   const db = openDb(join(repo.root, '.board', 'board.db'))
   t.after(() => {
     db.close()

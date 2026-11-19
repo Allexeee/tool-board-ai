@@ -8,6 +8,7 @@
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { openDb } from './db.ts'
+import { ensureTerminology } from './terminology.ts'
 
 export interface Project {
   root: string
@@ -135,6 +136,11 @@ export function initProject(dir: string): { created: string[]; root: string } {
 
   const dbPath = join(boardDir, 'board.db')
   if (!existsSync(dbPath)) created.push('.board/board.db')
+
+  if (!existsSync(join(docsDir, 'terminology.md'))) {
+    ensureTerminology(root)
+    created.push('docs/board/terminology.md')
+  }
 
   const db = openDb(dbPath)
   try {

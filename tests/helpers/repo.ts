@@ -41,3 +41,9 @@ export function makeRepo(): RepoFixture {
     },
   }
 }
+
+/** Коммитит сгенерированные initProject файлы (docs/board), чтобы дерево было чистым. */
+export function commitGenerated(root: string, message = 'chore: board init'): void {
+  git(root, ['add', '.'])
+  git(root, ['commit', '-m', message])
+}
