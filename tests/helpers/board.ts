@@ -49,13 +49,16 @@ export function seedExecutor(
 export interface SeedCardInput extends Partial<NewCardInput> {
   phase?: CardPhase
   status?: CardStatus
+  importance?: number | null
+  urgency?: number | null
+  position?: number | null
   waiveDeps?: boolean
 }
 
 /**
  * Карточка для теста: по умолчанию `UI`/`dev` от имени владельца.
- * Фазу, статус и waive_deps можно выставить напрямую: createCard умеет только
- * начальные состояния, а тестам нужны произвольные.
+ * Фазу, статус, оценки, позицию и waive_deps можно выставить напрямую:
+ * createCard умеет только начальные состояния, а тестам нужны произвольные.
  */
 export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
   const card = createCard(db, {
@@ -67,7 +70,7 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
   })
 
   const sets: string[] = []
-  const params: Array<string | number> = []
+  const params: Array<string | number | null> = []
   if (input.phase !== undefined) {
     sets.push('phase = ?')
     params.push(input.phase)
@@ -75,6 +78,18 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
   if (input.status !== undefined) {
     sets.push('status = ?')
     params.push(input.status)
+  }
+  if (input.importance !== undefined) {
+    sets.push('importance = ?')
+    params.push(input.importance)
+  }
+  if (input.urgency !== undefined) {
+    sets.push('urgency = ?')
+    params.push(input.urgency)
+  }
+  if (input.position !== undefined) {
+    sets.push('position = ?')
+    params.push(input.position)
   }
   if (input.waiveDeps !== undefined) {
     sets.push('waive_deps = ?')

@@ -1,0 +1,226 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import type { DatabaseSync } from 'node:sqlite'
+import { getCard } from '../../src/core/cards.ts'
+import {
+  insertIntoQueue,
+  listQueue,
+  moveCard,
+  reorderQueue,
+  score,
+} from '../../src/core/queue.ts'
+import type { Card, CardPhase, CardStatus } from '../../src/core/types.ts'
+import { makeBoard, seedCard } from '../helpers/board.ts'
+
+type Board = ReturnType<typeof makeBoard>
+
+function board(t: { after: (fn: () => void) => void }): Board {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  return fixture
+}
+
+/** Задача с оценкой: важность и срочность задают score = importance × urgency. */
+function task(
+  db: DatabaseSync,
+  input: {
+    importance?: number | null
+    urgency?: number | null
+    status?: CardStatus
+    phase?: CardPhase
+    position?: number | null
+    group?: string
+    skill?: string
+    holder?: string
+  } = {},
+): Card {
+  const card = seedCard(db, {
+    phase: input.phase ?? 'task',
+    status: input.status ?? 'ready',
+    importance: input.importance ?? 0,
+    urgency: input.urgency ?? 0,
+    position: input.position,
+    group: input.group,
+    skill: input.skill,
+  })
+  if (input.holder !== undefined) {
+    db.prepare('update cards set holder = ? where id = ?').run(input.holder, card.id)
+    return getCard(db, card.id)!
+  }
+  return card
+}
+
+const ids = (cards: Card[]): string[] => cards.map((card) => card.id)
+const positions = (cards: Card[]): Array<number | null> => cards.map((card) => card.position)
+
+test('оценка — importance × urgency, пустые оценки считаются нулём', (t) => {
+  const { db } = board(t)
+
+  const high = task(db, { importance: 3, urgency: 3 })
+  const low = task(db, { importance: 1, urgency: 1 })
+  const zero = task(db, { importance: 0, urgency: 3 })
+  const empty = seedCard(db)
+
+  assert.equal(score(high), 9)
+  assert.equal(score(low), 1)
+  assert.equal(score(zero), 0)
+  assert.equal(score(empty), 0)
+})
+
+test('вставка ставит карточки по оценке и нумерует позиции с 1', (t) => {
+  const { db } = board(t)
+  const low = task(db, { importance: 1, urgency: 1 }) // 1
+  const high = task(db, { importance: 3, urgency: 3 }) // 9
+  const mid = task(db, { importance: 2, urgency: 2 }) // 4
+
+  insertIntoQueue(db, low.id)
+  insertIntoQueue(db, high.id)
+  insertIntoQueue(db, mid.id)
+
+  const queue = listQueue(db)
+  assert.deepEqual(ids(queue), [high.id, mid.id, low.id])
+  assert.deepEqual(positions(queue), [1, 2, 3])
+})
+
+test('равные оценки встают после всех равных, то есть в конец группы', (t) => {
+  const { db } = board(t)
+  const first = task(db, { importance: 2, urgency: 2 })
+  const second = task(db, { importance: 1, urgency: 4 })
+  const third = task(db, { importance: 2, urgency: 2 })
+
+  insertIntoQueue(db, first.id)
+  insertIntoQueue(db, second.id)
+  insertIntoQueue(db, third.id)
+
+  assert.deepEqual(ids(listQueue(db)), [first.id, second.id, third.id])
+})
+
+test('карточка с наибольшей оценкой встаёт в начало, повторная вставка — no-op', (t) => {
+  const { db } = board(t)
+  const low = task(db, { importance: 1, urgency: 1 })
+  const best = task(db, { importance: 3, urgency: 3 })
+
+  insertIntoQueue(db, low.id)
+  insertIntoQueue(db, best.id)
+
+  assert.deepEqual(ids(listQueue(db)), [best.id, low.id])
+
+  insertIntoQueue(db, best.id)
+  assert.deepEqual(ids(listQueue(db)), [best.id, low.id])
+  assert.deepEqual(positions(listQueue(db)), [1, 2])
+})
+
+test('в очередь ставятся только задачи в waiting или ready', (t) => {
+  const { db } = board(t)
+  const request = task(db, { phase: 'request', status: 'new' })
+  const approval = task(db, { phase: 'task', status: 'approval' })
+  const done = task(db, { phase: 'task', status: 'done' })
+
+  assert.throws(() => insertIntoQueue(db, 'UI-999'), /не найдена/)
+  assert.throws(() => insertIntoQueue(db, request.id), /запрос/)
+  assert.throws(() => insertIntoQueue(db, approval.id), /waiting или ready/)
+  assert.throws(() => insertIntoQueue(db, done.id), /waiting или ready/)
+  assert.equal(listQueue(db).length, 0)
+})
+
+test('listQueue показывает все статусы очереди и не показывает approval, done и запросы', (t) => {
+  const { db } = board(t)
+  const visible: CardStatus[] = ['waiting', 'ready', 'booked', 'in_progress', 'blocked', 'review']
+  const queue = visible.map((status, index) =>
+    task(db, { status, position: index + 1, importance: 1, urgency: 1 }),
+  )
+
+  const hidden = [
+    task(db, { phase: 'request', status: 'new', position: 7 }),
+    task(db, { phase: 'task', status: 'approval', position: 8 }),
+    task(db, { phase: 'task', status: 'done', position: 9 }),
+    task(db, { phase: 'task', status: 'cancelled', position: 10 }),
+  ]
+
+  const listed = ids(listQueue(db))
+  assert.deepEqual(listed, ids(queue))
+  for (const card of hidden) assert.ok(!listed.includes(card.id), card.id)
+  assert.equal(listQueue(db, { status: ['done'] }).length, 0)
+})
+
+test('moveCard переставляет наверх, вниз и перед карточкой, позиции перенумерованы', (t) => {
+  const { db } = board(t)
+  const a = task(db, { importance: 3, urgency: 3 })
+  const b = task(db, { importance: 2, urgency: 3 })
+  const c = task(db, { importance: 1, urgency: 3 })
+  const d = task(db, { importance: 0, urgency: 3 })
+  for (const card of [a, b, c, d]) insertIntoQueue(db, card.id)
+  assert.deepEqual(ids(listQueue(db)), [a.id, b.id, c.id, d.id])
+
+  moveCard(db, d.id, { top: true })
+  assert.deepEqual(ids(listQueue(db)), [d.id, a.id, b.id, c.id])
+  assert.deepEqual(positions(listQueue(db)), [1, 2, 3, 4])
+
+  moveCard(db, d.id, { bottom: true })
+  assert.deepEqual(ids(listQueue(db)), [a.id, b.id, c.id, d.id])
+
+  moveCard(db, d.id, { before: b.id })
+  assert.deepEqual(ids(listQueue(db)), [a.id, d.id, b.id, c.id])
+  assert.deepEqual(positions(listQueue(db)), [1, 2, 3, 4])
+
+  moveCard(db, c.id, { before: a.id })
+  assert.deepEqual(ids(listQueue(db)), [c.id, a.id, d.id, b.id])
+})
+
+test('moveCard отказывает вне очереди, без цели и с чужой целью', (t) => {
+  const { db } = board(t)
+  const queued = task(db, { importance: 2, urgency: 2 })
+  insertIntoQueue(db, queued.id)
+
+  const approval = task(db, { status: 'approval' })
+  assert.throws(() => moveCard(db, approval.id, { top: true }), /не в очереди/)
+  assert.throws(() => moveCard(db, 'UI-999', { top: true }), /не найдена/)
+  assert.throws(() => moveCard(db, queued.id, {}), /--before|--top|--bottom/)
+  assert.throws(() => moveCard(db, queued.id, { top: true, bottom: true }), /одно/)
+  assert.throws(() => moveCard(db, queued.id, { before: 'UI-999' }), /не найдена/)
+  assert.throws(() => moveCard(db, queued.id, { before: approval.id }), /не в очереди/)
+})
+
+test('reorderQueue сортирует по оценке, внутри равных сохраняет текущий порядок', (t) => {
+  const { db } = board(t)
+  const x = task(db, { importance: 2, urgency: 2 }) // 4
+  const y = task(db, { importance: 2, urgency: 2 }) // 4
+  const z = task(db, { importance: 3, urgency: 3 }) // 9
+
+  insertIntoQueue(db, x.id)
+  insertIntoQueue(db, y.id)
+  insertIntoQueue(db, z.id)
+  assert.deepEqual(ids(listQueue(db)), [z.id, x.id, y.id])
+
+  moveCard(db, y.id, { top: true })
+  assert.deepEqual(ids(listQueue(db)), [y.id, z.id, x.id])
+
+  reorderQueue(db)
+  assert.deepEqual(ids(listQueue(db)), [z.id, y.id, x.id])
+  assert.deepEqual(positions(listQueue(db)), [1, 2, 3])
+})
+
+test('listQueue фильтрует по статусу, группе, навыку, держателю и лимиту', (t) => {
+  const { db } = board(t)
+  const ui = task(db, { importance: 3, urgency: 3, holder: 'developer' })
+  const uiWaiting = task(db, { status: 'waiting', importance: 2, urgency: 2, group: 'UI' })
+  const im = task(db, {
+    importance: 1,
+    urgency: 3,
+    group: 'IM',
+    skill: 'marketing',
+    holder: 'marketer',
+  })
+
+  insertIntoQueue(db, ui.id)
+  insertIntoQueue(db, uiWaiting.id)
+  insertIntoQueue(db, im.id)
+
+  assert.deepEqual(ids(listQueue(db, { group: 'UI' })), [ui.id, uiWaiting.id])
+  assert.deepEqual(ids(listQueue(db, { skill: 'marketing' })), [im.id])
+  assert.deepEqual(ids(listQueue(db, { holder: 'developer' })), [ui.id])
+  assert.deepEqual(ids(listQueue(db, { status: ['waiting'] })), [uiWaiting.id])
+  assert.deepEqual(ids(listQueue(db, { limit: 2 })), [ui.id, uiWaiting.id])
+  assert.deepEqual(ids(listQueue(db, { limit: 0 })), [])
+  assert.deepEqual(ids(listQueue(db, { status: [] })), [])
+})
