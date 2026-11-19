@@ -645,6 +645,14 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
     if (card.status !== 'in_progress') {
       throw new UserError(3, `карточка ${card.id} не в работе: ${card.status}`)
     }
+    // Переоткрытая зависимость не даёт сдать работу, пока не вернётся в review/done.
+    const unmet = listDeps(db, card.id).filter((dep) => !isSatisfied(db, dep))
+    if (unmet.length > 0) {
+      throw new UserError(
+        3,
+        `зависимость ${unmet.join(', ')} карточки ${card.id} не закрыта: finish невозможен`,
+      )
+    }
     if (input.noMerge && !card.needsMerge) {
       throw new UserError(3, `--no-merge применим только к needs_merge=true (карточка ${card.id})`)
     }

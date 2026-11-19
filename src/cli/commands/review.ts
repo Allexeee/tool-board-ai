@@ -1,44 +1,174 @@
-﻿import { findProject } from '../../core/project.ts'
+﻿import { readFileSync } from 'node:fs'
 import { openDb } from '../../core/db.ts'
-import { formatDigest, reviewDigest } from '../../core/digest.ts'
-import { formatWeek, reviewWeek } from '../../core/week.ts'
-import { submitReview, type Verdict } from '../../core/reviews.ts'
+import { listDiscussion } from '../../core/discussion.ts'
+import { findProject } from '../../core/project.ts'
+import { listRefs, type Ref } from '../../core/refs.ts'
+import {
+  addFinding,
+  listReviewCards,
+  submitVerdict,
+  type FindingInput,
+} from '../../core/review.ts'
+import { listSteps, type Step } from '../../core/steps.ts'
+import type { Card, Severity } from '../../core/types.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
-import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
+import { ok } from '../output.ts'
+
+/** Пакет ревью §9.2: всё, что нужно ревьюеру по одной карточке. */
+interface ReviewItem {
+  id: string
+  title: string
+  body: string
+  status: Card['status']
+  skill: string | null
+  needsMerge: boolean
+  scope: string[]
+  branch: string | null
+  mergeCommit: string | null
+  steps: Step[]
+  refs: Ref[]
+  discussion: ReturnType<typeof listDiscussion>
+  diff: string | null
+}
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
-  if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
+  if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
 
-  // digest — не вердикт, а карта ревью: что не выпущено и что в этом опасного
-  if (args.positionals[0] === 'digest') {
-    const stages = reviewDigest(db, { root: project.root, config: project.config })
-    ok(stages, formatDigest(stages))
+  const list = (args: ParsedArgs): number => {
+    const items: ReviewItem[] = listReviewCards(db).map((card) => ({
+      id: card.id,
+      title: card.title,
+      body: card.body,
+      status: card.status,
+      skill: card.skill,
+      needsMerge: card.needsMerge,
+      scope: card.scope,
+      branch: card.branch,
+      mergeCommit: card.mergeCommit,
+      steps: listSteps(db, card.id),
+      refs: listRefs(db, card.id),
+      discussion: listDiscussion(db, card.id),
+      diff: card.mergeCommit ? `git diff ${card.mergeCommit}^1 ${card.mergeCommit}` : null,
+    }))
+    ok(items, formatReviewList(items))
     return 0
   }
 
-  // week — поток, а не список: сколько стоило, что переоткрывали и сколько срочного
-  if (args.positionals[0] === 'week') {
-    const days = Number(stringFlag(args, 'days') ?? 7)
-    const report = reviewWeek(db, { days: Number.isFinite(days) && days > 0 ? days : 7 })
-    ok(report, formatWeek(report))
+  const finding = (args: ParsedArgs): number => {
+    const cardId = args.positionals[0]
+    if (!cardId) {
+      throw new UserError(3, 'использование: board review finding UI-1 --severity critical --text «...»')
+    }
+    const severity = stringFlag(args, 'severity') as Severity | undefined
+    if (!severity) throw new UserError(3, 'нужен --severity critical|important|other')
+    const text = stringFlag(args, 'text')
+    if (!text) throw new UserError(3, 'нужен --text «текст находки»')
+
+    const created = addFinding(db, {
+      cardId,
+      reviewer: stringFlag(args, 'reviewer') ?? stringFlag(args, 'as') ?? 'owner',
+      severity,
+      text,
+    })
+    ok(created, `${created.id} создана: находка ${severity} из ревью ${cardId}`)
     return 0
   }
 
-  const taskId = args.positionals[0]
-  const reviewer = stringFlag(args, 'as')
-  const verdict = stringFlag(args, 'verdict') as Verdict | undefined
-  if (!taskId || !reviewer || !verdict) {
-    throw new UserError(
-      3,
-      'использование: review digest | review F1.S1-1 --as w2 --verdict approved|rejected [--note]',
+  const submit = (args: ParsedArgs): number => {
+    const cardId = args.positionals[0]
+    if (!cardId) {
+      throw new UserError(
+        3,
+        'использование: board review submit UI-1 --verdict done|reopen --note «...» --reviewer reviewer-1 [--findings findings.json]',
+      )
+    }
+    const verdict = stringFlag(args, 'verdict')
+    if (verdict !== 'done' && verdict !== 'reopen') {
+      throw new UserError(3, 'нужен --verdict done|reopen')
+    }
+    const reviewer = stringFlag(args, 'reviewer') ?? stringFlag(args, 'as')
+    if (!reviewer) throw new UserError(3, 'нужен --reviewer <id> ревьюера')
+
+    const findingsPath = stringFlag(args, 'findings')
+    const findings = findingsPath ? parseFindings(findingsPath) : undefined
+
+    const result = submitVerdict(db, {
+      cardId,
+      reviewer,
+      verdict,
+      note: stringFlag(args, 'note') ?? '',
+      findings,
+    })
+    ok(
+      result,
+      `${cardId} ${verdict}${result.findings.length > 0 ? `; находок: ${result.findings.length}` : ''}`,
     )
+    return 0
   }
 
-  const review = submitReview(db, { taskId, reviewer, verdict, note: stringFlag(args, 'note') })
-  ok(review, `${review.taskId}  ${review.verdict}${review.comments ? ': ' + review.comments : ''}`)
-  return 0
+  try {
+    if (args.sub === 'list') return list(args)
+    if (args.sub === 'finding') return finding(args)
+    if (args.sub === 'submit') return submit(args)
+    throw new UserError(3, 'использование: board review list|finding|submit')
+  } finally {
+    db.close()
+  }
 }
 
+/** `findings.json`: массив `{ severity, text, skill?, scope? }` (§9.6). */
+function parseFindings(path: string): FindingInput[] {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    throw new UserError(3, `файл ${path} не найден`)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new UserError(3, `файл ${path}: невалидный JSON`)
+  }
+  if (!Array.isArray(parsed)) throw new UserError(3, `файл ${path}: ожидался массив находок`)
+
+  return parsed.map((item, index) => {
+    if (typeof item !== 'object' || item === null) {
+      throw new UserError(3, `файл ${path}: находка #${index + 1} — не объект`)
+    }
+    const finding = item as FindingInput
+    if (!finding.severity || !finding.text) {
+      throw new UserError(3, `файл ${path}: у находки #${index + 1} нет severity или text`)
+    }
+    return finding
+  })
+}
+
+function value(text: string | null): string {
+  return text === null || text === '' ? '—' : text
+}
+
+function formatReviewList(items: ReviewItem[]): string {
+  if (items.length === 0) return 'карточек на ревью нет'
+  return items
+    .map((item) => {
+      const lines = [
+        `${item.id} · ${item.title}`,
+        `  навык: ${value(item.skill)} · мерж: ${item.needsMerge ? 'да' : 'нет'} · scope: ${item.scope.length > 0 ? item.scope.join(', ') : '—'}`,
+        `  ветка: ${value(item.branch)} · merge: ${value(item.mergeCommit)}`,
+        `  diff: ${item.diff ?? '—'}`,
+      ]
+      if (item.body !== '') lines.push(`  body: ${item.body}`)
+      for (const step of item.steps) {
+        lines.push(`  [${step.done ? 'x' : ' '}] ${step.seq}. ${step.text}`)
+      }
+      for (const ref of item.refs) {
+        lines.push(`  ref ${ref.id}. ${ref.kind} ${ref.value}`)
+      }
+      return lines.join('\n')
+    })
+    .join('\n\n')
+}

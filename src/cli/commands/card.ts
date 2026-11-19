@@ -18,6 +18,7 @@ import {
 } from '../../core/lifecycle.ts'
 import { findProject } from '../../core/project.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
+import { submitVerdict } from '../../core/review.ts'
 import {
   addStep,
   doneStep,
@@ -376,6 +377,32 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const verdict = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) {
+      throw new UserError(
+        3,
+        'использование: board card verdict UI-1 --done|--reopen --note «...» --as reviewer-1',
+      )
+    }
+    const done = boolFlag(args, 'done')
+    const reopened = boolFlag(args, 'reopen')
+    if (done === reopened) {
+      throw new UserError(3, 'укажите ровно одно: --done или --reopen')
+    }
+    const reviewer = stringFlag(args, 'as')
+    if (!reviewer) throw new UserError(3, 'нужен --as <ревьюер>')
+
+    const result = submitVerdict(db, {
+      cardId: id,
+      reviewer,
+      verdict: done ? 'done' : 'reopen',
+      note: stringFlag(args, 'note') ?? '',
+    })
+    ok(result, `${id} ${result.card.status}`)
+    return 0
+  }
+
   try {
     if (args.sub === 'add') return add(args)
     if (args.sub === 'list') return list(args)
@@ -388,12 +415,13 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'submit') return submit(args)
     if (args.sub === 'approve') return approve(args)
     if (args.sub === 'reject') return reject(args)
+    if (args.sub === 'verdict') return verdict(args)
     if (args.sub === 'done') return done(args)
     if (args.sub === 'cancel') return cancel(args)
     if (args.sub === 'reopen') return reopen(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|approve|reject|done|cancel|reopen',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|approve|reject|verdict|done|cancel|reopen',
     )
   } finally {
     db.close()
