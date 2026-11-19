@@ -4,7 +4,7 @@ import { createCard, editCard, getCard, type CardPatch } from './cards.ts'
 import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { addDep, isSatisfied, listDeps, refreshReadiness } from './deps.ts'
-import { openQuestions } from './discussion.ts'
+import { comment, openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
@@ -189,6 +189,9 @@ export function rejectCard(
        updated_at = ? where id = ?`,
     ).run(at, card.id)
 
+    // Причина отказа остаётся в обсуждении, как требует §10.1.
+    comment(db, { cardId: card.id, author: actor, text: reason })
+
     const updated = getCard(db, card.id)!
     appendEvent(db, {
       type: 'card.rejected',
@@ -264,8 +267,8 @@ export function blockCard(
     const note = input.note?.trim() || null
     const at = nowIso()
     db.prepare(
-      `update cards set status = 'blocked', holder = null, lease_until = null, updated_at = ?
-       where id = ?`,
+      `update cards set status = 'blocked', holder = null, run_id = null, lease_until = null,
+       updated_at = ? where id = ?`,
     ).run(at, card.id)
 
     const updated = getCard(db, card.id)!
@@ -350,8 +353,11 @@ export function reopenCard(
        previous_holder = ?, holder = null, updated_at = ? where id = ?`,
     ).run(status, card.holder, at, card.id)
 
-    if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
-    moveCard(db, card.id, { top: true })
+    // Owner-карточка не встаёт в очередь: её закрывает и переоткрывает владелец.
+    if (card.skill !== OWNER) {
+      if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
+      moveCard(db, card.id, { top: true })
+    }
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {

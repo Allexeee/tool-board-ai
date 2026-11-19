@@ -1,7 +1,7 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
 import { createCard, editCard, getCard, listCards, type CardFilter, type CardPatch } from '../../core/cards.ts'
-import { openDb } from '../../core/db.ts'
+import { openDb, tx } from '../../core/db.ts'
 import { addDep, isSatisfied, listDeps, removeDep } from '../../core/deps.ts'
 import { listDiscussion, type Discussion } from '../../core/discussion.ts'
 import { listEvents, type EventRecord } from '../../core/events.ts'
@@ -272,11 +272,20 @@ export default async function command(args: ParsedArgs) {
     const actor = stringFlag(args, 'as')
     if (!actor) throw new UserError(3, 'нужен --as <исполнитель>')
 
-    const card = shapeCard(db, { id, actor })
-
+    // Разбираем и проверяем файл до любых изменений: невалидный JSON или
+    // новая карточка без группы оставляют карточку в покое.
     const from = stringFlag(args, 'from')
-    if (from) {
-      const result = applyShapeFile(db, { id, actor, file: parseShapeFile(from) })
+    const file = from ? parseShapeFile(from) : undefined
+
+    // shape + apply — одна транзакция: ошибка внутри applyShapeFile
+    // откатывает и переход в shaping.
+    const result = tx(db, () => {
+      const shaped = shapeCard(db, { id, actor })
+      if (!file) return { card: shaped, newCards: [] as Card[] }
+      return applyShapeFile(db, { id, actor, file })
+    })
+
+    if (file) {
       const created = result.newCards.length > 0
         ? `; создано: ${result.newCards.map((item) => item.id).join(', ')}`
         : ''
@@ -284,7 +293,7 @@ export default async function command(args: ParsedArgs) {
       return 0
     }
 
-    ok(card, `${card.id} в разборе: ${card.title}`)
+    ok(result.card, `${result.card.id} в разборе: ${result.card.title}`)
     return 0
   }
 
@@ -415,7 +424,16 @@ function parseShapeFile(path: string): ShapeFile {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new UserError(3, `файл ${path}: ожидался объект JSON`)
   }
-  return parsed as ShapeFile
+
+  const file = parsed as ShapeFile
+  // Минимальная проверка до изменения карточки: новая карточка без группы
+  // не должна оставлять карточку в shaping.
+  for (const item of file.new_cards ?? []) {
+    if (typeof item !== 'object' || item === null || !item.group?.trim()) {
+      throw new UserError(3, 'у новой карточки нет группы')
+    }
+  }
+  return file
 }
 
 /** Пара --x/--no-x: одновременный вызов — ошибка, иначе непонятно, что выбрали. */

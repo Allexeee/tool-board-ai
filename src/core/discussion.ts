@@ -34,6 +34,12 @@ export interface AnswerInput {
   text: string
 }
 
+export interface CommentInput {
+  cardId: string
+  author: string
+  text: string
+}
+
 interface Row {
   id: number
   card_id: string
@@ -137,6 +143,31 @@ export function answer(db: DatabaseSync, input: AnswerInput): Discussion {
       after: reply,
     })
     return reply
+  })
+}
+
+/** Комментарий в обсуждение карточки: не вопрос, ответа не ждёт. */
+export function comment(db: DatabaseSync, input: CommentInput): Discussion {
+  return tx(db, () => {
+    requireCard(db, input.cardId)
+    const author = requiredText(input.author, 'нужен автор комментария')
+    const text = requiredText(input.text, 'нужен текст комментария')
+
+    const result = db
+      .prepare(
+        'insert into discussion (card_id, author, kind, text, status, answer_to, created_at, answered_at) ' +
+          "values (?, ?, 'comment', ?, 'closed', null, ?, null)",
+      )
+      .run(input.cardId, author, text, nowIso())
+
+    const item = getItem(db, Number(result.lastInsertRowid))
+    appendEvent(db, {
+      type: 'discussion.comment',
+      actor: author,
+      subject: input.cardId,
+      after: item,
+    })
+    return item
   })
 }
 

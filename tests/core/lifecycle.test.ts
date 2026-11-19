@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createCard, editCard, getCard } from '../../src/core/cards.ts'
 import { addDep, listDeps } from '../../src/core/deps.ts'
-import { ask, answer, openQuestions } from '../../src/core/discussion.ts'
+import { ask, answer, listDiscussion, openQuestions } from '../../src/core/discussion.ts'
 import { listEvents } from '../../src/core/events.ts'
 import { nowIso } from '../../src/core/clock.ts'
 import {
@@ -193,6 +193,11 @@ test('reject возвращает в new, сохраняя содержимое,
   assert.equal(event.type, 'card.rejected')
   assert.equal(event.actor, 'owner')
   assert.equal(event.note, 'переделай')
+
+  // §10.1: причина отказа остаётся и в обсуждении.
+  const comment = listDiscussion(db, card.id).find((item) => item.kind === 'comment')!
+  assert.equal(comment.author, 'owner')
+  assert.equal(comment.text, 'переделай')
 })
 
 test('ownerDone закрывает owner-карточку без бронирования', (t) => {
@@ -351,4 +356,27 @@ test('reopen с незакрытой зависимостью ставит waiti
   const reopened = reopenCard(db, { id: card.id, actor: 'owner', reason: 'снова' })
   assert.equal(reopened.status, 'waiting')
   assert.equal(reopened.attempt, 2)
+})
+
+test('reopen owner-карточки не ставит её в очередь', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { skill: 'owner', group: 'OPS', title: 'VK' })
+  ownerDone(db, { id: card.id, actor: 'owner', summary: 'готово' })
+
+  const reopened = reopenCard(db, { id: card.id, actor: 'owner', reason: 'переделать' })
+  assert.equal(reopened.status, 'ready')
+  assert.equal(reopened.attempt, 2)
+  assert.equal(reopened.position, null)
+})
+
+test('block очищает run_id и аренду', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'in_progress' })
+  db.prepare("update cards set holder = ?, run_id = 'RUN-1', lease_until = ? where id = ?")
+    .run('developer', nowIso(), card.id)
+
+  const blocked = blockCard(db, { id: card.id, actor: 'developer', reason: 'стоп' })
+  assert.equal(blocked.runId, null)
+  assert.equal(blocked.leaseUntil, null)
+  assert.equal(blocked.holder, null)
 })
