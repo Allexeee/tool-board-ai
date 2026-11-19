@@ -1,6 +1,6 @@
 {
   "name": "toolbox-al",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "files": [
@@ -9,7 +9,6 @@
     "README.md"
   ],
   "bin": {
-    "toolbox-al": "bin/toolbox-al.ts",
     "board": "bin/board.ts"
   },
   "scripts": {
