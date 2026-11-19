@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
+import { nowIso } from './clock.ts'
 import { scopeAllows } from './scope.ts'
 import type { Card } from './types.ts'
 
@@ -254,6 +256,26 @@ export function isAncestor(root: string, commit: string, ref: string): boolean {
     if (error instanceof GitCommandError && error.status === 1) return false
     throw error
   }
+}
+
+/**
+ * Пересчитывает кэш `in_dev`/`in_main` из git (§7.3): merge-коммит является
+ * предком `dev`/`main`? Без merge-коммита оба флага сбрасываются. Значения
+ * кэшируются в карточке; git остаётся источником истины.
+ */
+export function refreshMergeState(db: DatabaseSync, root: string, card: Card): Card {
+  const inDev = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, 'dev')
+  const inMain = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, 'main')
+  const at = nowIso()
+
+  db.prepare('update cards set in_dev = ?, in_main = ?, updated_at = ? where id = ?').run(
+    inDev ? 1 : 0,
+    inMain ? 1 : 0,
+    at,
+    card.id,
+  )
+
+  return { ...card, inDev, inMain, updatedAt: at }
 }
 
 /**

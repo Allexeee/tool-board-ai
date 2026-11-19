@@ -357,6 +357,7 @@ export default async function command(args: ParsedArgs) {
       actor: stringFlag(args, 'as') ?? 'owner',
       reason: stringFlag(args, 'reason') ?? '',
       waiveDeps: boolFlag(args, 'waive-dependents'),
+      root: project.root,
     })
     ok(card, `${card.id} отменена: ${card.title}`)
     return 0

@@ -13,6 +13,7 @@ import {
   mergeCommitFor,
   mergeToDev,
   outOfScope,
+  revertMerge,
   runGit,
   startCardBranch,
   syncWithDev,
@@ -307,8 +308,9 @@ export function blockCard(
 
 /**
  * Отмена: держатель — только свою, владелец — любую. Причина обязательна.
- * `waiveDeps` закрывает карточку для зависимых. Git-revert появится в задаче 10,
- * когда передан `root`.
+ * `waiveDeps` закрывает карточку для зависимых. Если передан `root` и у карточки
+ * есть `merge_commit` в dev, отмена создаёт revert-коммит (§7.8): конфликт
+ * останавливает команду и оставляет карточку в прежнем статусе.
  */
 export function cancelCard(
   db: DatabaseSync,
@@ -329,11 +331,20 @@ export function cancelCard(
       throw new UserError(3, `карточка ${card.id} уже отменена`)
     }
 
+    // Revert до записи статуса: конфликт откатывает транзакцию, карточка не меняется.
+    let revertedAt: string | null = null
+    let revertCommit: string | null = null
+    if (input.root && card.mergeCommit && card.inDev) {
+      revertCommit = revertMerge(input.root, card.mergeCommit)
+      revertedAt = nowIso()
+    }
+
     const at = nowIso()
     db.prepare(
       `update cards set status = 'cancelled', cancel_reason = ?, waive_deps = ?,
-       holder = null, run_id = null, lease_until = null, updated_at = ? where id = ?`,
-    ).run(reason, input.waiveDeps === true ? 1 : 0, at, card.id)
+       reverted_at = ?, revert_commit = ?, holder = null, run_id = null, lease_until = null,
+       updated_at = ? where id = ?`,
+    ).run(reason, input.waiveDeps === true ? 1 : 0, revertedAt, revertCommit, at, card.id)
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {
