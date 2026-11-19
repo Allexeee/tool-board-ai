@@ -98,12 +98,18 @@
 | `needs_merge` | нужен ли git-мерж |
 | `review_required` | нужен ли ревью-вердикт |
 | `scope` | JSON-массив glob-путей, за которые нельзя выходить |
+| `severity` | `critical`, `important`, `other` — у карточек-находок ревью |
+| `origin_card_id` | карточка, из ревью которой выросла находка |
+| `summary` | отчёт исполнителя при `finish`/`done` |
 | `holder` | кто держит карточку сейчас |
 | `run_id` | текущий забег |
 | `branch` | ветка карточки, `card/UI-1` |
+| `attempt` | номер попытки; после переоткрытия растёт |
 | `merge_commit` | последний merge-коммит в `dev` |
 | `in_dev` | merge-коммит является предком `dev` |
 | `in_main` | merge-коммит является предком `main` |
+| `reverted_at`, `revert_commit` | отмена уже влитой карточки |
+| `waive_deps` | отменённая карточка считается закрытой для зависимых |
 | `lease_until` | срок брони/разбора; продлевается `touch` |
 | `previous_holder` | кто держал до переоткрытия/отказа ревью |
 | `created_at`, `updated_at`, `shaped_at`, `approved_at`, `done_at` | время |
@@ -176,7 +182,8 @@ board card add --group IM --title "Статья про запуск" --skill mar
   `waiting`; зависимые в работе получают предупреждение, их `finish`
   блокируется, пока зависимость снова не станет `review`/`done`.
 - `cancelled` зависимость удовлетворяет только если владелец явно сказал
-  «считать закрытой»; по умолчанию зависимые блокируются с причиной.
+  «считать закрытой»: `cancel <ID> --waive-dependents --reason "..."` ставит
+  `waive_deps=1`. Иначе зависимые блокируются с причиной.
 
 ## 4. Статусы
 
@@ -211,6 +218,7 @@ in_progress ──finish──→ review (review_required) / done
 review ──done──→ done
 review ──reopen──→ ready (без закрепления за автором; previous_holder)
 done ──reopen──→ ready (с причиной)
+ready ──owner done──→ done (только для skill=owner)
 любой открытый ──cancel──→ cancelled
 ```
 
@@ -221,8 +229,8 @@ done ──reopen──→ ready (с причиной)
 - `shaping` — активный статус, но не забег. Держится lease; если разбирающий
   пропал, карточка возвращается в `new`.
 - Владелец может отменить любую карточку; исполнитель — только свою
-  `booked`/`in_progress` (с причиной). Отмена `done`/`review` требует причины
-  и блокирует release, если код уже в `dev`.
+  `booked`/`in_progress` (с причиной). Отмена `done`/`review` с кодом в `dev`
+  создаёт revert-коммит; до него release блокируется, после — нет.
 
 Причина обязательна у `block`, `cancel`, `reject`, `reopen`; `finish` требует
 краткий отчёт `--summary`. Каждый переход пишется в `events` с автором,
@@ -234,12 +242,26 @@ done ──reopen──→ ready (с причиной)
 
 - создаётся сразу в `ready`, без разбора и утверждения;
 - не бронируется и не переходит в `in_progress`;
-- владелец отмечает `done` одной командой;
+- владелец закрывает её командой `board card done UI-9 --summary "..."`;
 - `needs_merge` по умолчанию `false`;
-- видна в `now 0`.
+- не входит в очередь задач и `now 3`; живёт в `now 0`;
+- `importance`/`urgency`/`position` не нужны; порядок в `now 0` — по
+  `importance`, затем по времени создания.
 
 Если агент создал owner-карточку, она тоже появляется в `now 0`; владелец
 делает её и закрывает. Зависимые карточки ждут её `done`.
+
+Особые случаи:
+
+- Если при разборе обычного запроса поставить `skill=owner`, карточка всё
+  равно проходит утверждение владельцем; после approval она становится
+  owner-карточкой и не бронируется. Чтобы пропустить утверждение, создавай
+  owner-карточку сразу.
+- Навык карточки можно менять только до `submit`. После утверждения навык
+  неизменяем: отмени и создай новую карточку. Это не даёт owner-карточке
+  незаметно превратиться в задачу для агента.
+- Owner-карточка с `needs_merge=true` — ошибка: код идёт обычной карточкой
+  с навыком разработчика.
 
 ## 5. Очередь
 
@@ -320,12 +342,29 @@ board decision obsolete D7 --reason "неактуально после смен�
 ### 7.1 Изоляция
 
 - Репозиторий имеет `main` и `dev`.
-- Тулбокс создаёт worktree на исполнителя: `.worktrees/<executor-id>`.
-  Человек может работать в своём клоне; тогда worktree не создаётся.
-- Ветка на карточку: `card/<ID>` от свежего `dev`.
-- Один исполнитель — один worktree; карточки выполняются последовательно.
-  Если агенту нужно несколько параллельных сессий, worktree создаётся на
-  сессию (параметр `--worktree <path>`).
+- Worktree создаётся лениво, при первом `run start`/`take` исполнителя:
+  `.worktrees/<executor-id>`. Если каталог уже есть, он переиспользуется;
+  если в нём грязно — команда отказывает.
+- Ветка создаётся не при бронировании, а при `take`, от свежего `dev`:
+  `card/<ID>` для первой попытки, `card/<ID>-2` для второй и т.д.
+  Старая ветка после мержа и переоткрытия не удаляется — она остаётся в
+  истории; новая попытка идёт с новой ветки и нового `merge_commit`.
+- `take` переключает worktree на ветку карточки. `finish` оставляет ветку
+  как есть; следующий `take` переключит. `block`, `run end` и истечение
+  lease не удаляют ни ветку, ни worktree и не трогают незакоммиченные файлы.
+  `doctor` показывает грязные worktree; следующий держатель может
+  продолжить или взять `--fresh` (новая попытка).
+- Параллельные сессии: один активный забег на исполнителя. Для второй
+  сессии заводится отдельный executor-id с теми же навыками
+  (`developer-2`) и, при необходимости, свой `--worktree`.
+- База `.board/board.db` живёт в основном worktree. CLI, запущенный из
+  worktree, находит основной каталог через `git worktree list --porcelain`
+  или `git rev-parse --git-common-dir`; переменная `BOARD_HOME` перекрывает
+  поиск. В самом worktree отдельной базы нет.
+- Человек может работать в основном worktree или в worktree, созданном
+  тулбоксом. Если у него отдельный клон, он запускает CLI с
+  `BOARD_HOME=<основной проект>` и после ручного мержа делает
+  `finish --no-merge`; тулбокс проверит, что коммит уже в `dev`.
 
 ### 7.2 Finish
 
@@ -342,9 +381,12 @@ board decision obsolete D7 --reason "неактуально после смен�
 
 Для `needs_merge=false` шаги 2–5 пропускаются: карточка сразу `review`/`done`.
 
-Если `finish` запущен с `--no-merge`, тулбокс не мержит, а только проверяет,
-что `card/<ID>` уже является предком `dev`; иначе ошибка. Это аварийный путь
-для нестандартного мержа.
+Если `finish` запущен с `--no-merge`, тулбокс не мержит, но **не** снимает
+проверки: worktree должен быть чистым, diff — в `scope`, `needs_merge=true`,
+а ветка (или явно указанный `--merge-commit`) уже должна быть предком `dev`.
+Тулбокс ищет merge-коммит через `git log --merges --ancestry-path`; если не
+находит — ошибка. Записывается настоящий `merge_commit` и `in_dev=true`.
+Это аварийный путь для нестандартного мержа, а не способ обойти scope.
 
 ### 7.3 Состояние в git
 
@@ -354,9 +396,9 @@ board decision obsolete D7 --reason "неактуально после смен�
 необходимости. Источник истины по мержу — git; база хранит кэш.
 
 `dev опережает main на N карточек` — это количество карточек с
-`needs_merge=true`, `in_dev=true`, `in_main=false`, независимо от статуса.
-Карточки в `review` и в переоткрытии (`ready`/`in_progress`/`blocked`)
-считаются, потому что их код уже в `dev`.
+`needs_merge=true`, `in_dev=true`, `in_main=false`, `reverted_at is null`,
+независимо от статуса. Карточки в `review` и в переоткрытии
+(`ready`/`in_progress`/`blocked`) считаются, потому что их код уже в `dev`.
 
 ### 7.4 Review
 
@@ -367,21 +409,25 @@ board decision obsolete D7 --reason "неактуально после смен�
 - что проверять: шаги и текст карточки.
 
 Ревью не блокирует зависимости. Оно блокирует только `main`: `release`
-отказывается, пока есть карточки в `review` или переоткрытые карточки,
-чей код уже в `dev`.
+отказывается, пока в `dev` есть карточка в `review` или переоткрытая
+карточка, чей код уже в `dev`, и пока не закрыты критические находки ревью
+(§ 9.6).
 
 ### 7.5 Release
 
 `release` — команда владельца:
 
-1. Проверяет, что в `dev` нет карточек с `in_dev=true` и статусом не `done`
-   (review, ready-переоткрытие, in_progress-переоткрытие, blocked, cancelled).
-   Отменённая карточка в `dev` требует revert или явного
-   `release --force --reason "..."`; без этого релиз не проходит.
-2. Мержит `dev` в `main` с `--no-ff`.
-3. Обновляет `in_main` для всех карточек, чьи merge-коммиты стали предками
+1. Проверяет, что в `dev` нет карточек с `in_dev=true`, статусом не `done`
+   и без `reverted_at` (review, ready-переоткрытие, in_progress-переоткрытие,
+   blocked). Отменённая карточка в `dev` должна быть отменена через
+   `card cancel` с revert-коммитом; иначе релиз не проходит.
+2. Проверяет, что нет открытых карточек с `severity=critical` — даже если
+   они ещё не в `dev`. Критическая находка блокирует `main`, пока не станет
+   `done` или владелец явно не понизит её важность.
+3. Мержит `dev` в `main` с `--no-ff`.
+4. Обновляет `in_main` для всех карточек, чьи merge-коммиты стали предками
    `main`.
-4. Пишет событие релиза. Тег и changelog — опционально, по умолчанию нет.
+5. Пишет событие релиза. Тег и changelog — опционально, по умолчанию нет.
 
 После релиза все `done`-карточки в `main` остаются `done`; счётчик
 «dev опережает main» уменьшается.
@@ -390,7 +436,8 @@ board decision obsolete D7 --reason "неактуально после смен�
 
 Карточки без мержа (owner, маркетинг вне репозитория, внешние действия) не
 трогают git: нет ветки, нет worktree, нет `in_dev`/`in_main`. `review` для них
-проверяет артефакт по ссылкам и шагам. `release` их не касается.
+проверяет артефакт по ссылкам и шагам. `release` их не касается: карточка в
+`review` с `needs_merge=false` не блокирует `main`.
 
 ### 7.7 Ограничения
 
@@ -399,6 +446,29 @@ board decision obsolete D7 --reason "неактуально после смен�
 - Shared-файлы (`package.json`, конфиги) должны быть в `scope` той карточки,
   которая их меняет; иначе `finish` не пропустит.
 - Конфликты в shared-файлах решает агент; тулбокс только останавливает мерж.
+
+### 7.8 Отмена и переоткрытие
+
+Статус карточки меняется, а git получает новый коммит. Это не переписывание
+истории.
+
+- **Отмена `in_dev`-карточки.** `card cancel UI-1 --reason "..."` создаёт
+  revert-коммит в `dev` (`git revert -m 1 <merge_commit>`), записывает
+  `reverted_at`/`revert_commit`, статус `cancelled`. Конфликт revert'а
+  останавливает команду; карточка остаётся в прежнем статусе, конфликт
+  разруливает агент. `in_dev`/`in_main` остаются историческими флагами;
+  счётчики и release смотрят на `reverted_at`. Release её больше не блокирует.
+- **Отмена `in_main`-карточки.** Тот же revert-коммит в `dev`; после
+  ближайшего release revert попадает в `main`. Статус `cancelled`,
+  `reverted_at` записан. Для отменённых карточек `in_dev`/`in_main` —
+  исторические; счётчики и release смотрят на `reverted_at`.
+- **Переоткрытие.** `card reopen UI-1 --reason "..."` ставит `ready`,
+  `attempt++`, `previous_holder`, очищает `reverted_at`; код уже в
+  `dev`/`main` остаётся. Новая попытка — новая ветка `card/UI-1-<attempt>`
+  от свежего `dev`; `finish` обновит `merge_commit`. Release блокируется,
+  пока карточка снова не станет `done`.
+- **После `main`** история не переписывается: revert или fix — новый коммит,
+  который проходит через `dev` и release.
 
 ## 8. Забег
 
@@ -433,10 +503,17 @@ board run start --as developer --suggest 1
 - навык подходит исполнителю;
 - карточка не забронирована другим;
 - зависимости либо закрыты, либо входят в этот забег раньше по порядку;
-- `run_size` не превышен.
+- `run_size` не превышен;
+- у исполнителя нет другого активного забега.
 
-При ошибке не бронируется ничего. Успех: карточки `booked`, `run_id`,
-lease на 2 часа (настраивается). `run start` пишет run-запись и события.
+При ошибке не бронируется ничего. Один активный забег на исполнителя:
+`run next`/`run end` всегда адресуют его. Вторая параллельная сессия — это
+отдельный executor-id с теми же навыками и своим worktree.
+
+Успех: карточки `booked`, `run_id`, lease забега на 2 часа (настраивается).
+`run start` пишет run-запись и события. Пока забег активен, его состав можно
+менять: `run add <ID>` бронирует ещё одну доступную карточку, `run drop <ID>`
+возвращает её в очередь.
 
 ### 8.3 Выполнение
 
@@ -447,12 +524,17 @@ board block UI-1 --as developer --reason needs_decision --note "..."
 board run next --as developer       # следующая карточка забега
 ```
 
-`block` освобождает карточку от исполнителя; агент берёт следующую.
-Заблокированная карточка остаётся `blocked` и ждёт владельца.
+`block` освобождает карточку от исполнителя, но оставляет её в забеге с
+пометкой `blocked`; агент берёт следующую. Если владелец ответил, пока забег
+ещё активен, карточка снова `ready` и `run next` может её вернуть. Если забег
+закрыт, карточка просто ждёт в очереди.
 
 `take` проверяет зависимости ещё раз: если зависимость не в `review`/`done`
-и не закрыта раньше в этом же забеге, карточку брать нельзя. Порядок забега
-строится так, чтобы это было выполнено.
+и не закрыта раньше в этом же забеге, карточку брать нельзя. `run next`
+пропускает такую карточку. Если зависимость заблокирована или её lease
+истёк, зависимая остаётся `booked`, но не берётся; `run end` вернёт её в
+`waiting`/`ready`. Если зависимость переоткрыта до `take`, зависимая
+снимается с забега (`run_cards.status=dropped`) и уходит в `waiting`.
 
 ### 8.4 Завершение
 
@@ -463,21 +545,28 @@ board run end --as developer
 - `booked`-карточки возвращаются в `ready`/`waiting`;
 - `in_progress` должны быть закрыты, заблокированы или отпущены; иначе
   команда просит сначала разобраться;
-- `blocked` остаются как есть;
+- `blocked` остаются как есть; из забега они снимаются;
 - run-запись получает `ended_at`, результат и список карточек;
-- если в забеге запланировано ревью, оно запускается до `ended_at`
-  (см. § 9).
+- `run end --review` ставит `review=1` и возвращает пакет для ревью. Забег
+  закрывается сразу, **не ждёт** вердиктов. Ревью — отдельная команда
+  (§ 9.2), её можно запустить сразу после `run end` или позже.
 
 Если агент умер, lease истекает, карточки возвращаются в очередь, run
-закрывается с причиной `lease_expired`. Владелец может снять бронь вручную.
+закрывается с причиной `lease_expired`. Ветка и worktree сохраняются.
+Владелец может снять бронь вручную.
 
 ### 8.5 Lease
 
-- `shaping` — 30 минут;
-- `booked`/`in_progress` — 2 часа;
-- `touch <ID>` продлевает; каждая команда карточки тоже продлевает.
+- `shaping` — 30 минут на карточку;
+- забег — 2 часа на весь забег (`runs.lease_until`); `booked`/`in_progress`
+  карточки наследуют его.
+- `take`, `finish`, `touch` и любая команда карточки продлевают lease всего
+  забега, а не только этой карточки. Поэтому работа над первой карточкой не
+  даёт истечь второй и третьей.
 - Просроченные lease снимаются при `now`, `doctor` и любой команде,
-  затрагивающей карточку.
+  затрагивающей забег: все его карточки возвращаются в очередь, run
+  закрывается `lease_expired`, ветки и worktree остаются.
+- Владелец может снять бронь вручную: `run release <RUN-ID> --reason "..."`.
 
 ## 9. Ревью
 
@@ -522,9 +611,12 @@ CLI сам субагентов не порождает: он готовит п�
 
 ### 9.4 Ревью в забеге
 
-Забег может включать ревью: `run end --review` или `run review`. Тогда
-пакетное ревью запускается до закрытия run-записи, а результат пишется в
-неё. Ревью проверяет все карточки в `review`, не только карточки забега.
+`run end --review` **закрывает забег сразу** и ставит `runs.review=1`.
+Пакет для ревью возвращается командой; само ревью — отдельная команда
+`review` (§ 9.2), которую можно запустить сразу или позже. Забег не ждёт
+вердиктов и не зависает, если ревьюер умер. Если ревьюер вернул только часть
+вердиктов, остальные карточки остаются `review`, а run-запись уже содержит
+факт запланированного ревью. Повторный `review` обрабатывает оставшиеся.
 
 ### 9.5 Чужой навык
 
@@ -532,6 +624,44 @@ CLI сам субагентов не порождает: он готовит п�
 контентный контекст, для `dev` — код и diff. Если ревью требует навыка,
 которого у субагента нет, владелец решает сам или назначает другого
 ревьюера.
+
+### 9.6 Находки ревью
+
+У ревью есть результаты трёх уровней: `critical`, `important`, `other`.
+Каждый результат оформляется **запросом** — новой карточкой:
+
+- `phase=request`, `status=new`, `severity=<уровень>`,
+  `origin_card_id=<проверяемая карточка>`;
+- `skill`, `needs_merge` и `scope` наследуются от проверяемой карточки,
+  если ревьюер не сказал иначе;
+- `body` — текст находки; шаги и ссылки добавляет разбирающий.
+
+Команда:
+
+```
+board review submit UI-1 --verdict done|reopen --note "..." \
+  --findings findings.json --reviewer reviewer-1
+board review finding UI-1 --severity critical --text "..."
+```
+
+`findings.json`: `[{ "severity": "critical|important|other", "text": "...",
+"skill": "dev", "scope": ["src/**"] }]`. Создание находок и вердикт — одна
+транзакция.
+
+Вердикт выбирает ревьюер:
+
+- `done` — работа принята; находки остаются отдельными запросами. Критические
+  находки всё равно блокируют `main`, пока не закрыты.
+- `reopen` — карточка переоткрыта; находки описывают переработку. Проверяемая
+  карточка получает зависимости на критические находки, её `finish` не
+  пройдёт, пока они не `done`.
+- критических находок нет — `done` с follow-up карточками `important`/`other`,
+  они `main` не блокируют.
+
+`release` блокируется, пока открыта хотя бы одна карточка с
+`severity=critical`. Владелец может понизить важность или отменить находку
+с причиной — тогда блок снимается. Находки `important`/`other` в `main` не
+блокируют.
 
 ## 10. Разбор и брейншторм
 
@@ -553,6 +683,45 @@ board card shape UI-1 --as developer
 Правила разбора: `review_required` по умолчанию `false`; для
 `needs_merge=true` `scope` обязателен — иначе `finish` не сможет отличить
 свои файлы от чужих. Для `needs_merge=false` scope не нужен.
+
+Для агентов есть пакетный разбор:
+
+```
+board card shape UI-1 --as developer --from card.json
+```
+
+`card.json`:
+
+```json
+{
+  "body": "...",
+  "skill": "dev",
+  "importance": 4,
+  "urgency": 5,
+  "needs_merge": true,
+  "review_required": true,
+  "scope": ["src/**", "tests/**"],
+  "steps": ["Написать форму", "Добавить тест"],
+  "refs": [{ "kind": "spec", "value": "docs/specs/login.md" }],
+  "deps": ["UI-5"],
+  "new_cards": [
+    {
+      "key": "gen",
+      "group": "UI",
+      "title": "Генератор форм",
+      "skill": "dev",
+      "body": "...",
+      "needs_merge": true
+    }
+  ],
+  "new_deps": [["UI-1", "gen"]]
+}
+```
+
+`new_cards` создаются отдельными запросами (`phase=request`, `status=new`).
+`key` — локальное имя, которое разрешается в выданный ID; `new_deps`
+связывают карточки после создания. Всё — одной транзакцией. Если в JSON
+ошибка, не создаётся ничего.
 
 Затем:
 
@@ -696,53 +865,104 @@ RUN-3  developer  UI-12, UI-13, UI-14 завершён: done 2, review 1
 
 ```
 board init
-board executor add developer --kind agent --skills dev
+
+board executor add developer --kind agent --skills dev [--run-size 3]
 board executor add marketer --kind agent --skills marketing
 board executor add owner --kind human --skills owner
+board executor list
+board executor edit developer --skills dev,frontend
+board executor remove developer
 
 board card add --group UI --title "..." --skill dev [--body "..."]
 board card list [--phase request|task] [--status ...] [--skill ...]
 board card show UI-1
-board card edit UI-1 --title ...
+board card edit UI-1 [--title ...] [--body ...] [--skill dev]
+  [--importance 1-5] [--urgency 1-5]
+  [--needs-merge|--no-needs-merge] [--review|--no-review]
+  [--scope "src/**"] [--scope "tests/**"]
 board card shape UI-1 --as developer
+board card shape UI-1 --as developer --from card.json
 board card submit UI-1 --as developer
 board card approve UI-1
 board card reject UI-1 --reason "..."
-board card verdict UI-1 --done|--reopen --note "..."
+board card verdict UI-1 --done|--reopen --note "..." --as reviewer
+board card done UI-9 --summary "..." --as owner
+board card cancel UI-1 --reason "..." [--waive-dependents] --as developer
+board card reopen UI-1 --reason "..." --as developer
+
+board card step add UI-1 "Написать форму"
+board card step done UI-1 1
+board card step remove UI-1 2
+board card step list UI-1
+
+board card ref add UI-1 --kind link --value "https://..." --title "..."
+board card ref remove UI-1 2
+board card ref list UI-1
+
+board card dep add UI-1 UI-5
+board card dep remove UI-1 UI-5
+board card dep list UI-1
 
 board queue move UI-4 --before UI-2
+board queue move UI-4 --top
+board queue move UI-4 --bottom
 board queue reorder
 
 board run start --as developer --cards UI-1,UI-7,UI-11
 board run start --as developer --suggest 1
+board run add UI-12 --as developer
+board run drop UI-12 --as developer
 board run next --as developer
 board run end --as developer [--review]
+board run release RUN-1 --reason "..."
 board run list
 
 board take UI-1 --as developer
 board finish UI-1 --as developer --summary "..."
 board block UI-1 --as developer --reason needs_decision --note "..."
-board cancel UI-1 --reason "..."
-board reopen UI-1 --reason "..."
 board touch UI-1 --as developer
 
 board ask UI-1 "Нужен ли SSO?" --as developer [--block]
 board answer UI-1 "Нет" --as owner
 
-board decision add UI-1 "..." --kind decision
+board decision add UI-1 "..." --kind decision --as developer
+board decision list
 board decision supersede D12 --by D15 --reason "..."
 board decision obsolete D7 --reason "..."
 
 board review list [--json]
+board review finding UI-1 --severity critical --text "..."
+board review submit UI-1 --verdict done|reopen --note "..." \
+  --findings findings.json --reviewer reviewer-1
 board release
-
 board now [0|1|2|3] [фильтры]
 board doctor
 ```
 
 Все команды принимают `--json`. Коды выхода: `0` успех, `1` делать нечего,
-`2` нужно решение владельца, `3` ошибка. `--as` обязателен там, где действие
-зависит от исполнителя; для owner-команд по умолчанию `owner`.
+`2` нужно решение владельца, `3` ошибка.
+
+### 12.1 Идентичность
+
+`--as <id>` — кто действует. Это не аутентификация, а идентичность для
+журнала и проверок; доска локальная.
+
+- `take`, `finish`, `block`, `touch`, `run *` требуют `--as`; агент может
+  действовать только на карточки своего забега/держания.
+- `shape`, `submit` требуют `--as`; держатель карточки — автор разбора.
+- `card add`, `ask`, `decision add` требуют `--as`; по умолчанию `owner`.
+- `approve`, `reject`, `release`, `executor *` — owner-команды; по умолчанию
+  `owner`.
+- `cancel` требует `--as`: держатель может отменить свою `booked`/
+  `in_progress`, владелец — любую.
+- `verdict` и `review submit` требуют `--as`/`--reviewer`: это id ревьюера
+  (субагента или `owner`). `reviews.reviewer` пишется из него.
+- `BOARD_ACTOR` задаёт значение по умолчанию для `--as`; удобно в конфиге
+  агента. Явный `--as` важнее.
+
+Владелец может действовать от любого имени только в аварийном режиме
+`--force`; это пишется в журнал как `owner_override`. В обычной работе
+владелец — `owner`.
 
 ## 13. Данные
 
@@ -782,12 +1002,19 @@ create table cards (
   needs_merge integer not null default 1,
   review_required integer not null default 0,
   scope text not null default '[]',
+  severity text,
+  origin_card_id text,
+  summary text,
   holder text,
   run_id text,
   branch text,
+  attempt integer not null default 1,
   merge_commit text,
   in_dev integer not null default 0,
   in_main integer not null default 0,
+  reverted_at text,
+  revert_commit text,
+  waive_deps integer not null default 0,
   lease_until text,
   previous_holder text,
   created_at text not null,
@@ -856,9 +1083,12 @@ create table runs (
   created_at text not null,
   started_at text,
   ended_at text,
+  lease_until text,
   review integer not null default 0,
   note text
 );
+create unique index idx_runs_active on runs(executor_id)
+  where status = 'active';
 
 create table run_cards (
   run_id text not null references runs(id) on delete cascade,
@@ -899,7 +1129,9 @@ create table reviews (
 
 - скилл `board` — как смотреть `now`, брать забег, разбирать карточку,
   задавать вопросы, закрывать, ревьюить;
-- команда `review` — запускает нового субагента с пакетом `review list`;
+- команда `review` — запускает нового субагента с пакетом `review list`
+  после `run end --review` (или отдельно) и принимает `review submit` с
+  находками; забег при этом уже закрыт и не ждёт;
 - тонкий плагин с инструментами `board_now`, `board_card`, `board_run`,
   `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`,
   `board_review`, `board_decision`;
@@ -914,12 +1146,12 @@ create table reviews (
 
 - имя CLI (`board` или `toolbox-al`);
 - точная формула оценки (сумма важности и срочности или матрица);
-- длительность lease (2 часа для забега, 30 минут для разбора);
 - способ запуска субагента ревью в конкретной версии OpenCode;
 - нужен ли `doctor` сверх проверки git/lease/веток;
 - LFS для картинок;
 - тег и changelog в `release` (по умолчанию нет);
-- формат `--json` (плоский или с `data`/`error`).
+- формат `--json` (плоский или с `data`/`error`);
+- как показывать `critical`-находки в `now` и очереди.
 
 ## 16. Рассмотренные подходы
 
@@ -959,17 +1191,24 @@ temp git-репозитории.
   бронирование, lease, run end.
 - Git: worktree, ветка, scope, merge --no-ff, конфликт, `in_dev`/`in_main`,
   release-гейт, `needs_merge=false`.
-- Ревью: пакет, done/reopen, previous_holder, release-блок.
+- Ревью: пакет, done/reopen, previous_holder, находки трёх уровней,
+  создание карточек-находок, release-блок по critical.
 - Решения: md активные/неактивные, зачёркивание, supersede.
 - Доска: `now 0..3`, лимит 15 + `...`, сегодняшний счётчик, dev-ahead.
-- Owner-карточки: без брони и approval, done одной командой.
-- CLI: `--json`, коды выхода.
+- Owner-карточки: без брони и approval, done одной командой, только `now 0`.
+- Git: отмена с revert-коммитом, переоткрытие с новой веткой/attempt,
+  `--no-merge` с scope и ancestry, lease забега, сохранение worktree.
+- Идентичность: `--as`, actor в событиях, owner-override.
+- CLI: `--json`, коды выхода, `--from` JSON разбора.
 - Конкурентность: два процесса бронируют одну карточку — выигрывает один.
 
 ## 18. Открыто
 
 - Авто-ран: отдельное обсуждение после v1.
-- Точная формула оценки.
-- Нужен ли отдельный статус `rework` вместо `ready` с `previous_holder`.
-- Как показывать review-карточки в `now 3` (отдельной секцией или в очереди).
-- Нужен ли `release` с тегом и changelog.
+- Точная формула оценки (сумма или матрица).
+- Имя CLI (`board` или `toolbox-al`).
+- Формат `--json`.
+- Тег и changelog в `release` (по умолчанию нет).
+- Нужен ли `doctor` сверх проверки git/lease/веток.
+- LFS для картинок.
+- Как показывать находки `critical` в `now` (отдельной секцией или маркером).
