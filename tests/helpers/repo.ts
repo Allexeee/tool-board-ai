@@ -1,25 +1,43 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-export function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim()
+export interface RepoFixture {
+  root: string
+  close: () => void
 }
 
-export function makeRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'tbal-repo-'))
-  execFileSync('git', ['init', '-b', 'main', dir], { stdio: 'ignore', windowsHide: true })
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, windowsHide: true })
-  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir, windowsHide: true })
-  writeFileSync(join(dir, 'README.md'), '# repo\n')
-  execFileSync('git', ['add', '.'], { cwd: dir, windowsHide: true })
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore', windowsHide: true })
-  return dir
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  }).trim()
 }
 
-export function makeRepoWithDev(): string {
-  const dir = makeRepo()
-  execFileSync('git', ['branch', 'dev'], { cwd: dir, windowsHide: true })
-  return dir
+/**
+ * Временный git-репозиторий: ветка `main` с коммитом и ветка `dev` на том же
+ * коммите. `.worktrees/` и `.board/` в `.gitignore`, чтобы worktree не грязнил
+ * `git status` основного каталога.
+ */
+export function makeRepo(): RepoFixture {
+  const root = mkdtempSync(join(tmpdir(), 'board-repo-'))
+  execFileSync('git', ['init', '-b', 'main', root], { stdio: 'ignore', windowsHide: true })
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root, windowsHide: true })
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root, windowsHide: true })
+
+  writeFileSync(join(root, '.gitignore'), '.worktrees/\n.board/\n')
+  writeFileSync(join(root, 'README.md'), '# repo\n')
+  git(root, ['add', '.'])
+  git(root, ['commit', '-m', 'init'])
+  git(root, ['branch', 'dev'])
+
+  return {
+    root,
+    close() {
+      rmSync(root, { recursive: true, force: true })
+    },
+  }
 }

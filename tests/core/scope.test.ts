@@ -1,55 +1,31 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { scopesOverlap } from '../../src/core/git/scope.ts'
-import { openDb, type DatabaseSync } from '../../src/core/db.ts'
-import { addRequest } from '../../src/core/requests.ts'
-import { addFeature } from '../../src/core/features.ts'
-import { addStage, activateNextStage } from '../../src/core/stages.ts'
-import { createTask } from '../../src/core/tasks.ts'
-import { refreshReady } from '../../src/core/deps.ts'
-import { addExecutor } from '../../src/core/executors.ts'
-import { takeTask } from '../../src/core/lease.ts'
+import { scopeAllows } from '../../src/core/scope.ts'
 
-test('exclusive пересекается со всем', () => {
-  assert.equal(scopesOverlap('exclusive', ['src/a']), true)
-  assert.equal(scopesOverlap(['src/a'], 'exclusive'), true)
+test('scopeAllows: базовые glob-паттерны', () => {
+  assert.equal(scopeAllows('src/a.ts', ['src/**']), true)
+  assert.equal(scopeAllows('src\\a.ts', ['src/**']), true)
+  assert.equal(scopeAllows('content/a.md', ['src/**']), false)
+  assert.equal(scopeAllows('docs/a.md', ['**/*.md']), true)
+  assert.equal(scopeAllows('src/deep/a.ts', ['src/*']), false)
 })
 
-test('разные каталоги не пересекаются', () => {
-  assert.equal(scopesOverlap(['assets/sprites/**'], ['src/enemy/**']), false)
+test('scopeAllows: каталог без glob совпадает с файлом и префиксом каталога', () => {
+  assert.equal(scopeAllows('src', ['src']), true)
+  assert.equal(scopeAllows('src/deep/a.ts', ['src']), true)
+  assert.equal(scopeAllows('srcx/a.ts', ['src']), false)
 })
 
-test('вложенный путь пересекается', () => {
-  assert.equal(scopesOverlap(['src/**'], ['src/billing/a.ts']), true)
+test('scopeAllows: * внутри сегмента и ? один символ', () => {
+  assert.equal(scopeAllows('src/a.ts', ['src/*.ts']), true)
+  assert.equal(scopeAllows('src/a1.ts', ['src/a?.ts']), true)
+  assert.equal(scopeAllows('src/a.ts', ['src/a?.ts']), false)
+  assert.equal(scopeAllows('src/deep/a.ts', ['src/**/a.ts']), true)
+  assert.equal(scopeAllows('a/b/c/x.md', ['**/x.md']), true)
 })
 
-test('вторая задача с пересечением не берётся', () => {
-  const db: DatabaseSync = openDb(':memory:')
-  addExecutor(db, { id: 'w1', kind: 'agent', skills: ['backend'] })
-  addExecutor(db, { id: 'w2', kind: 'agent', skills: ['backend'] })
-
-  const request = addRequest(db, { title: 'A', body: '', author: 'owner' })
-  const feature = addFeature(db, { requestId: request.id, name: 'A', rank: 1 })
-  const stage = addStage(db, { featureId: feature.id, name: 'S1', goal: 'g', appetite: '2 дня' })
-  activateNextStage(db, feature.id)
-
-  const base = {
-    stageId: stage.id,
-    dod: ['a'],
-    size: 'S' as const,
-    skill: 'backend',
-    class: 'standard' as const,
-  }
-  const first = createTask(db, { ...base, title: 'Первый шаг', scope: ['src/billing/**'] })
-  const second = createTask(db, { ...base, title: 'Второй шаг', scope: ['src/billing/api.ts'] })
-  refreshReady(db)
-
-  takeTask(db, { executor: 'w1', taskId: first.id })
-  assert.throws(() => takeTask(db, { executor: 'w2', taskId: second.id }), /област/)
-})
-
-test('двойная звезда перекрывает вложенные каталоги', () => {
-  assert.equal(scopesOverlap(['src/**/a.ts'], ['src/x/y/a.ts']), true)
-  assert.equal(scopesOverlap(['src/**'], ['src/x/y/a.ts']), true)
-  assert.equal(scopesOverlap(['src/**/a.ts'], ['docs/a.ts']), false)
+test('scopeAllows: нормализует ./ и пустой scope ничего не разрешает', () => {
+  assert.equal(scopeAllows('./src/a.ts', ['src/**']), true)
+  assert.equal(scopeAllows('src/a.ts', ['./src/**']), true)
+  assert.equal(scopeAllows('src/a.ts', []), false)
 })
