@@ -225,6 +225,7 @@ export default async function command(args: ParsedArgs) {
       'использование: board card dep add|remove|list UI-1 UI-5',
     )
     const actor = stringFlag(args, 'as') ?? 'owner'
+    const reason = stringFlag(args, 'reason')
 
     if (action === 'add' || action === 'remove') {
       const other = args.positionals[2]
@@ -233,10 +234,10 @@ export default async function command(args: ParsedArgs) {
       }
 
       if (action === 'add') {
-        addDep(db, card.id, other, actor)
+        addDep(db, card.id, other, actor, reason)
         ok({ from: card.id, to: other }, `${card.id} теперь зависит от ${other}`)
       } else {
-        removeDep(db, card.id, other, actor)
+        removeDep(db, card.id, other, actor, reason)
         ok({ from: card.id, to: other }, `${card.id} больше не зависит от ${other}`)
       }
       return 0

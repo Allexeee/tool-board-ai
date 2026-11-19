@@ -59,13 +59,14 @@ export function wouldCycle(db: DatabaseSync, from: string, to: string): string[]
 
 /**
  * `insert or ignore` делает повторное добавление безопасным. Событие пишется
- * и на повтор: команда была, журнал её помнит.
+ * и на повтор: команда была, журнал её помнит. `reason` — почему добавили.
  */
 export function addDep(
   db: DatabaseSync,
   from: string,
   to: string,
   actor: string = DEFAULT_ACTOR,
+  reason?: string,
 ): void {
   tx(db, () => {
     requireCard(db, from)
@@ -84,6 +85,7 @@ export function addDep(
       actor,
       subject: from,
       after: { dependsOn: to },
+      note: reason,
     })
   })
 }
@@ -93,6 +95,7 @@ export function removeDep(
   from: string,
   to: string,
   actor: string = DEFAULT_ACTOR,
+  reason?: string,
 ): void {
   tx(db, () => {
     requireCard(db, from)
@@ -107,6 +110,7 @@ export function removeDep(
       actor,
       subject: from,
       before: { dependedOn: to },
+      note: reason,
     })
   })
 }

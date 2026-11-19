@@ -105,7 +105,7 @@ test('card dep add/list/remove работает через CLI и виден в 
   const dir = project(t)
   json(dir, ['card', 'add', '--group', 'UI', '--title', 'Основа', '--skill', 'dev'])
 
-  const added = json(dir, ['card', 'dep', 'add', 'UI-1', 'UI-2'])
+  const added = json(dir, ['card', 'dep', 'add', 'UI-1', 'UI-2', '--reason', 'сначала основа'])
   assert.equal(added.from, 'UI-1')
   assert.equal(added.to, 'UI-2')
   assert.deepEqual(json(dir, ['card', 'dep', 'list', 'UI-1']), ['UI-2'])
@@ -114,14 +114,19 @@ test('card dep add/list/remove работает через CLI и виден в 
   assert.equal(shown.code, 0, shown.err)
   assert.match(shown.out, /ЗАВИСИМОСТИ/)
   assert.match(shown.out, /UI-2/)
+  assert.match(shown.out, /сначала основа/)
 
   const cycle = run(dir, ['card', 'dep', 'add', 'UI-2', 'UI-1'])
   assert.equal(cycle.code, 3)
   assert.match(cycle.err, /цикл/)
 
-  const removed = json(dir, ['card', 'dep', 'remove', 'UI-1', 'UI-2'])
+  const removed = json(dir, ['card', 'dep', 'remove', 'UI-1', 'UI-2', '--reason', 'передумали'])
   assert.equal(removed.to, 'UI-2')
   assert.deepEqual(json(dir, ['card', 'dep', 'list', 'UI-1']), [])
+
+  const afterRemove = run(dir, ['card', 'show', 'UI-1'])
+  assert.equal(afterRemove.code, 0, afterRemove.err)
+  assert.match(afterRemove.out, /передумали/)
 })
 
 test('card dep отказывает без карточки', (t) => {

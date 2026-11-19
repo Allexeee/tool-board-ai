@@ -170,6 +170,28 @@ test('добавление и удаление зависимости', (t) => {
   assert.throws(() => removeDep(db, waiting.id, first.id), /не найдена/)
 })
 
+test('причина добавления и удаления зависимости пишется в журнал', (t) => {
+  const { db } = board(t)
+  const blocker = seedCard(db, { phase: 'task', status: 'done' })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+
+  addDep(db, waiting.id, blocker.id, 'developer', 'форма ждёт API')
+  const added = listEvents(db, waiting.id).at(-1)!
+  assert.equal(added.type, 'dep.added')
+  assert.equal(added.actor, 'developer')
+  assert.equal(added.note, 'форма ждёт API')
+
+  const second = seedCard(db, { phase: 'task', status: 'done' })
+  addDep(db, waiting.id, second.id)
+  assert.equal(listEvents(db, waiting.id).at(-1)!.note, null)
+
+  removeDep(db, waiting.id, blocker.id, 'owner', 'зависимость снята')
+  const removed = listEvents(db, waiting.id).at(-1)!
+  assert.equal(removed.type, 'dep.removed')
+  assert.equal(removed.actor, 'owner')
+  assert.equal(removed.note, 'зависимость снята')
+})
+
 test('удаление последней зависимости делает задачу готовой', (t) => {
   const { db } = board(t)
   const blocker = seedCard(db, { phase: 'task', status: 'booked' })
