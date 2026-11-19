@@ -1,563 +1,656 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
-import { allocateId } from './ids.ts'
-import { tx } from './db.ts'
-import { appendEvent, listEvents } from './events.ts'
-import { listRoutines } from './routines.ts'
-import { nextRun, parseSchedule } from './schedule.ts'
 import { UserError } from '../cli/errors.ts'
+import { getCard, listCards } from './cards.ts'
+import { nowIso } from './clock.ts'
+import { tx } from './db.ts'
+import { isSatisfied, listDeps } from './deps.ts'
+import { appendEvent } from './events.ts'
+import { getExecutor } from './executors.ts'
+import { allocateId } from './ids.ts'
+import type {
+  Card,
+  Executor,
+  Run,
+  RunCard,
+  RunCardStatus,
+  RunSuggestion,
+} from './types.ts'
 
-export type RunStatus = 'planned' | 'running' | 'done' | 'partial' | 'waiting_gate' | 'skipped'
+/** Забег держит lease два часа; карточки наследуют срок забега (§8.5). */
+const RUN_LEASE_MS = 2 * 60 * 60 * 1000
 
-export interface RoutineRun {
-  id: string
-  routineId: string
-  dueAt: string
-  status: RunStatus
-  startedAt: string | null
-  finishedAt: string | null
-  note: string | null
-}
+const OWNER = 'owner'
 
-interface Row {
-  id: string
-  routine_id: string
-  due_at: string
-  status: RunStatus
-  started_at: string | null
-  finished_at: string | null
-  note: string | null
-}
-
-const toRun = (row: Row): RoutineRun => ({
-  id: row.id,
-  routineId: row.routine_id,
-  dueAt: row.due_at,
-  status: row.status,
-  startedAt: row.started_at,
-  finishedAt: row.finished_at,
-  note: row.note,
-})
-
-export function materialize(
-  db: DatabaseSync,
-  options: { now?: Date; leadHours?: number } = {},
-): RoutineRun[] {
-  const now = options.now ?? new Date()
-  const leadHours = options.leadHours ?? 24
-  const horizon = now.getTime() + leadHours * 3_600_000
-
-  return tx(db, () => {
-    const created: RoutineRun[] = []
-
-    const catchUpFrom = new Date(now.getTime() - 24 * 3_600_000)
-
-    for (const routine of listRoutines(db)) {
-      const schedule = parseSchedule(routine.schedule)
-      let due = nextRun(schedule, catchUpFrom)
-
-      while (due.getTime() <= horizon) {
-        const dueAt = due.toISOString()
-        const exists = db
-          .prepare('select 1 as found from routine_runs where routine_id = ? and due_at = ?')
-          .get(routine.id, dueAt)
-
-        if (!exists) {
-          const run: RoutineRun = {
-            id: allocateId(db, 'run'),
-            routineId: routine.id,
-            dueAt,
-            status: 'planned',
-            startedAt: null,
-            finishedAt: null,
-            note: null,
-          }
-
-          db.prepare(
-            'insert into routine_runs (id, routine_id, due_at, status, started_at, finished_at, note) values (?, ?, ?, ?, ?, ?, ?)',
-          ).run(run.id, run.routineId, run.dueAt, run.status, null, null, null)
-
-          appendEvent(db, { type: 'run.planned', actor: 'system', subject: run.id, after: { dueAt } })
-          created.push(run)
-        }
-
-        const next = nextRun(schedule, due)
-        if (next.getTime() <= due.getTime()) break
-        due = next
-      }
-    }
-
-    return created
-  })
-}
-
-export function listRuns(
-  db: DatabaseSync,
-  filter: { from?: string; to?: string } = {},
-): RoutineRun[] {
-  const where: string[] = []
-  const params: string[] = []
-
-  if (filter.from) {
-    where.push('due_at >= ?')
-    params.push(filter.from)
-  }
-  if (filter.to) {
-    where.push('due_at <= ?')
-    params.push(filter.to)
-  }
-
-  const sql =
-    'select * from routine_runs' +
-    (where.length ? ' where ' + where.join(' and ') : '') +
-    ' order by due_at'
-
-  return (db.prepare(sql).all(...params) as unknown as Row[]).map(toRun)
-}
-
-export function getRun(db: DatabaseSync, id: string): RoutineRun | null {
-  const row = db.prepare('select * from routine_runs where id = ?').get(id) as Row | undefined
-  return row ? toRun(row) : null
-}
-
-// ─── прогон (RUN): запись в базе, а не договорённость в чате ──────────────────
-//
-// Рутинный прогон выше отвечает на «когда по расписанию». Прогон здесь — это
-// затея владельца: с какими запросами, в каком режиме, что утверждено, что
-// будет с питанием. Открытый прогон один: второй старт без `run end` — отказ.
-
-export type RunMode = 'plan' | 'all'
-export type RunPower = 'none' | 'hibernate' | 'shutdown'
-export type RunEndReason = 'owner' | 'tasks' | 'decision' | 'context'
-export type RunVerdict = 'ok' | 'found'
-
-/** Почему прогон закончился: остановил владелец, кончились задачи, нужно решение. */
-export type RunReviewState = 'open' | 'not_required' | 'needs_review' | 'found' | 'ready'
-
-export interface RunReview {
-  verdict: RunVerdict
-  note: string | null
-  at: string
-  actor: string
-}
-
-export interface RunRecord {
-  id: string
-  mode: RunMode
-  requests: string[]
-  nearest: boolean
-  approve: boolean
-  power: RunPower
-  startedAt: string
-  endedAt: string | null
-  endReason: RunEndReason | null
-  /**
-   * Номер сегмента: прогон один, сессий несколько. Первый сегмент — тот, в
-   * котором прогон начат; каждый handoff открывает следующий.
-   */
-  segment: number
-  /** Остановка владельцем ревью не требует; всё остальное — требует. */
-  reviewRequired: boolean
-}
+/** Карточки, которые ещё держат место в забеге. */
+const ACTIVE_CARD_STATUSES: readonly RunCardStatus[] = [
+  'booked',
+  'in_progress',
+  'blocked',
+  'done',
+  'review',
+]
 
 interface RunRow {
   id: string
-  mode: string
-  requests: string
-  nearest: number
-  approve: number
-  power: string
-  started_at: string
+  executor_id: string
+  status: string
+  created_at: string
+  started_at: string | null
   ended_at: string | null
-  end_reason: string | null
-  segment: number
+  lease_until: string | null
+  review: number
+  note: string | null
 }
 
-const RUN_MODES: readonly string[] = ['plan', 'all']
-const RUN_POWERS: readonly string[] = ['none', 'hibernate', 'shutdown']
-const RUN_END_REASONS: readonly string[] = ['owner', 'tasks', 'decision', 'context']
-const RUN_VERDICTS: readonly string[] = ['ok', 'found']
-
-/**
- * Питание прогона, проверенное до записи. Одна точка правды для start, end и
- * `run power`: неверный заказ отказывает раньше, чем что-то ляжет в базу.
- */
-export function runPowerOf(value: unknown): RunPower {
-  if (!RUN_POWERS.includes(String(value))) {
-    throw new UserError(
-      3,
-      `питание после прогона: none, hibernate или shutdown, а не ${String(value)}`,
-    )
-  }
-  return value as RunPower
+interface RunCardRow {
+  run_id: string
+  card_id: string
+  position: number
+  status: string
 }
 
-function runRequests(raw: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.map(String) : []
-  } catch {
-    return []
-  }
-}
-
-const toRunRecord = (row: RunRow): RunRecord => ({
+const toRun = (row: RunRow): Run => ({
   id: row.id,
-  mode: row.mode as RunMode,
-  requests: runRequests(row.requests),
-  nearest: row.nearest === 1,
-  approve: row.approve === 1,
-  power: row.power as RunPower,
+  executorId: row.executor_id,
+  status: row.status as Run['status'],
+  createdAt: row.created_at,
   startedAt: row.started_at,
   endedAt: row.ended_at,
-  endReason: row.end_reason as RunEndReason | null,
-  // база, пришедшая из схемы 12, знает только первый сегмент
-  segment: row.segment ?? 1,
-  reviewRequired: row.ended_at !== null && row.end_reason !== 'owner',
+  leaseUntil: row.lease_until,
+  review: row.review === 1,
+  note: row.note,
 })
 
-/**
- * Номер прогона: RUN1, RUN2, … Считается в meta, а не по строкам таблицы:
- * удалённый или закрытый прогон не должен выдавать номер повторно.
- */
-function allocateRunId(db: DatabaseSync): string {
-  const key = 'counter.workrun'
-  const row = db.prepare('select value from meta where key = ?').get(key) as { value: string } | undefined
-  const next = row ? Number(row.value) + 1 : 1
+const toRunCard = (row: RunCardRow): RunCard => ({
+  runId: row.run_id,
+  cardId: row.card_id,
+  position: row.position,
+  status: row.status as RunCardStatus,
+})
 
-  db.prepare(
-    'insert into meta (key, value) values (?, ?) on conflict(key) do update set value = excluded.value',
-  ).run(key, String(next))
-
-  return `RUN${next}`
+function requireExecutor(db: DatabaseSync, id: string): Executor {
+  const executor = getExecutor(db, id)
+  if (!executor) throw new UserError(3, `исполнитель ${id} не найден`)
+  return executor
 }
 
-function runList(db: DatabaseSync, where: string, params: string[]): RunRecord[] {
-  return (
-    db.prepare(`select * from runs${where ? ' where ' + where : ''} order by started_at, id`).all(
-      ...params,
-    ) as unknown as RunRow[]
-  ).map(toRunRecord)
+function requiredActor(raw: string | undefined): string {
+  const actor = raw?.trim()
+  if (!actor) throw new UserError(3, 'нужен --as <исполнитель>')
+  return actor
 }
 
-/** Открытый прогон: тот, у которого нет конца. Такой всегда один. */
-export function activeRun(db: DatabaseSync): RunRecord | null {
-  const rows = runList(db, 'ended_at is null', [])
-  return rows.length > 0 ? rows[rows.length - 1] : null
+function normalizeCardIds(raw: string[]): string[] {
+  const ids = raw.map((id) => id.trim()).filter(Boolean)
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (seen.has(id)) throw new UserError(3, `карточка ${id} указана дважды`)
+    seen.add(id)
+  }
+  return ids
 }
 
-/** Последний закрытый прогон: с него начинается разговор «что было в прошлый раз». */
-export function lastClosedRun(db: DatabaseSync): RunRecord | null {
-  const rows = runList(db, 'ended_at is not null', [])
-  return rows.length > 0 ? rows[rows.length - 1] : null
-}
-
-export function getRunRecord(db: DatabaseSync, id: string): RunRecord | null {
+export function getRun(db: DatabaseSync, id: string): Run | null {
   const row = db.prepare('select * from runs where id = ?').get(id) as RunRow | undefined
-  return row ? toRunRecord(row) : null
+  return row ? toRun(row) : null
 }
 
-export interface RunCursorStep {
-  id: string
-  title: string
-}
-
-export interface RunCursor {
-  /** Следующая готовая задача прогона; null — готовых нет. */
-  next: RunCursorStep | null
-  /** Сколько задач прогона не закрыто. */
-  remaining: number
-  /** Сколько задач прогона всего. */
-  total: number
-}
-
-/**
- * Курсор прогона: что следующее и сколько осталось. Считается по задачам
- * запросов прогона, поэтому оркестратору не нужно помнить план в контексте.
- */
-export function runCursor(db: DatabaseSync, id: string): RunCursor | null {
-  const run = getRunRecord(db, id)
-  if (!run) return null
-  if (run.requests.length === 0) return { next: null, remaining: 0, total: 0 }
-
-  const placeholders = run.requests.map(() => '?').join(', ')
+export function listRuns(db: DatabaseSync): Run[] {
   const rows = db
-    .prepare(
-      'select t.id as id, t.title as title, t.status as status from tasks t ' +
-        'join stages st on st.id = t.stage_id ' +
-        'join features f on f.id = st.feature_id ' +
-        `where f.request_id in (${placeholders}) and t.status != 'cancelled' ` +
-        'order by f.rank, st.seq, t.id',
-    )
-    .all(...run.requests) as Array<{ id: string; title: string; status: string }>
+    .prepare('select * from runs order by created_at, id')
+    .all() as unknown as RunRow[]
+  return rows.map(toRun)
+}
 
-  const remaining = rows.filter((row) => row.status !== 'done')
-  const next = remaining.find((row) => row.status === 'ready' || row.status === 'open')
+export function getActiveRun(db: DatabaseSync, executorId: string): Run | null {
+  const row = db
+    .prepare("select * from runs where executor_id = ? and status = 'active'")
+    .get(executorId) as RunRow | undefined
+  return row ? toRun(row) : null
+}
 
-  return {
-    next: next ? { id: next.id, title: next.title } : null,
-    remaining: remaining.length,
-    total: rows.length,
+export function listRunCards(db: DatabaseSync, runId: string): RunCard[] {
+  const rows = db
+    .prepare('select * from run_cards where run_id = ? order by position, card_id')
+    .all(runId) as unknown as RunCardRow[]
+  return rows.map(toRunCard)
+}
+
+/** Навык owner может взять любую карточку; агент — только свой навык. */
+function canTake(executor: Executor, card: Card): boolean {
+  return executor.id === OWNER || (card.skill !== null && executor.skills.includes(card.skill))
+}
+
+function depsStartable(db: DatabaseSync, card: Card, earlier: Set<string>): boolean {
+  return listDeps(db, card.id).every(
+    (dep) => earlier.has(dep) || isSatisfied(db, dep),
+  )
+}
+
+function unmetDeps(db: DatabaseSync, card: Card, earlier: Set<string>): string[] {
+  return listDeps(db, card.id).filter(
+    (dep) => !earlier.has(dep) && !isSatisfied(db, dep),
+  )
+}
+
+function requireRunnableCard(db: DatabaseSync, executor: Executor, cardId: string): Card {
+  const card = getCard(db, cardId)
+  if (!card) throw new UserError(3, `карточка ${cardId} не найдена`)
+  if (card.phase !== 'task') {
+    throw new UserError(3, `карточка ${card.id} — запрос: в забег берутся только задачи`)
   }
-}
-
-/**
- * Следующий сегмент прогона: передача эстафеты закрывает текущий и открывает
- * новый. Растёт в базе, а не в файле: файл перезаписывается, а история
- * сегментов остаётся в записи прогона.
- */
-export function bumpRunSegment(db: DatabaseSync, id: string): number {
-  const run = getRunRecord(db, id)
-  if (!run) throw new UserError(3, `прогон ${id} не найден`)
-
-  const segment = run.segment + 1
-  db.prepare('update runs set segment = ? where id = ?').run(segment, id)
-  return segment
-}
-
-export interface StartRunInput {
-  mode: RunMode
-  requests?: string[]
-  nearest?: boolean
-  approve?: boolean
-  power?: RunPower
-  actor?: string
-  now?: Date
-}
-
-/**
- * Начать прогон. Взаимоисключающие варианты не угадываются: «ближайшие»
- * добирает 1-2 запроса сверху списка, «доталово» берёт всё до упора —
- * вместе это противоречие, о котором прямо и говорим.
- */
-export function startRun(db: DatabaseSync, input: StartRunInput): RunRecord {
-  const mode = input.mode
-  if (!RUN_MODES.includes(mode)) {
-    throw new UserError(3, `режим прогона бывает plan или all, а не ${String(mode)}`)
+  if (card.status === 'booked' || card.holder !== null || card.runId !== null) {
+    throw new UserError(3, `карточка ${card.id} уже забронирована или удерживается`)
   }
-
-  const power = runPowerOf(input.power ?? 'none')
-
-  if (input.nearest === true && mode === 'all') {
+  if (card.status !== 'ready' && card.status !== 'waiting') {
     throw new UserError(
       3,
-      'выбор ближайших и режим доталово — это взаимоисключающие варианты: ' +
-        'оставьте либо --nearest, либо --mode all',
+      `карточка ${card.id} в статусе ${card.status}: в забег берутся ready или waiting`,
     )
   }
+  if (!canTake(executor, card)) {
+    throw new UserError(
+      3,
+      `навык карточки ${card.id} (${card.skill ?? '—'}) не подходит исполнителю ${executor.id}`,
+    )
+  }
+  return card
+}
 
-  const requests = [...new Set((input.requests ?? []).map((id) => id.trim()).filter(Boolean))]
+function requireDeps(
+  db: DatabaseSync,
+  card: Card,
+  earlier: Set<string>,
+  runId?: string,
+): void {
+  const unmet = unmetDeps(db, card, earlier)
+  if (unmet.length === 0) return
 
+  const where = runId === undefined ? '' : ` в забеге ${runId}`
+  throw new UserError(
+    3,
+    `зависимость ${unmet.join(', ')} карточки ${card.id} не закрыта и не входит раньше${where}`,
+  )
+}
+
+function bookCard(
+  db: DatabaseSync,
+  run: Run,
+  card: Card,
+  position: number,
+  actor: string,
+): void {
+  const updatedAt = nowIso()
+  db.prepare(
+    `update cards set status = 'booked', holder = ?, run_id = ?, lease_until = ?, updated_at = ?
+     where id = ?`,
+  ).run(run.executorId, run.id, run.leaseUntil, updatedAt, card.id)
+
+  db.prepare(
+    `insert into run_cards (run_id, card_id, position, status) values (?, ?, ?, 'booked')
+     on conflict(run_id, card_id) do update set position = excluded.position, status = excluded.status`,
+  ).run(run.id, card.id, position)
+
+  appendEvent(db, {
+    type: 'card.booked',
+    actor,
+    subject: card.id,
+    before: card,
+    after: getCard(db, card.id),
+    note: `забег ${run.id}`,
+  })
+}
+
+/** Возвращает карточку в очередь: ready, если зависимости уже закрыты, иначе waiting. */
+function releaseCard(
+  db: DatabaseSync,
+  card: Card,
+  actor: string,
+  note: string,
+): void {
+  const ready = listDeps(db, card.id).every((dep) => isSatisfied(db, dep))
+  const status = ready ? 'ready' : 'waiting'
+  db.prepare(
+    `update cards set status = ?, holder = null, run_id = null, lease_until = null, updated_at = ?
+     where id = ?`,
+  ).run(status, nowIso(), card.id)
+
+  appendEvent(db, {
+    type: 'card.released',
+    actor,
+    subject: card.id,
+    before: card,
+    after: getCard(db, card.id),
+    note,
+  })
+}
+
+/** Заблокированная карточка остаётся blocked, но перестаёт принадлежать забегу. */
+function detachBlockedCard(
+  db: DatabaseSync,
+  card: Card,
+  actor: string,
+  note: string,
+): void {
+  db.prepare(
+    `update cards set holder = null, run_id = null, lease_until = null, updated_at = ?
+     where id = ?`,
+  ).run(nowIso(), card.id)
+
+  appendEvent(db, {
+    type: 'card.released',
+    actor,
+    subject: card.id,
+    before: card,
+    after: getCard(db, card.id),
+    note,
+  })
+}
+
+function closeRun(
+  db: DatabaseSync,
+  run: Run,
+  status: Run['status'],
+  endedAt: string,
+  review: boolean,
+  note: string | null,
+): Run {
+  db.prepare(
+    'update runs set status = ?, ended_at = ?, review = ?, note = ? where id = ?',
+  ).run(status, endedAt, review ? 1 : 0, note, run.id)
+  return getRun(db, run.id)!
+}
+
+function releaseRunCards(
+  db: DatabaseSync,
+  run: Run,
+  actor: string,
+  reason: string,
+): void {
+  for (const row of listRunCards(db, run.id)) {
+    const card = getCard(db, row.cardId)
+    if (!card) continue
+
+    if (row.status === 'blocked' || card.status === 'blocked') {
+      detachBlockedCard(db, card, actor, `${reason}: заблокирована`)
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        run.id,
+        row.cardId,
+      )
+      continue
+    }
+
+    if (card.status === 'booked' || card.status === 'in_progress') {
+      releaseCard(db, card, actor, reason)
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        run.id,
+        row.cardId,
+      )
+    }
+  }
+}
+
+/**
+ * Предложение забега §8.1: верхняя доступная карточка, затем та же группа до
+ * `run_size`, затем другие группы. waiting-карточка попадает в забег только
+ * после своей зависимости. Предложения непересекающиеся; ничего не бронируют.
+ */
+export function suggestRuns(
+  db: DatabaseSync,
+  executorId: string,
+  count = 3,
+): RunSuggestion[] {
+  const executor = requireExecutor(db, executorId)
+  if (!Number.isInteger(count) || count < 1) {
+    throw new UserError(3, 'количество предложений — целое число от 1')
+  }
+
+  const candidates = listCards(db, { phase: 'task', status: ['ready', 'waiting'] })
+    .filter((card) => card.holder === null && card.runId === null)
+    .filter((card) => canTake(executor, card))
+    .sort(
+      (left, right) =>
+        (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER) ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.id.localeCompare(right.id),
+    )
+
+  const used = new Set<string>()
+  const suggestions: RunSuggestion[] = []
+
+  for (let index = 0; index < count; index++) {
+    const anchor = candidates.find(
+      (card) => !used.has(card.id) && depsStartable(db, card, new Set()),
+    )
+    if (!anchor) break
+
+    const chosen: Card[] = [anchor]
+    const chosenIds = new Set<string>([anchor.id])
+    used.add(anchor.id)
+
+    let progress = true
+    while (chosen.length < executor.runSize && progress) {
+      progress = false
+
+      for (const sameGroup of [true, false]) {
+        for (const candidate of candidates) {
+          if (chosen.length >= executor.runSize) break
+          if (used.has(candidate.id)) continue
+          if (sameGroup ? candidate.group !== anchor.group : candidate.group === anchor.group) {
+            continue
+          }
+          if (!depsStartable(db, candidate, chosenIds)) continue
+
+          chosen.push(candidate)
+          chosenIds.add(candidate.id)
+          used.add(candidate.id)
+          progress = true
+        }
+      }
+    }
+
+    suggestions.push({ executorId, cards: chosen, group: anchor.group })
+  }
+
+  return suggestions
+}
+
+/**
+ * Бронирование §8.2. Все проверки и записи — одна транзакция: ошибка не
+ * оставляет ни run-записи, ни забронированных карточек.
+ */
+export function startRun(
+  db: DatabaseSync,
+  input: { executorId: string; cardIds: string[]; actor: string },
+): Run {
   return tx(db, () => {
-    const open = activeRun(db)
-    if (open) {
+    const actor = requiredActor(input.actor)
+    const executor = requireExecutor(db, input.executorId)
+    const cardIds = normalizeCardIds(input.cardIds)
+
+    if (cardIds.length === 0) {
+      throw new UserError(3, 'для забега нужна хотя бы одна карточка')
+    }
+    if (cardIds.length > executor.runSize) {
       throw new UserError(
-        1,
-        `прогон ${open.id} ещё не закрыт (начат ${open.startedAt}): сначала run end ${open.id}`,
+        3,
+        `в забеге не больше ${executor.runSize} карточек, а передано ${cardIds.length}`,
       )
     }
 
-    const run: RunRecord = {
-      id: allocateRunId(db),
-      mode,
-      requests,
-      nearest: input.nearest === true,
-      approve: input.approve === true,
-      power,
-      startedAt: (input.now ?? new Date()).toISOString(),
+    const active = getActiveRun(db, executor.id)
+    if (active) {
+      throw new UserError(
+        3,
+        `у исполнителя ${executor.id} уже есть активный забег ${active.id}`,
+      )
+    }
+
+    const cards: Card[] = []
+    const earlier = new Set<string>()
+    for (const cardId of cardIds) {
+      const card = requireRunnableCard(db, executor, cardId)
+      requireDeps(db, card, earlier)
+      cards.push(card)
+      earlier.add(card.id)
+    }
+
+    const now = new Date()
+    const createdAt = nowIso(now)
+    const leaseUntil = new Date(now.getTime() + RUN_LEASE_MS).toISOString()
+    const run: Run = {
+      id: allocateId(db, 'run'),
+      executorId: executor.id,
+      status: 'active',
+      createdAt,
+      startedAt: createdAt,
       endedAt: null,
-      endReason: null,
-      segment: 1,
-      reviewRequired: false,
+      leaseUntil,
+      review: false,
+      note: null,
     }
 
     db.prepare(
-      'insert into runs (id, mode, requests, nearest, approve, power, started_at, ended_at, end_reason, segment) ' +
-        'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      `insert into runs (id, executor_id, status, created_at, started_at, ended_at, lease_until, review, note)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.id,
-      run.mode,
-      JSON.stringify(run.requests),
-      run.nearest ? 1 : 0,
-      run.approve ? 1 : 0,
-      run.power,
+      run.executorId,
+      run.status,
+      run.createdAt,
       run.startedAt,
-      null,
-      null,
-      run.segment,
+      run.endedAt,
+      run.leaseUntil,
+      run.review ? 1 : 0,
+      run.note,
     )
+
+    cards.forEach((card, index) => bookCard(db, run, card, index + 1, actor))
 
     appendEvent(db, {
       type: 'run.started',
-      actor: input.actor ?? 'owner',
+      actor,
       subject: run.id,
-      after: {
-        mode: run.mode,
-        requests: run.requests,
-        nearest: run.nearest,
-        approve: run.approve,
-        power: run.power,
-      },
+      after: getRun(db, run.id),
+      note: cards.map((card) => card.id).join(', '),
     })
 
-    return run
+    return getRun(db, run.id)!
   })
 }
 
-export interface EndRunInput {
-  id: string
-  reason: RunEndReason
-  /**
-   * Заказ питания на конце: пишется той же транзакцией, что и сам конец.
-   * Иначе `end` с неверным питанием закрывал прогон, а заказ терялся.
-   */
-  power?: RunPower
-  actor?: string
-  now?: Date
-}
+export function addToRun(
+  db: DatabaseSync,
+  input: { executorId: string; cardId: string; actor: string },
+): void {
+  tx(db, () => {
+    const actor = requiredActor(input.actor)
+    const executor = requireExecutor(db, input.executorId)
+    const run = getActiveRun(db, executor.id)
+    if (!run) {
+      throw new UserError(3, `у исполнителя ${executor.id} нет активного забега`)
+    }
 
-/**
- * Закрыть прогон с причиной. Прогон закрывается один раз: повторный end —
- * отказ, а не тихое переписывание конца. Остановка владельцем ревью не
- * требует, «задачи» и «решение» — требуют: непроверенный код к релизу не идёт.
- *
- * Питание проверяется до закрытия и ложится в ту же запись: `run end --power`
- * либо закрывает прогон с заказом, либо не закрывает вовсе.
- */
-export function endRun(db: DatabaseSync, input: EndRunInput): RunRecord {
-  return tx(db, () => {
-    if (!RUN_END_REASONS.includes(input.reason)) {
+    const existingCard = getCard(db, input.cardId)
+    if (!existingCard) throw new UserError(3, `карточка ${input.cardId} не найдена`)
+
+    const rows = listRunCards(db, run.id)
+    const existing = rows.find((row) => row.cardId === input.cardId)
+    if (existing && existing.status !== 'dropped') {
+      throw new UserError(3, `карточка ${input.cardId} уже в забеге ${run.id}`)
+    }
+
+    const card = requireRunnableCard(db, executor, input.cardId)
+
+    const active = rows.filter((row) => ACTIVE_CARD_STATUSES.includes(row.status))
+    if (active.length >= executor.runSize) {
       throw new UserError(
         3,
-        `причина конца прогона: owner, tasks или decision, а не ${String(input.reason)}`,
+        `в забеге ${run.id} уже ${active.length} карточек: не больше ${executor.runSize}`,
       )
     }
 
-    // проверка заказа стоит до записи: неверное питание не закрывает прогон
-    const power = input.power === undefined ? null : runPowerOf(input.power)
+    requireDeps(db, card, new Set(active.map((row) => row.cardId)), run.id)
 
-    const run = getRunRecord(db, input.id)
-    if (!run) throw new UserError(3, `прогон ${input.id} не найден`)
-    if (run.endedAt) {
-      throw new UserError(
-        1,
-        `прогон ${run.id} уже закрыт ${run.endedAt} (причина: ${run.endReason ?? 'не указана'}): ` +
-          'второй run end не нужен',
-      )
-    }
-
-    const endedAt = (input.now ?? new Date()).toISOString()
-    db.prepare(
-      'update runs set ended_at = ?, end_reason = ?, power = coalesce(?, power) ' +
-        'where id = ? and ended_at is null',
-    ).run(endedAt, input.reason, power, run.id)
-
-    appendEvent(db, {
-      type: 'run.ended',
-      actor: input.actor ?? 'owner',
-      subject: run.id,
-      after: {
-        reason: input.reason,
-        reviewRequired: input.reason !== 'owner',
-        ...(power === null ? {} : { power }),
-      },
-    })
-
-    return getRunRecord(db, run.id)!
+    const position =
+      active.reduce((max, row) => Math.max(max, row.position), 0) + 1
+    bookCard(db, run, card, position, actor)
   })
 }
 
-export interface ReviewRunInput {
-  id: string
-  verdict: RunVerdict
-  note?: string
-  actor?: string
-}
-
-/**
- * Отметка ревью закрытого прогона. Замечания без описания бесполезны,
- * поэтому `found` требует note. Связь с релизом появится отдельной задачей:
- * здесь важно только «проверено / не проверено» в самой записи прогона.
- */
-export function reviewRun(db: DatabaseSync, input: ReviewRunInput): RunRecord {
-  return tx(db, () => {
-    if (!RUN_VERDICTS.includes(input.verdict)) {
-      throw new UserError(3, `вердикт ревью: ok или found, а не ${String(input.verdict)}`)
+export function dropFromRun(
+  db: DatabaseSync,
+  input: { executorId: string; cardId: string; actor: string },
+): void {
+  tx(db, () => {
+    const actor = requiredActor(input.actor)
+    const run = getActiveRun(db, input.executorId)
+    if (!run) {
+      throw new UserError(3, `у исполнителя ${input.executorId} нет активного забега`)
     }
 
-    const run = getRunRecord(db, input.id)
-    if (!run) throw new UserError(3, `прогон ${input.id} не найден`)
-    if (!run.endedAt) {
+    const row = listRunCards(db, run.id).find((item) => item.cardId === input.cardId)
+    if (!row) {
+      throw new UserError(3, `карточка ${input.cardId} не в забеге ${run.id}`)
+    }
+
+    const card = getCard(db, input.cardId)
+    if (!card) throw new UserError(3, `карточка ${input.cardId} не найдена`)
+
+    if (row.status === 'in_progress' || card.status === 'in_progress') {
       throw new UserError(
-        1,
-        `прогон ${run.id} ещё идёт: ревью ставится закрытому прогону, сначала run end ${run.id}`,
+        3,
+        `карточка ${card.id} в работе: сначала finish или block`,
       )
     }
-
-    const note = input.note?.trim() ? input.note.trim() : null
-    if (input.verdict === 'found' && note === null) {
-      throw new UserError(3, 'ревью с замечаниями требует --note: что именно нашло')
+    if (row.status !== 'booked' || card.status !== 'booked') {
+      throw new UserError(3, `карточка ${card.id} не забронирована в ${run.id}`)
     }
 
-    appendEvent(db, {
-      type: 'run.reviewed',
-      actor: input.actor ?? 'owner',
-      subject: run.id,
-      after: { verdict: input.verdict, note },
-    })
-
-    return getRunRecord(db, run.id)!
+    db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+      run.id,
+      card.id,
+    )
+    releaseCard(db, card, actor, `снята с забега ${run.id}`)
   })
 }
 
-/** Последняя отметка ревью прогона: ревью переставляется, живёт последняя. */
-export function reviewOf(db: DatabaseSync, id: string): RunReview | null {
-  const events = listEvents(db, { subject: id }).filter((event) => event.type === 'run.reviewed')
-  const last = events[events.length - 1]
-  if (!last || !last.after) return null
-
-  try {
-    const parsed = JSON.parse(last.after) as { verdict?: string; note?: string | null }
-    if (parsed.verdict !== 'ok' && parsed.verdict !== 'found') return null
-    return { verdict: parsed.verdict, note: parsed.note ?? null, at: last.at, actor: last.actor }
-  } catch {
-    return null
-  }
-}
-
 /**
- * Готовность прогона к релизу: открытый прогон ещё не готов, остановленный
- * владельцем ревью не проходил, «задачи» и «решение» ждут ревью, а after
- * вердикта ok — готов (найденное — не готов).
+ * Следующая карточка забега §8.3: только booked, зависимости закрыты или
+ * закрыты раньше в этом забеге. blocked и in_progress пропускаются.
  */
-export function reviewState(run: RunRecord, review: RunReview | null): RunReviewState {
-  if (run.endedAt === null) return 'open'
-  if (review) return review.verdict === 'found' ? 'found' : 'ready'
-  return run.reviewRequired ? 'needs_review' : 'not_required'
-}
+export function nextCard(
+  db: DatabaseSync,
+  input: { executorId: string },
+): Card | null {
+  const run = getActiveRun(db, input.executorId)
+  if (!run) return null
 
-export interface RunReviewGap {
-  run: RunRecord
-  state: RunReviewState
-  review: RunReview | null
-}
+  const rows = listRunCards(db, run.id)
+  for (const row of rows) {
+    if (row.status !== 'booked') continue
 
-/**
- * Долг ревью: самый свежий закрытый прогон, который ревью требовал, но до ok не
- * дошёл — ни разу не смотрели или смотрели и нашли. Смотрим все закрытые
- * прогоны, а не только последний: прогон, закрытый владельцем, ревью не
- * требует, но не должен прятать непроверенный предыдущий. Релиз об этом
- * говорит, но не отменяет: релиз — команда владельца.
- */
-export function unreviewedRun(db: DatabaseSync): RunReviewGap | null {
-  const closed = runList(db, 'ended_at is not null', [])
+    const card = getCard(db, row.cardId)
+    if (!card || card.status !== 'booked') continue
 
-  // свежие первыми: предупреждаем про ближайший к релизу непроверенный прогон
-  for (let index = closed.length - 1; index >= 0; index--) {
-    const run = closed[index]
-    const review = reviewOf(db, run.id)
-    const state = reviewState(run, review)
-    if (state === 'needs_review' || state === 'found') return { run, state, review }
+    const completedEarlier = new Set(
+      rows
+        .filter(
+          (item) =>
+            item.position < row.position &&
+            (item.status === 'done' || item.status === 'review'),
+        )
+        .map((item) => item.cardId),
+    )
+    if (!depsStartable(db, card, completedEarlier)) continue
+
+    return card
   }
 
   return null
+}
+
+export function endRun(
+  db: DatabaseSync,
+  input: { executorId: string; actor: string; review?: boolean },
+): Run {
+  return tx(db, () => {
+    const actor = requiredActor(input.actor)
+    const run = getActiveRun(db, input.executorId)
+    if (!run) {
+      throw new UserError(3, `у исполнителя ${input.executorId} нет активного забега`)
+    }
+
+    const rows = listRunCards(db, run.id)
+    const inProgress = rows.some(
+      (row) =>
+        row.status === 'in_progress' ||
+        getCard(db, row.cardId)?.status === 'in_progress',
+    )
+    if (inProgress) {
+      throw new UserError(
+        3,
+        `в забеге ${run.id} есть карточки в работе: сначала finish или block`,
+      )
+    }
+
+    releaseRunCards(db, run, actor, `забег ${run.id} закрыт`)
+    const ended = closeRun(db, run, 'ended', nowIso(), input.review === true, null)
+
+    appendEvent(db, {
+      type: 'run.ended',
+      actor,
+      subject: run.id,
+      before: run,
+      after: ended,
+      note: input.review === true ? 'ревью запланировано' : undefined,
+    })
+
+    return ended
+  })
+}
+
+/** Ручное снятие брони владельцем §8.5: закрывает забег как cancelled. */
+export function releaseRun(
+  db: DatabaseSync,
+  input: { runId: string; actor: string; reason: string },
+): Run {
+  return tx(db, () => {
+    const actor = requiredActor(input.actor)
+    const run = getRun(db, input.runId)
+    if (!run) throw new UserError(3, `забег ${input.runId} не найден`)
+    if (run.status !== 'active') {
+      throw new UserError(3, `забег ${run.id} не активен: ${run.status}`)
+    }
+
+    const reason = input.reason.trim()
+    if (!reason) throw new UserError(3, 'нужна причина снятия забега: --reason «...»')
+
+    releaseRunCards(db, run, actor, `забег снят: ${reason}`)
+    const released = closeRun(db, run, 'cancelled', nowIso(), run.review, reason)
+
+    appendEvent(db, {
+      type: 'run.released',
+      actor,
+      subject: run.id,
+      before: run,
+      after: released,
+      note: reason,
+    })
+
+    return released
+  })
+}
+
+/**
+ * Истёкший lease §8.5: забег закрывается как lease_expired, карточки
+ * возвращаются в очередь. Ветки и worktree не трогаем — это забота git-слоя.
+ */
+export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number {
+  return tx(db, () => {
+    const cutoff = nowIso(now)
+    const rows = db
+      .prepare(
+        "select * from runs where status = 'active' and lease_until is not null and lease_until < ?",
+      )
+      .all(cutoff) as unknown as RunRow[]
+
+    for (const row of rows) {
+      const run = toRun(row)
+      releaseRunCards(db, run, 'system', `lease истёк: ${cutoff}`)
+      const expired = closeRun(db, run, 'lease_expired', cutoff, run.review, 'lease истёк')
+
+      appendEvent(db, {
+        type: 'run.lease_expired',
+        actor: 'system',
+        subject: run.id,
+        before: run,
+        after: expired,
+        note: cutoff,
+      })
+    }
+
+    return rows.length
+  })
 }

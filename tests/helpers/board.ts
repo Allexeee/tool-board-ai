@@ -4,9 +4,19 @@ import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { addExecutor, type NewExecutorInput } from '../../src/core/executors.ts'
 import { createCard, getCard, type NewCardInput } from '../../src/core/cards.ts'
+import { nowIso } from '../../src/core/clock.ts'
 import { openDb } from '../../src/core/db.ts'
+import { allocateId } from '../../src/core/ids.ts'
 import { initProject } from '../../src/core/project.ts'
-import type { Card, CardPhase, CardStatus, Executor } from '../../src/core/types.ts'
+import { getRun } from '../../src/core/runs.ts'
+import type {
+  Card,
+  CardPhase,
+  CardStatus,
+  Executor,
+  Run,
+  RunStatus,
+} from '../../src/core/types.ts'
 
 export interface BoardFixture {
   root: string
@@ -100,4 +110,56 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
   params.push(card.id)
   db.prepare(`update cards set ${sets.join(', ')} where id = ?`).run(...params)
   return getCard(db, card.id)!
+}
+
+export interface SeedRunInput {
+  id?: string
+  executorId?: string
+  status?: RunStatus
+  createdAt?: string
+  startedAt?: string | null
+  endedAt?: string | null
+  leaseUntil?: string | null
+  review?: boolean
+  note?: string | null
+  cardIds?: string[]
+}
+
+/**
+ * Забег для теста: по умолчанию активный забег `developer` без карточек.
+ * Переданные карточки бронируются так же, как это делает `startRun`.
+ */
+export function seedRun(db: DatabaseSync, input: SeedRunInput = {}): Run {
+  const id = input.id ?? allocateId(db, 'run')
+  const executorId = input.executorId ?? 'developer'
+  const status = input.status ?? 'active'
+  const createdAt = input.createdAt ?? nowIso()
+
+  db.prepare(
+    `insert into runs (id, executor_id, status, created_at, started_at, ended_at, lease_until, review, note)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    executorId,
+    status,
+    createdAt,
+    input.startedAt === undefined ? createdAt : input.startedAt,
+    input.endedAt ?? null,
+    input.leaseUntil ?? null,
+    input.review ? 1 : 0,
+    input.note ?? null,
+  )
+
+  const cardIds = input.cardIds ?? []
+  cardIds.forEach((cardId, index) => {
+    db.prepare(
+      'insert into run_cards (run_id, card_id, position, status) values (?, ?, ?, ?)',
+    ).run(id, cardId, index + 1, 'booked')
+    db.prepare(
+      `update cards set status = 'booked', holder = ?, run_id = ?, lease_until = ?, updated_at = ?
+       where id = ?`,
+    ).run(executorId, id, input.leaseUntil ?? null, nowIso(), cardId)
+  })
+
+  return getRun(db, id)!
 }

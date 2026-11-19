@@ -17,6 +17,35 @@ export type Severity = 'critical' | 'important' | 'other'
 
 export type ExecutorKind = 'human' | 'agent'
 
+export type RunStatus = 'active' | 'ended' | 'cancelled' | 'lease_expired'
+
+export type RunCardStatus =
+  | 'booked'
+  | 'in_progress'
+  | 'blocked'
+  | 'dropped'
+  | 'done'
+  | 'review'
+
+export interface Run {
+  id: string
+  executorId: string
+  status: RunStatus
+  createdAt: string
+  startedAt: string | null
+  endedAt: string | null
+  leaseUntil: string | null
+  review: boolean
+  note: string | null
+}
+
+export interface RunCard {
+  runId: string
+  cardId: string
+  position: number
+  status: RunCardStatus
+}
+
 export interface Executor {
   id: string
   kind: ExecutorKind
@@ -64,4 +93,10 @@ export interface Card {
   doneAt: string | null
   cancelReason: string | null
   note: string | null
+}
+
+export interface RunSuggestion {
+  executorId: string
+  cards: Card[]
+  group: string | null
 }

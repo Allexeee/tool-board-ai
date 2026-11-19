@@ -1,189 +1,215 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { join, resolve } from 'node:path'
-import { openDb } from '../../src/core/db.ts'
-import { getRunRecord, reviewOf, reviewState } from '../../src/core/runs.ts'
-import { makeRepo } from '../helpers/repo.ts'
+import { spawn, spawnSync } from 'node:child_process'
+import { resolve } from 'node:path'
+import { getCard, listCards } from '../../src/core/cards.ts'
+import { getRun, listRunCards, listRuns } from '../../src/core/runs.ts'
+import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 
-const bin = resolve('bin/toolbox-al.ts')
+const bin = resolve('bin/board.ts')
 
-function run(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', windowsHide: true })
+interface Result {
+  code: number | null
+  out: string
+  err: string
+}
+
+function run(dir: string, args: string[]): Result {
+  const result = spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    windowsHide: true,
+  })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 
-function project(): string {
-  const dir = makeRepo()
-  const init = run(dir, ['init'])
-  assert.equal(init.code, 0, init.err)
-  return dir
+function spawnBoard(dir: string, args: string[]): Promise<Result> {
+  return new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, [bin, ...args], {
+      cwd: dir,
+      windowsHide: true,
+    })
+    let out = ''
+    let err = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => (out += chunk))
+    child.stderr.on('data', (chunk: string) => (err += chunk))
+    child.on('close', (code) => resolvePromise({ code, out, err }))
+  })
 }
 
-function withDb<T>(dir: string, fn: (db: ReturnType<typeof openDb>) => T): T {
-  const db = openDb(join(dir, '.toolbox-al', 'tracker.db'))
-  try {
-    return fn(db)
-  } finally {
-    db.close()
+function json(dir: string, args: string[]): unknown {
+  const result = run(dir, [...args, '--json'])
+  assert.equal(result.code, 0, result.err)
+  return JSON.parse(result.out)
+}
+
+/** Проект с исполнителем developer и четырьмя задачами UI-1..UI-4. */
+function project(t: { after: (fn: () => void) => void }) {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'], runSize: 3 })
+  const cards = [1, 2, 3, 4].map((position) =>
+    seedCard(fixture.db, {
+      phase: 'task',
+      status: 'ready',
+      position,
+      title: `Задача ${position}`,
+    }),
+  )
+  return { ...fixture, cards }
+}
+
+test('run start --suggest берёт предложенный забег и блокирует второй', (t) => {
+  const { root, db } = project(t)
+
+  const started = json(root, ['run', 'start', '--as', 'developer', '--suggest', '1']) as {
+    id: string
+    status: string
+    executorId: string
   }
-}
+  assert.equal(started.id, 'RUN-1')
+  assert.equal(started.status, 'active')
+  assert.equal(started.executorId, 'developer')
 
-test('end с причиной owner закрывает прогон и ревью не требует', () => {
-  const dir = project()
-  const started = run(dir, ['run', 'start', '--mode', 'plan'])
+  const held = listCards(db, { holder: 'developer' })
+  assert.equal(held.length, 3)
+  assert.ok(held.every((card) => card.status === 'booked' && card.runId === 'RUN-1'))
+
+  const second = run(root, ['run', 'start', '--as', 'developer', '--cards', 'UI-4'])
+  assert.equal(second.code, 3)
+  assert.match(second.err, /активный забег/)
+})
+
+test('run start --cards, add, drop, next и end --review', (t) => {
+  const { root, db, cards } = project(t)
+
+  const started = run(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])
   assert.equal(started.code, 0, started.err)
+  assert.match(started.out, /RUN-1 · developer · UI-1/)
 
-  const ended = run(dir, ['run', 'end', 'RUN1', '--reason', 'owner'])
+  const added = json(root, ['run', 'add', cards[1].id, '--as', 'developer']) as {
+    run: { id: string }
+    card: { id: string; status: string }
+  }
+  assert.equal(added.run.id, 'RUN-1')
+  assert.equal(added.card.status, 'booked')
+
+  const next = json(root, ['run', 'next', '--as', 'developer']) as { id: string }
+  assert.equal(next.id, cards[0].id)
+
+  const dropped = json(root, ['run', 'drop', cards[1].id, '--as', 'developer']) as {
+    card: { id: string; status: string; runId: string | null }
+  }
+  assert.equal(dropped.card.status, 'ready')
+  assert.equal(dropped.card.runId, null)
+
+  const ended = run(root, ['run', 'end', '--as', 'developer', '--review'])
   assert.equal(ended.code, 0, ended.err)
-  assert.match(ended.out, /RUN1\s+закрыт · причина: владелец · ревью не было/)
+  assert.match(ended.out, /RUN-1 закрыт/)
+  assert.match(ended.out, /board review list/)
 
-  const show = run(dir, ['run', 'show'])
-  assert.equal(show.code, 0, show.err)
-  assert.match(show.out, /RUN1\s+закрыт .*ревью не было/)
-  assert.match(show.out, /причина: владелец/)
+  const runRecord = getRun(db, 'RUN-1')!
+  assert.equal(runRecord.status, 'ended')
+  assert.equal(runRecord.review, true)
+  assert.equal(getCard(db, cards[0].id)!.status, 'ready')
 
-  withDb(dir, (db) => {
-    const record = getRunRecord(db, 'RUN1')!
-    assert.equal(record.endReason, 'owner')
-    assert.ok(record.endedAt, 'конец прогона записан')
-    assert.equal(record.reviewRequired, false, 'остановка владельцем ревью не требует')
-    assert.equal(reviewState(record, reviewOf(db, 'RUN1')), 'not_required')
-  })
+  const listed = json(root, ['run', 'list']) as Array<{ id: string; status: string }>
+  assert.equal(listed.length, 1)
+  assert.equal(listed[0].id, 'RUN-1')
+  assert.equal(listed[0].status, 'ended')
 })
 
-test('end с задачами требует ревью, а вердикт ok делает прогон готовым к релизу', () => {
-  const dir = project()
-  run(dir, ['run', 'start', '--mode', 'all'])
+test('run list снимает просроченный lease', (t) => {
+  const { root, db, cards } = project(t)
+  json(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])
+  db.prepare("update runs set lease_until = '2000-01-01T00:00:00.000Z' where id = 'RUN-1'").run()
 
-  const ended = run(dir, ['run', 'end', 'RUN1', '--reason', 'tasks'])
-  assert.equal(ended.code, 0, ended.err)
-  assert.match(ended.out, /RUN1\s+закрыт · причина: задачи · нужно ревью/)
-
-  withDb(dir, (db) => {
-    const record = getRunRecord(db, 'RUN1')!
-    assert.equal(record.reviewRequired, true, 'прогон без остановки владельцем ревью требует')
-    assert.equal(reviewState(record, reviewOf(db, 'RUN1')), 'needs_review')
-  })
-
-  const pending = run(dir, ['run', 'show'])
-  assert.match(pending.out, /нужно ревью/)
-
-  const reviewed = run(dir, ['run', 'review', 'RUN1', '--verdict', 'ok', '--as', 'reviewer'])
-  assert.equal(reviewed.code, 0, reviewed.err)
-  assert.match(reviewed.out, /RUN1\s+ревью: ok · готов к релизу/)
-
-  const show = run(dir, ['run', 'show'])
-  assert.match(show.out, /готов к релизу/)
-  assert.doesNotMatch(show.out, /нужно ревью/)
-
-  withDb(dir, (db) => {
-    const record = getRunRecord(db, 'RUN1')!
-    const review = reviewOf(db, 'RUN1')
-    assert.equal(review?.verdict, 'ok')
-    assert.equal(review?.actor, 'reviewer')
-    assert.equal(reviewState(record, review), 'ready')
-  })
+  const listed = json(root, ['run', 'list']) as Array<{ id: string; status: string }>
+  assert.equal(listed[0].status, 'lease_expired')
+  assert.equal(getCard(db, cards[0].id)!.status, 'ready')
+  assert.equal(getCard(db, cards[0].id)!.holder, null)
 })
 
-test('повторный end закрытого прогона отвергается и не переписывает конец', () => {
-  const dir = project()
-  run(dir, ['run', 'start', '--mode', 'plan'])
-  assert.equal(run(dir, ['run', 'end', 'RUN1', '--reason', 'tasks']).code, 0)
+test('run next без доступных карточек завершается кодом 1', (t) => {
+  const { root, db, cards } = project(t)
+  json(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])
+  db.prepare("update cards set status = 'blocked', holder = null where id = ?").run(cards[0].id)
+  db.prepare("update run_cards set status = 'blocked' where card_id = ?").run(cards[0].id)
 
-  const again = run(dir, ['run', 'end', 'RUN1', '--reason', 'owner'])
-  assert.equal(again.code, 1)
-  assert.match(again.err, /RUN1 уже закрыт/)
-  assert.match(again.err, /второй run end не нужен/)
-
-  withDb(dir, (db) => {
-    const record = getRunRecord(db, 'RUN1')!
-    assert.equal(record.endReason, 'tasks', 'причина конца осталась первой')
-    assert.equal(record.reviewRequired, true)
-  })
+  const next = run(root, ['run', 'next', '--as', 'developer'])
+  assert.equal(next.code, 1)
+  assert.match(next.err, /нет доступных карточек/)
 })
 
-test('ревью с замечаниями требует описания и не делает прогон готовым', () => {
-  const dir = project()
-  run(dir, ['run', 'start', '--mode', 'plan'])
-  assert.equal(run(dir, ['run', 'end', 'RUN1', '--reason', 'decision']).code, 0)
+test('run release снимает забег и требует причину', (t) => {
+  const { root, db, cards } = project(t)
+  json(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])
 
-  const bare = run(dir, ['run', 'review', 'RUN1', '--verdict', 'found'])
-  assert.equal(bare.code, 3)
-  assert.match(bare.err, /--note/)
-
-  const found = run(dir, ['run', 'review', 'RUN1', '--verdict', 'found', '--note', 'плавающий тест'])
-  assert.equal(found.code, 0, found.err)
-  assert.match(found.out, /ревью: found · ревью нашло замечания/)
-  assert.match(found.out, /плавающий тест/)
-
-  const show = run(dir, ['run', 'show'])
-  assert.match(show.out, /ревью нашло замечания/)
-  assert.doesNotMatch(show.out, /готов к релизу/)
-})
-
-test('ревью открытого прогона и неизвестная причина конца — отказы', () => {
-  const dir = project()
-  run(dir, ['run', 'start', '--mode', 'plan'])
-
-  const early = run(dir, ['run', 'review', 'RUN1', '--verdict', 'ok'])
-  assert.equal(early.code, 1)
-  assert.match(early.err, /ещё идёт/)
-
-  const badReason = run(dir, ['run', 'end', 'RUN1', '--reason', 'отдых'])
-  assert.equal(badReason.code, 3)
-  assert.match(badReason.err, /owner, tasks или decision/)
-
-  const noReason = run(dir, ['run', 'end', 'RUN1'])
+  const noReason = run(root, ['run', 'release', 'RUN-1'])
   assert.equal(noReason.code, 3)
-  assert.match(noReason.err, /run end RUN1 --reason/)
+  assert.match(noReason.err, /причина/)
 
-  // отказы ничего не закрыли: прогон всё ещё активный
-  const show = run(dir, ['run', 'show'])
-  assert.match(show.out, /идёт с/)
-  withDb(dir, (db) => assert.equal(getRunRecord(db, 'RUN1')?.endedAt, null))
+  const released = json(root, ['run', 'release', 'RUN-1', '--reason', 'агент умер']) as {
+    status: string
+    note: string
+  }
+  assert.equal(released.status, 'cancelled')
+  assert.equal(released.note, 'агент умер')
+  assert.equal(getCard(db, cards[0].id)!.status, 'ready')
+
+  const again = run(root, ['run', 'release', 'RUN-1', '--reason', 'ещё раз'])
+  assert.equal(again.code, 3)
+  assert.match(again.err, /не активен/)
 })
 
-test('run show печатает активный прогон и последний закрытый рядом', () => {
-  const dir = project()
-  run(dir, ['run', 'start', '--mode', 'plan'])
-  run(dir, ['run', 'end', 'RUN1', '--reason', 'tasks'])
-  run(dir, ['run', 'review', 'RUN1', '--verdict', 'ok'])
-  run(dir, ['run', 'start', '--mode', 'all', '--approve'])
+test('run start проверяет --as, источник карточек и подкоманду', (t) => {
+  const { root } = project(t)
 
-  const show = run(dir, ['run', 'show'])
-  assert.equal(show.code, 0, show.err)
+  const noActor = run(root, ['run', 'start', '--cards', 'UI-1'])
+  assert.equal(noActor.code, 3)
+  assert.match(noActor.err, /--as/)
 
-  const [active, closed] = show.out.trim().split('\n')
-  assert.match(active, /RUN2\s+идёт с/)
-  assert.match(closed, /RUN1\s+закрыт/)
-  assert.match(closed, /готов к релизу/)
+  const noSource = run(root, ['run', 'start', '--as', 'developer'])
+  assert.equal(noSource.code, 3)
+  assert.match(noSource.err, /--cards|--suggest/)
+
+  const both = run(root, [
+    'run', 'start', '--as', 'developer', '--cards', 'UI-1', '--suggest', '1',
+  ])
+  assert.equal(both.code, 3)
+  assert.match(both.err, /одно/)
+
+  const usage = run(root, ['run', 'wat'])
+  assert.equal(usage.code, 3)
+  assert.match(usage.err, /использование/)
 })
 
-test('run next отдаёт следующую задачу и остаток', () => {
-  const dir = project()
-  run(dir, ['request', 'add', 'Очередь'])
-  run(dir, ['feature', 'add', 'Фича', '--request', 'R1'])
-  run(dir, ['stage', 'add', 'F1', 'Этап', '--goal', 'g', '--appetite', '1 день'])
-  run(dir, ['stage', 'activate', 'F1.S1'])
-  run(dir, ['task', 'add', 'F1.S1', 'Шаг', '--dod', 'a', '--skill', 'backend', '--scope', 'src/**'])
-  run(dir, ['run', 'start', '--mode', 'plan', '--request', 'R1'])
+test('два процесса не бронируют одну карточку дважды', async (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer-1', skills: ['dev'] })
+  seedExecutor(fixture.db, { id: 'developer-2', skills: ['dev'] })
+  const card = seedCard(fixture.db, { phase: 'task', status: 'ready', position: 1 })
 
-  const next = run(dir, ['run', 'next'])
-  assert.equal(next.code, 0, next.err)
-  assert.match(next.out, /F1\.S1-1/)
-  assert.match(next.out, /осталось: 1 из 1/)
+  const [first, second] = await Promise.all([
+    spawnBoard(fixture.root, ['run', 'start', '--as', 'developer-1', '--cards', card.id, '--json']),
+    spawnBoard(fixture.root, ['run', 'start', '--as', 'developer-2', '--cards', card.id, '--json']),
+  ])
 
-  const show = run(dir, ['run', 'show'])
-  assert.match(show.out, /дальше: F1\.S1-1/)
-})
+  const results = [first, second]
+  assert.equal(results.filter((result) => result.code === 0).length, 1)
+  assert.equal(results.filter((result) => result.code !== 0).length, 1)
 
-test('run end принимает причину контекст', () => {
-  const dir = project()
-  run(dir, ['run', 'start', '--mode', 'plan'])
-  const ended = run(dir, ['run', 'end', 'RUN1', '--reason', 'context'])
-  assert.equal(ended.code, 0, ended.err)
-
-  const show = run(dir, ['run', 'show'])
-  assert.match(show.out, /предел контекста/)
+  const booked = getCard(fixture.db, card.id)!
+  assert.equal(booked.status, 'booked')
+  assert.ok(['developer-1', 'developer-2'].includes(booked.holder!))
+  assert.ok(booked.runId !== null)
+  assert.equal(listRuns(fixture.db).length, 1)
+  assert.equal(listRunCards(fixture.db, booked.runId!).length, 1)
+  assert.equal(
+    listCards(fixture.db, { status: 'booked' }).filter((item) => item.id === card.id).length,
+    1,
+  )
 })
