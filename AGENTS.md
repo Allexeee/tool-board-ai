@@ -1,7 +1,7 @@
 <!-- board:begin -->
 ## board
 
-Доска карточек: `node bin/board.ts`.
+Доска карточек: `board` (если CLI в PATH); в плагине OpenCode — `BOARD_CLI`.
 
 - Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.
 - Карточка: запрос → `card shape` → `card submit` → владелец `card approve`/`card reject`.

@@ -70,6 +70,6 @@ test('существующий AGENTS.md сохраняется, блок board 
   const after = readFileSync(path, 'utf8')
   assert.match(after, /Мой проект/)
   assert.match(after, /хвост/)
-  assert.match(after, /node bin\/board\.ts/)
+  assert.match(after, /board/)
   assert.doesNotMatch(after, /старое/)
 })

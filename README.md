@@ -6,46 +6,65 @@
 
 ## Установка
 
-Клонировать один раз и положить в `PATH`:
+CLI ставится один раз; в каждый проект его класть не нужно.
 
 ```powershell
-git clone https://github.com/Allexeee/toolbox-al.git "$env:USERPROFILE\tools\toolbox-al"
-$env:Path += ";$env:USERPROFILE\tools\toolbox-al"
+# скопируйте/клонируйте этот репозиторий (ветку с доской) в удобное место
+git clone <repo-url> "$env:USERPROFILE\tools\board"
+$env:Path += ";$env:USERPROFILE\tools\board"
 ```
 
-Дальше в любом проекте: `board init`.
+В корне лежит `board.cmd`; он запускает `node bin\board.ts`. Проверка:
+`board --version`.
 
-`npm install` из git не работает: Node отказывается обрабатывать TypeScript внутри `node_modules`. Запуск идёт из обычного каталога.
+Скилл `board` и команда `/review` вызывают `board`, поэтому CLI должен быть в
+`PATH` (хотя бы в окружении, из которого стартует OpenCode). Если не хотите
+менять `PATH` глобально, запускайте CLI как `node <путь>\bin\board.ts ...`;
+`BOARD_CLI` перекрывает путь только для инструментов плагина:
 
-## Первый запуск на проекте
+```powershell
+[Environment]::SetEnvironmentVariable('BOARD_CLI', "$env:USERPROFILE\tools\board\bin\board.ts", 'User')
+```
+
+`npm install` из git не работает: Node не обрабатывает TypeScript внутри `node_modules`. Запуск идёт из обычного каталога.
+
+## Установка в существующий проект
+
+`toolbox-al` в проекте не нужен. `init` создаёт новую доску с нуля и не
+переносит старые данные.
+
+В корне существующего проекта:
 
 ```bash
-node bin/board.ts init
+git checkout -b dev          # если ветки dev ещё нет
+board init                   # или: node <путь>\bin\board.ts init
+git add -A
+git commit -m "chore: board init"
+board executor add developer --kind agent --skills dev
+board doctor
+board now
 ```
 
-Что создаёт `init`:
+`init` создаёт:
 
-- `.board/board.db` — база (источник истины доски) и исполнитель `owner`;
+- `.board/board.db` — базу (истина доски) и исполнителя `owner`;
 - `docs/board/terminology.md` — термины и команды владельца;
 - `.opencode/skills/board/SKILL.md`, `.opencode/plugins/board/index.ts`, `.opencode/command/review.md` — интеграция с OpenCode;
 - блок `board` в `AGENTS.md`;
 - записи `.board/`, `.worktrees/` в `.gitignore`.
 
-Затем:
+Скелет нужно закоммитить: `finish` мержит в `dev` и требует чистое основное
+дерево. `.board/` в git не попадает, `main` меняется только `release`.
 
-```bash
-node bin/board.ts executor add developer --kind agent --skills dev
-git branch dev        # если ветки ещё нет
-```
-
-`doctor` скажет, чего не хватает.
+В примерах ниже `board` — CLI из `PATH`. Если запускаете из исходников,
+замените его на `node <путь>\bin\board.ts`.
 
 ## Карточка
 
 Создавать может кто угодно, выполнять — только носитель нужного навыка.
 
 ```bash
-node bin/board.ts card add --group UI --title "Форма входа" --skill dev
+board card add --group UI --title "Форма входа" --skill dev
 ```
 
 - **Запрос** (`phase=request`) → разбор: `card shape UI-1 --as developer [--from card.json]`.
@@ -59,11 +78,11 @@ node bin/board.ts card add --group UI --title "Форма входа" --skill de
 После утверждения карточка встаёт в очередь задач по оценке. `now 3` показывает запросы и очередь; `now 1`/`now 2` — вероятные забеги.
 
 ```bash
-node bin/board.ts run start --as developer --cards UI-1,UI-7   # или --suggest 1
-node bin/board.ts take UI-1 --as developer
-node bin/board.ts finish UI-1 --as developer --summary "готово"
-node bin/board.ts run next --as developer
-node bin/board.ts run end --as developer [--review]
+board run start --as developer --cards UI-1,UI-7   # или --suggest 1
+board take UI-1 --as developer
+board finish UI-1 --as developer --summary "готово"
+board run next --as developer
+board run end --as developer [--review]
 ```
 
 `take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` (если `review_required`) или `done`.
@@ -75,8 +94,8 @@ node bin/board.ts run end --as developer [--review]
 `board review list --json` отдаёт карточки на ревью (body, шаги, scope, diff). Команда `/review` в OpenCode запускает свежего субагента, который выносит вердикт по каждой:
 
 ```bash
-node bin/board.ts review submit UI-1 --verdict done --note "..." --reviewer review
-node bin/board.ts review finding UI-1 --severity critical --text "..."
+board review submit UI-1 --verdict done --note "..." --reviewer review
+board review finding UI-1 --severity critical --text "..."
 ```
 
 CLI субагентов не порождает — он готовит пакет и принимает вердикты. Находки ревью становятся запросами; `critical` блокирует `main`, пока не закрыта.
@@ -86,16 +105,16 @@ CLI субагентов не порождает — он готовит пак�
 `release` — команда владельца: проверяет, что в `dev` нет незавершённых карточек и открытых `critical`-находок, и мержит `dev` в `main` (`--no-ff`).
 
 ```bash
-node bin/board.ts release
+board release
 ```
 
 ## Доска
 
 ```bash
-node bin/board.ts now      # вкладка 3: открытые карточки
-node bin/board.ts now 0    # владельцу: утвердить, owner-задачи, вопросы
-node bin/board.ts now 1    # мои забеги
-node bin/board.ts now 2    # все забеги
+board now      # вкладка 3: открытые карточки
+board now 0    # владельцу: утвердить, owner-задачи, вопросы
+board now 1    # мои забеги
+board now 2    # все забеги
 ```
 
 Фильтры: `--group UI`, `--skill dev`, `--status ready,waiting`, `--mine`, `--phase request`, `--limit`, `--all`. Все команды принимают `--json`.
@@ -106,9 +125,9 @@ node bin/board.ts now 2    # все забеги
 - `docs/board/terminology.md` — живой документ (источник истины для языка проекта); читают все, термины пишут все, команды владельца — только owner.
 
 ```bash
-node bin/board.ts decision add UI-1 "Используем VK API" --kind decision --as developer
-node bin/board.ts term add "забег" "сессия агента над 1–3 карточками" --as developer
-node bin/board.ts command add "RUN" "начать забег по очереди" --as owner
+board decision add UI-1 "Используем VK API" --kind decision --as developer
+board term add "забег" "сессия агента над 1–3 карточками" --as developer
+board command add "RUN" "начать забег по очереди" --as owner
 ```
 
 ## Git (вариант B)
@@ -146,4 +165,4 @@ node bin/board.ts command add "RUN" "начать забег по очереди
 
 ## OpenCode
 
-`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term` и команду `/review`. Плагин не содержит логики: он вызывает `node bin/board.ts … --json`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.
+`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term` и команду `/review`. Плагин не содержит логики: он вызывает `board … --json`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.
