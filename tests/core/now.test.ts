@@ -59,6 +59,26 @@ test('now 3: заголовок — сделано сегодня, dev опер�
   assert.equal(data.header.lastDone[4].title, 'Ещё раньше')
 })
 
+test('now 3: «сегодня» — локальные сутки, а не UTC', (t) => {
+  const { db, root } = board(t)
+
+  // локальная полночь текущих суток
+  const midnight = new Date()
+  midnight.setHours(0, 0, 0, 0)
+
+  // за минуту до локальной полуночи — вчера, за минуту после — сегодня
+  const before = new Date(midnight.getTime() - 60_000)
+  const after = new Date(midnight.getTime() + 60_000)
+
+  seedCard(db, { phase: 'task', status: 'done', doneAt: before.toISOString(), title: 'Вчера' })
+  seedCard(db, { phase: 'task', status: 'done', doneAt: after.toISOString(), title: 'Сегодня' })
+
+  const data = nowData(db, { view: 3, executorId: 'owner', root })
+  assert.equal(data.header.doneToday, 1)
+  assert.equal(data.header.lastDone[0].title, 'Сегодня')
+  assert.equal(data.header.lastDone[1].title, 'Вчера')
+})
+
 test('now 3: devAhead считает только needs_merge в dev, не в main и без revert', (t) => {
   const { db, root } = board(t)
 
