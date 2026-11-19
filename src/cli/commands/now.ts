@@ -1,199 +1,74 @@
 ﻿import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { advanceTime } from '../../core/clock.ts'
-import { nowView, ownerView, taskQueue, queueFreeReason, sessionIsWorthShowing, type ExecutorState, type OwnerStageRow, type OwnerStageStatus, type QueueRow } from '../../core/views.ts'
-import { pendingRelease } from '../../core/git/release.ts'
-import { readLiveSessions } from '../../core/usage.ts'
-import { listTasks } from '../../core/tasks.ts'
-import { boolFlag, type ParsedArgs } from '../args.ts'
-import { ok, paint, setColorMode, type ColorName } from '../output.ts'
+import { nowData, renderNow, type NowFilters, type NowViewKind } from '../../core/now.ts'
+import type { CardPhase, CardStatus } from '../../core/types.ts'
+import { boolFlag, numberFlag, stringFlag, stringsFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
-
-// цвет несёт только смысл: готово — можно не читать, в работе — смотри сюда, очередь — фон.
-const stageColor: Record<OwnerStageStatus, ColorName> = {
-  done: 'green',
-  merge: 'cyan',
-  wip: 'magenta',
-  pending: 'gray',
-}
-
-// цвет строки очереди отвечает на один вопрос: можно ли брать эту задачу сейчас.
-// зелёная — можно, жёлтая — уже в чьей-то руке, циан — в работе, серая — чего-то ждёт.
-export const queueColor = (row: QueueRow): ColorName => {
-  if (row.status === 'active' || row.holder !== null) return 'cyan'
-  if (row.hand !== null) return 'yellow'
-  if (row.status !== 'ready' || row.waitsFor.length > 0) return 'gray'
-  return row.reason === queueFreeReason ? 'green' : 'gray'
-}
+import { ok } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
-  if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
+  if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
-  advanceTime(db)
 
-  // цвет выключается и флагом, и NO_COLOR; в пайп он не течёт вовсе.
-  if (boolFlag(args, 'no-color')) setColorMode(false)
+  try {
+    const view = parseView(args.positionals[0])
+    const executorId = stringFlag(args, 'as') ?? 'owner'
+    const filters = parseFilters(args)
 
-  const all = boolFlag(args, 'all')
-  // живые субагенты — из базы OpenCode; без неё список пуст, доска печатается как раньше
-  const sessions = readLiveSessions({ projectDir: project.root })
-  const view = nowView(db, { all, sessions })
-  const owner = ownerView(db, { all })
-
-  // ownerView уже отдаёт по строке на каждую фичу, включая фичу без этапов
-  const stageRows: OwnerStageRow[] = [...owner.stages]
-
-  const featureWidth = Math.max(0, ...stageRows.map((row) => row.featureId.length))
-  const progressWidth = Math.max(
-    0,
-    ...stageRows.map((row) => `${row.progress.current}/${row.progress.total}`.length),
-  )
-  const decisionsByFeature = new Map(view.features.map((feature) => [feature.id, feature.decisions ?? []]))
-
-  const printed = new Set<string>()
-  const features = stageRows.map((row) => {
-    const progress = `${row.progress.current}/${row.progress.total}`
-    const line = [
-      row.featureId.padEnd(featureWidth),
-      progress.padEnd(progressWidth),
-      paint(row.status.padEnd(7), stageColor[row.status]),
-      row.name,
-    ]
-      .join('  ')
-      .trimEnd()
-    if (printed.has(row.featureId)) return line
-    printed.add(row.featureId)
-    const decisions = decisionsByFeature.get(row.featureId) ?? []
-    return [line, ...decisions.map((decision) => `   · ${decision.question} → ${decision.choice}`)].join('\n')
-  })
-
-  // очередь отвечает на вопрос «что можно взять»: задачи в работе и в руке видны
-  // в строках исполнителей, второй раз их печатать незачем
-  const queue = taskQueue(db).filter((row) => row.holder === null && row.hand === null)
-  const queueIdWidth = Math.max(0, ...queue.map((row) => row.taskId.length))
-  const queueLines = queue.map((row) => {
-    // у свободной задачи причина стоит на месте пустоты: владелец сразу видит, чего она ждёт.
-    const note = row.reason
-      ? ` · ${row.reason}`
-      : row.waitsFor.length > 0
-        ? ` · ждёт ${row.waitsFor.join(', ')}`
-        : ''
-    return `  ${paint(row.taskId.padEnd(queueIdWidth), queueColor(row))}  ${row.title}${note}`
-  })
-
-  // исполнители и живые субагенты — один список: субагент и есть исполнитель.
-  // сессия агента, который уже есть в списке, своей строки не заводит.
-  const holderNames = new Set(view.holders.map((holder) => holder.executor))
-  // сессия без исполнителя — только живая работа: занята и обновлялась недавно
-  const freeSessions = view.sessions.filter(
-    (session) => !holderNames.has(session.agent) && sessionIsWorthShowing(session),
-  )
-  const nameWidth = Math.max(
-    12,
-    ...view.holders.map((holder) => holder.executor.length),
-    ...freeSessions.map((session) => session.agent.length),
-  )
-
-  const holders = view.holders.map((holder) => {
-    // занятость и рука — две правды: печатаем обе в одной строке.
-    // у «работа зарезервирована» рука уже внутри состояния, второй раз её не дублируем.
-    const hand = holder.state.kind === 'reserved' ? '' : handText(holder.hand)
-    return `  ${holder.executor.padEnd(nameWidth)} ${[stateText(holder.state), hand].filter(Boolean).join(' · ')}`
-  })
-
-  // живая сессия без исполнителя — такая же строка списка, а не отдельный блок.
-  // сюда попадают только занятые и свежие: заголовок не печатаем, он не обновляется
-  const sessionRows = freeSessions.map(
-    (session) => `  ${session.agent.padEnd(nameWidth)} ${paint('работает', 'cyan')}`,
-  )
-  const executors = [...holders, ...sessionRows]
-
-  const plans = view.plans.map((plan) => `  ${plan.id.padEnd(5)} ${plan.requestId.padEnd(5)} ${plan.title}`)
-
-  // фичи, слитые в dev, но ещё не выпущенные: владельцу видно, что просит релиза
-  const waitingMain = view.waitingMain.map((feature) => `  ${feature.id}  ${feature.name}`)
-
-  // пустая строка сверху и табуляция в начале каждой строки: вывод читается как блок, а не как эхо команды.
-  const text =
-    `Открытых запросов: ${view.requests.length}\n\n` +
-    (features.length
-      ? features.join('\n')
-      : all
-        ? 'фич нет'
-        : 'фич в работе нет') +
-    (view.plans.length ? '\n\nПЛАНЫ НА УТВЕРЖДЕНИЕ\n' + plans.join('\n') : '') +
-    (waitingMain.length ? '\n\nЖДЁТ MAIN\n' + waitingMain.join('\n') : '') +
-    (queue.length ? `\n\nОЧЕРЕДЬ\n` + queueLines.join('\n') : '') +
-    '\n\nИСПОЛНИТЕЛИ\n' +
-    (executors.length ? executors.join('\n') : '  нет')
-
-  ok(view, '\n' + indent(text))
-  return 0
-}
-
-/** Строка исполнителя: работа, ожидание с причиной или отдых — по фактическим сигналам. */
-function stateText(state: ExecutorState): string {
-  switch (state.kind) {
-    case 'work':
-      return state.taskId
-        ? paint(`работает над ${state.taskId} · ${state.title ?? ''}`.trimEnd(), 'cyan')
-        : paint('работает', 'cyan')
-    case 'silent':
-      return paint(`работает над ${state.taskId} · молчит ${silentMinutes(state.silentMs)}`, 'cyan')
-    case 'test':
-      return paint(`ждёт результата теста: ${state.taskId}`, 'cyan')
-    case 'command':
-      return paint(`ждёт команды: ${state.taskId}`, 'cyan')
-    case 'reserved': {
-      const reason = state.reason ? ` · ждёт: ${state.reason}` : ''
-      return paint(`работа зарезервирована: ${state.taskIds.join(', ')}${reason}`, 'cyan')
-    }
-    case 'review':
-      return paint(`на ревью: ${state.taskId}`, 'cyan')
-    case 'wait': {
-      const until = state.until ? ` (до ${shortTime(state.until)})` : ''
-      return paint(`ждёт: ${state.reason}${until}`, 'cyan')
-    }
-    case 'offline':
-      return paint(`нет связи ${connectionAge(state.sinceMs)}`, 'gray')
-    default:
-      return paint('отдыхает', 'gray')
+    const data = nowData(db, { view, executorId, filters, root: project.root })
+    ok(data, renderNow(data))
+    return 0
+  } finally {
+    db.close()
   }
 }
 
-/** Рука в строке исполнителя: все задачи, а не только первая. */
-function handText(hand: string[]): string {
-  return hand.length > 0 ? `рука: ${hand.join(', ')}` : ''
+/** `board now [0|1|2|3]`; без номера — вкладка 3. */
+function parseView(raw: string | undefined): NowViewKind {
+  if (raw === undefined) return 3
+  if (raw === '0' || raw === '1' || raw === '2' || raw === '3') {
+    return Number(raw) as NowViewKind
+  }
+  throw new UserError(3, `вкладка now — 0, 1, 2 или 3, а не «${raw}»`)
 }
 
-/** «нет связи N»: часы до двух суток, дальше дни — минуты тут не читаются. */
-function connectionAge(ms: number): string {
-  const hours = Math.floor(ms / 3_600_000)
-  if (hours < 48) return `${Math.max(2, hours)} ч`
-  return `${Math.floor(hours / 24)} дн`
+function parseFilters(args: ParsedArgs): NowFilters {
+  const filters: NowFilters = {}
+
+  const group = stringFlag(args, 'group')
+  if (group !== undefined) filters.group = group
+
+  const skill = stringFlag(args, 'skill')
+  if (skill !== undefined) filters.skill = skill
+
+  const statuses = splitFlag(args, 'status')
+  if (statuses.length > 0) filters.status = statuses as CardStatus[]
+
+  const phase = stringFlag(args, 'phase')
+  if (phase !== undefined) filters.phase = parsePhase(phase)
+
+  if (boolFlag(args, 'mine')) filters.mine = true
+
+  const limit = numberFlag(args, 'limit')
+  if (limit !== undefined) {
+    if (limit < 0) throw new UserError(3, '--limit — целое число от 0')
+    filters.limit = limit
+  }
+
+  if (boolFlag(args, 'all')) filters.all = true
+
+  return filters
 }
 
-/** «молчит N мин»: минута — минимальная единица, ноль минут читается как ошибка. */
-function silentMinutes(ms: number): string {
-  return `${Math.max(1, Math.round(ms / 60_000))} мин`
+function parsePhase(raw: string): CardPhase {
+  if (raw === 'request' || raw === 'task') return raw
+  throw new UserError(3, `--phase — request или task, а не «${raw}»`)
 }
 
-/** Пустые строки остаются разделителями, содержательные — начинаются с табуляции. */
-function indent(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => (line.trim() === '' ? '' : '\t' + line))
-    .join('\n')
+function splitFlag(args: ParsedArgs, name: string): string[] {
+  return stringsFlag(args, name)
+    .flatMap((value) => value.split(','))
+    .map((value) => value.trim())
+    .filter(Boolean)
 }
-
-/** Срок занятости печатается локальным временем: человек читает часы, а не ISO. */
-function shortTime(iso: string): string {
-  const at = new Date(iso)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${pad(at.getHours())}:${pad(at.getMinutes())}`
-}
-
-
-
-

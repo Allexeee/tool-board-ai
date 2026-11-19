@@ -63,6 +63,13 @@ export interface SeedCardInput extends Partial<NewCardInput> {
   urgency?: number | null
   position?: number | null
   waiveDeps?: boolean
+  doneAt?: string | null
+  inDev?: boolean
+  inMain?: boolean
+  revertedAt?: string | null
+  needsMerge?: boolean
+  holder?: string | null
+  createdAt?: string
 }
 
 /**
@@ -104,6 +111,34 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
   if (input.waiveDeps !== undefined) {
     sets.push('waive_deps = ?')
     params.push(input.waiveDeps ? 1 : 0)
+  }
+  if (input.doneAt !== undefined) {
+    sets.push('done_at = ?')
+    params.push(input.doneAt)
+  }
+  if (input.inDev !== undefined) {
+    sets.push('in_dev = ?')
+    params.push(input.inDev ? 1 : 0)
+  }
+  if (input.inMain !== undefined) {
+    sets.push('in_main = ?')
+    params.push(input.inMain ? 1 : 0)
+  }
+  if (input.revertedAt !== undefined) {
+    sets.push('reverted_at = ?')
+    params.push(input.revertedAt)
+  }
+  if (input.needsMerge !== undefined) {
+    sets.push('needs_merge = ?')
+    params.push(input.needsMerge ? 1 : 0)
+  }
+  if (input.holder !== undefined) {
+    sets.push('holder = ?')
+    params.push(input.holder)
+  }
+  if (input.createdAt !== undefined) {
+    sets.push('created_at = ?')
+    params.push(input.createdAt)
   }
   if (sets.length === 0) return card
 
