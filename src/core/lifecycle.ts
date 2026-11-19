@@ -20,6 +20,7 @@ import {
 } from './git.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
+import { revalidateDependents } from './review.ts'
 import { getActiveRun, listRunCards, RUN_LEASE_MS } from './runs.ts'
 import { addStep } from './steps.ts'
 import type { Card, CardStatus } from './types.ts'
@@ -68,19 +69,36 @@ function assertScore(raw: number | null, label: string): void {
 }
 
 /**
- * Начало разбора: только `new`. Карточка переходит в `shaping`, держатель
- * получает lease на 30 минут, `shaped_at` фиксирует начало разбора.
+ * Начало разбора: `new` или истёкший `shaping`. Карточка переходит в `shaping`,
+ * держатель получает lease на 30 минут, `shaped_at` фиксирует начало разбора.
  */
 export function shapeCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
   return tx(db, () => {
-    const card = requireCard(db, input.id)
+    let card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
+    const now = new Date()
+    const at = now.toISOString()
+
+    if (card.status === 'shaping' && card.leaseUntil !== null && card.leaseUntil < at) {
+      db.prepare(
+        "update cards set status = 'new', holder = null, lease_until = null, updated_at = ? where id = ?",
+      ).run(at, card.id)
+      const expired = getCard(db, card.id)!
+      appendEvent(db, {
+        type: 'card.lease_expired',
+        actor: 'system',
+        subject: card.id,
+        before: card,
+        after: expired,
+        note: at,
+      })
+      card = expired
+    }
+
     if (card.status !== 'new') {
       throw new UserError(3, `карточка ${card.id} в статусе ${card.status}: разбирается только new`)
     }
 
-    const now = new Date()
-    const at = now.toISOString()
     const leaseUntil = new Date(now.getTime() + SHAPING_LEASE_MS).toISOString()
 
     db.prepare(
@@ -243,6 +261,8 @@ export function ownerDone(
       `update cards set status = 'done', done_at = ?, summary = ?, updated_at = ? where id = ?`,
     ).run(at, summary, at, card.id)
 
+    refreshReadiness(db)
+
     const updated = getCard(db, card.id)!
     appendEvent(db, {
       type: 'card.done',
@@ -339,12 +359,22 @@ export function cancelCard(
       revertedAt = nowIso()
     }
 
+    if (card.runId) {
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        card.runId,
+        card.id,
+      )
+    }
+
     const at = nowIso()
     db.prepare(
       `update cards set status = 'cancelled', cancel_reason = ?, waive_deps = ?,
        reverted_at = ?, revert_commit = ?, holder = null, run_id = null, lease_until = null,
        updated_at = ? where id = ?`,
     ).run(reason, input.waiveDeps === true ? 1 : 0, revertedAt, revertCommit, at, card.id)
+
+    refreshReadiness(db)
+    if (!input.waiveDeps) revalidateDependents(db, card.id)
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {
@@ -391,6 +421,9 @@ export function reopenCard(
       if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
       moveCard(db, card.id, { top: true })
     }
+
+    refreshReadiness(db)
+    revalidateDependents(db, card.id)
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {
@@ -735,14 +768,24 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
 }
 
 /**
- * Продление lease §8.5: карточка и её забег получают ещё два часа. Команда
- * касается только карточек, которые держит исполнитель.
+ * Продление lease §8.5: для `shaping` — 30 минут, для `booked`/`in_progress` —
+ * два часа (вместе с забегом). Остальные статусы продлить нельзя.
  */
 export function touchCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
   return tx(db, () => {
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
 
+    if (
+      card.status !== 'shaping' &&
+      card.status !== 'booked' &&
+      card.status !== 'in_progress'
+    ) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} в статусе ${card.status} нельзя продлить: touch применим только к shaping, booked и in_progress`,
+      )
+    }
     if (card.holder !== actor) {
       throw new UserError(
         3,
@@ -750,7 +793,8 @@ export function touchCard(db: DatabaseSync, input: { id: string; actor: string }
       )
     }
 
-    const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
+    const leaseMs = card.status === 'shaping' ? SHAPING_LEASE_MS : RUN_LEASE_MS
+    const leaseUntil = new Date(Date.now() + leaseMs).toISOString()
     db.prepare('update cards set lease_until = ?, updated_at = ? where id = ?').run(
       leaseUntil,
       nowIso(),

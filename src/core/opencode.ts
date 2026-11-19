@@ -118,7 +118,10 @@ async function call(ctx, args) {
     if (error.code === 'ENOENT') {
       return { content: 'CLI board не найден. Укажите BOARD_CLI или положите bin/board.ts', isError: true }
     }
-    return { content: String(error.stderr ?? error.message).trim(), isError: true }
+    return {
+      content: error.stdout?.trim() || error.stderr?.trim() || error.message,
+      isError: true,
+    }
   }
 }
 

@@ -7,7 +7,7 @@ import { editCard, getCard } from '../../src/core/cards.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { openDb } from '../../src/core/db.ts'
 import { isAncestor, runGit } from '../../src/core/git.ts'
-import { blockCard, finishCard, takeCard, touchCard } from '../../src/core/lifecycle.ts'
+import { blockCard, finishCard, shapeCard, takeCard, touchCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { endRun, getActiveRun, listRunCards, nextCard, startRun } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
@@ -210,6 +210,24 @@ test('touch продлевает lease карточки и забега на д�
   const touched = touchCard(db, { id: card.id, actor: 'developer' })
   assert.ok(touched.leaseUntil! > '2000-01-01T00:00:00.000Z')
   assert.equal(getActiveRun(db, 'developer')!.leaseUntil, touched.leaseUntil)
+})
+
+test('touch на shaping продлевает на 30 минут, а на done/review отказывает', (t) => {
+  const { db } = board(t)
+  const shaping = seedCard(db, { phase: 'request', status: 'new' })
+  shapeCard(db, { id: shaping.id, actor: 'developer' })
+  db.prepare("update cards set lease_until = '2000-01-01T00:00:00.000Z' where id = ?").run(shaping.id)
+
+  const before = Date.now()
+  const touched = touchCard(db, { id: shaping.id, actor: 'developer' })
+  const after = Date.now()
+  const leaseMs = new Date(touched.leaseUntil!).getTime()
+  assert.ok(leaseMs >= before + 29 * 60 * 1000 && leaseMs <= after + 31 * 60 * 1000)
+
+  const done = seedCard(db, { phase: 'task', status: 'done', holder: 'developer' })
+  const review = seedCard(db, { phase: 'task', status: 'review', holder: 'developer' })
+  assert.throws(() => touchCard(db, { id: done.id, actor: 'developer' }), /нельзя продлить/)
+  assert.throws(() => touchCard(db, { id: review.id, actor: 'developer' }), /нельзя продлить/)
 })
 
 test('block помечает run_cards blocked: run next пропускает, run end снимает', (t) => {

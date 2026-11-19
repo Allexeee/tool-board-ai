@@ -603,3 +603,25 @@ test('reclaimExpired закрывает просроченный забег и �
   )
   assert.equal(getRun(db, future.id)!.status, 'lease_expired')
 })
+
+test('reclaimExpired возвращает просроченную shaping-карточку в new', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, {
+    phase: 'request',
+    status: 'shaping',
+    holder: 'developer',
+    leaseUntil: '2000-01-01T00:00:00.000Z',
+  })
+
+  assert.equal(reclaimExpired(db), 1)
+
+  const after = getCard(db, card.id)!
+  assert.equal(after.status, 'new')
+  assert.equal(after.holder, null)
+  assert.equal(after.leaseUntil, null)
+
+  const event = listEvents(db, card.id).at(-1)!
+  assert.equal(event.type, 'card.lease_expired')
+  assert.equal(event.actor, 'system')
+  assert.equal(reclaimExpired(db), 0)
+})

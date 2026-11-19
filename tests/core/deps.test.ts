@@ -23,10 +23,11 @@ function board(t: { after: (fn: () => void) => void }): Board {
 
 test('закрытая зависимость переводит задачу из waiting в ready', (t) => {
   const { db } = board(t)
-  const done = seedCard(db, { phase: 'task', status: 'done' })
+  const done = seedCard(db, { phase: 'task', status: 'in_progress' })
   const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
 
   addDep(db, waiting.id, done.id)
+  db.prepare("update cards set status = 'done' where id = ?").run(done.id)
 
   assert.equal(refreshReadiness(db), 1)
   assert.equal(getCard(db, waiting.id)!.status, 'ready')
@@ -58,9 +59,10 @@ test('cancelled без waive_deps не удовлетворяет зависим
   assert.equal(refreshReadiness(db), 0)
   assert.equal(getCard(db, waiting.id)!.status, 'waiting')
 
-  const waived = seedCard(db, { phase: 'task', status: 'cancelled', waiveDeps: true })
+  const waived = seedCard(db, { phase: 'task', status: 'cancelled', waiveDeps: false })
   const second = seedCard(db, { phase: 'task', status: 'waiting' })
   addDep(db, second.id, waived.id)
+  db.prepare('update cards set waive_deps = 1 where id = ?').run(waived.id)
 
   assert.equal(refreshReadiness(db), 1)
   assert.equal(getCard(db, second.id)!.status, 'ready')
@@ -121,7 +123,6 @@ test('ready с незакрытой зависимостью возвращае�
   const ready = seedCard(db, { phase: 'task', status: 'ready' })
   addDep(db, ready.id, blocker.id)
 
-  assert.equal(refreshReadiness(db), 1)
   assert.equal(getCard(db, ready.id)!.status, 'waiting')
   assert.equal(getCard(db, blocker.id)!.status, 'booked')
 })
@@ -141,9 +142,10 @@ test('waiting с несколькими зависимостями ждёт по
 
 test('refreshReadiness пишет событие только при смене статуса', (t) => {
   const { db } = board(t)
-  const done = seedCard(db, { phase: 'task', status: 'done' })
+  const done = seedCard(db, { phase: 'task', status: 'in_progress' })
   const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
   addDep(db, waiting.id, done.id)
+  db.prepare("update cards set status = 'done' where id = ?").run(done.id)
 
   assert.equal(refreshReadiness(db), 1)
   const countAfterChange = listEvents(db, waiting.id).length
@@ -173,7 +175,7 @@ test('добавление и удаление зависимости', (t) => {
 test('причина добавления и удаления зависимости пишется в журнал', (t) => {
   const { db } = board(t)
   const blocker = seedCard(db, { phase: 'task', status: 'done' })
-  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
+  const waiting = seedCard(db, { phase: 'task', status: 'ready' })
 
   addDep(db, waiting.id, blocker.id, 'developer', 'форма ждёт API')
   const added = listEvents(db, waiting.id).at(-1)!
@@ -192,17 +194,16 @@ test('причина добавления и удаления зависимос
   assert.equal(removed.note, 'зависимость снята')
 })
 
-test('удаление последней зависимости делает задачу готовой', (t) => {
+test('удаление последней зависимости делает задачу готовой, а добавление незакрытой — waiting', (t) => {
   const { db } = board(t)
   const blocker = seedCard(db, { phase: 'task', status: 'booked' })
-  const waiting = seedCard(db, { phase: 'task', status: 'waiting' })
-  addDep(db, waiting.id, blocker.id)
+  const card = seedCard(db, { phase: 'task', status: 'ready' })
 
-  assert.equal(refreshReadiness(db), 0)
-  removeDep(db, waiting.id, blocker.id)
+  addDep(db, card.id, blocker.id)
+  assert.equal(getCard(db, card.id)!.status, 'waiting')
 
-  assert.equal(refreshReadiness(db), 1)
-  assert.equal(getCard(db, waiting.id)!.status, 'ready')
+  removeDep(db, card.id, blocker.id)
+  assert.equal(getCard(db, card.id)!.status, 'ready')
 })
 
 test('цикл отвергается с путём, самозависимость тоже', (t) => {

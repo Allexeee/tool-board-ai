@@ -69,6 +69,7 @@ export interface SeedCardInput extends Partial<NewCardInput> {
   revertedAt?: string | null
   needsMerge?: boolean
   holder?: string | null
+  leaseUntil?: string | null
   createdAt?: string
 }
 
@@ -135,6 +136,10 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
   if (input.holder !== undefined) {
     sets.push('holder = ?')
     params.push(input.holder)
+  }
+  if (input.leaseUntil !== undefined) {
+    sets.push('lease_until = ?')
+    params.push(input.leaseUntil)
   }
   if (input.createdAt !== undefined) {
     sets.push('created_at = ?')

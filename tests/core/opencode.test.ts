@@ -35,6 +35,7 @@ test('плагин объявляет инструмент board_now и зовё
   assert.match(plugin, /board\.ts/)
   assert.match(plugin, /BOARD_CLI/)
   assert.match(plugin, /Plugin\.define/)
+  assert.match(plugin, /error\.stdout\?\.trim\(\)\s*\|\|\s*error\.stderr\?\.trim\(\)\s*\|\|\s*error\.message/)
 })
 
 test('команда ревью упоминает review list и review submit', () => {

@@ -87,6 +87,7 @@ export function addDep(
       after: { dependsOn: to },
       note: reason,
     })
+    refreshReadiness(db)
   })
 }
 
@@ -112,6 +113,7 @@ export function removeDep(
       before: { dependedOn: to },
       note: reason,
     })
+    refreshReadiness(db)
   })
 }
 

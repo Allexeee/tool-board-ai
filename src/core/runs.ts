@@ -658,6 +658,30 @@ export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number
       })
     }
 
-    return rows.length
+    const shapingIds = db
+      .prepare(
+        "select id from cards where status = 'shaping' and lease_until is not null and lease_until < ? order by created_at, id",
+      )
+      .all(cutoff) as Array<{ id: string }>
+
+    for (const { id } of shapingIds) {
+      const before = getCard(db, id)
+      if (!before) continue
+
+      db.prepare(
+        "update cards set status = 'new', holder = null, lease_until = null, updated_at = ? where id = ?",
+      ).run(cutoff, id)
+
+      appendEvent(db, {
+        type: 'card.lease_expired',
+        actor: 'system',
+        subject: id,
+        before,
+        after: getCard(db, id),
+        note: cutoff,
+      })
+    }
+
+    return rows.length + shapingIds.length
   })
 }

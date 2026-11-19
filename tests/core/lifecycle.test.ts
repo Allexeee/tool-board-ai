@@ -18,7 +18,7 @@ import {
   submitCard,
   takeCard,
 } from '../../src/core/lifecycle.ts'
-import { endRun, startRun, suggestRuns } from '../../src/core/runs.ts'
+import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 
 type Board = ReturnType<typeof makeBoard>
@@ -82,13 +82,23 @@ test('shape переводит new в shaping: держатель, аренда 
   assert.equal(event.actor, 'developer')
 })
 
-test('shape разбирает только new', (t) => {
+test('shape разбирает только new или истёкший shaping', (t) => {
   const { db } = board(t)
-  const card = seedCard(db, { status: 'shaping' })
-  db.prepare('update cards set holder = ? where id = ?').run('developer', card.id)
+  const card = seedCard(db, {
+    status: 'shaping',
+    holder: 'developer',
+    leaseUntil: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  })
 
   assert.throws(() => shapeCard(db, { id: card.id, actor: 'marketer' }), /shaping/)
   assert.equal(getCard(db, card.id)!.holder, 'developer')
+
+  // Если lease истёк, карточку можно перехватить
+  db.prepare("update cards set lease_until = '2000-01-01T00:00:00.000Z' where id = ?").run(card.id)
+  const reshaped = shapeCard(db, { id: card.id, actor: 'marketer' })
+  assert.equal(reshaped.status, 'shaping')
+  assert.equal(reshaped.holder, 'marketer')
+  assert.ok(listEvents(db, card.id).some((e) => e.type === 'card.lease_expired'))
 })
 
 test('submit принимает только держатель и требует оценки', (t) => {
@@ -413,4 +423,85 @@ test('block очищает run_id и аренду', (t) => {
   assert.equal(blocked.runId, null)
   assert.equal(blocked.leaseUntil, null)
   assert.equal(blocked.holder, null)
+})
+
+test('ownerDone разблокирует waiting зависимого', (t) => {
+  const { db } = board(t)
+  const ownerCard = seedCard(db, { skill: 'owner', group: 'OPS', title: 'VK' })
+  const dependent = seedCard(db, { phase: 'task', status: 'waiting', position: 1 })
+  addDep(db, dependent.id, ownerCard.id)
+  assert.equal(getCard(db, dependent.id)!.status, 'waiting')
+
+  ownerDone(db, { id: ownerCard.id, actor: 'owner', summary: 'создана' })
+  assert.equal(getCard(db, dependent.id)!.status, 'ready')
+})
+
+test('reopenCard возвращает ready и booked зависимых в waiting', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const origin = seedCard(db, { phase: 'task', status: 'done', position: 1 })
+  const readyDep = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+  addDep(db, readyDep.id, origin.id)
+
+  const bookedDep = seedCard(db, { phase: 'task', status: 'ready', position: 3 })
+  editCard(db, { id: bookedDep.id, actor: 'owner', patch: { needsMerge: false } })
+  addDep(db, bookedDep.id, origin.id)
+  const run = startRun(db, { executorId: 'developer', cardIds: [bookedDep.id], actor: 'developer' })
+  assert.equal(getCard(db, bookedDep.id)!.status, 'booked')
+
+  reopenCard(db, { id: origin.id, actor: 'owner', reason: 'переделать' })
+
+  assert.equal(getCard(db, readyDep.id)!.status, 'waiting')
+  assert.equal(getCard(db, bookedDep.id)!.status, 'waiting')
+  assert.equal(getCard(db, bookedDep.id)!.runId, null)
+  assert.equal(getCard(db, bookedDep.id)!.holder, null)
+  assert.equal(listRunCards(db, run.id).find((r) => r.cardId === bookedDep.id)!.status, 'dropped')
+})
+
+test('cancelCard с waiveDeps открывает waiting зависимого, без waive — возвращает ready/booked в waiting', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  // 1) waiveDeps: waiting -> ready
+  const waivedOrigin = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const waitingDep = seedCard(db, { phase: 'task', status: 'waiting', position: 2 })
+  addDep(db, waitingDep.id, waivedOrigin.id)
+  assert.equal(getCard(db, waitingDep.id)!.status, 'waiting')
+
+  cancelCard(db, { id: waivedOrigin.id, actor: 'owner', reason: 'не нужно', waiveDeps: true })
+  assert.equal(getCard(db, waitingDep.id)!.status, 'ready')
+
+  // 2) без waiveDeps: ready/booked -> waiting
+  const origin = seedCard(db, { phase: 'task', status: 'review', position: 3 })
+  const readyDep = seedCard(db, { phase: 'task', status: 'ready', position: 4 })
+  addDep(db, readyDep.id, origin.id)
+  const bookedDep = seedCard(db, { phase: 'task', status: 'ready', position: 5 })
+  editCard(db, { id: bookedDep.id, actor: 'owner', patch: { needsMerge: false } })
+  addDep(db, bookedDep.id, origin.id)
+  const run = startRun(db, { executorId: 'developer', cardIds: [bookedDep.id], actor: 'developer' })
+  assert.equal(getCard(db, readyDep.id)!.status, 'ready')
+  assert.equal(getCard(db, bookedDep.id)!.status, 'booked')
+
+  cancelCard(db, { id: origin.id, actor: 'owner', reason: 'откат', waiveDeps: false })
+  assert.equal(getCard(db, readyDep.id)!.status, 'waiting')
+  assert.equal(getCard(db, bookedDep.id)!.status, 'waiting')
+  assert.equal(listRunCards(db, run.id).find((r) => r.cardId === bookedDep.id)!.status, 'dropped')
+})
+
+test('cancelCard на карточке в in_progress помечает run_cards dropped и позволяет завершить забег', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+
+  const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  takeCard(db, { id: card.id, actor: 'developer', root: '' })
+  assert.equal(getCard(db, card.id)!.status, 'in_progress')
+
+  cancelCard(db, { id: card.id, actor: 'developer', reason: 'отмена в работе' })
+  assert.equal(getCard(db, card.id)!.status, 'cancelled')
+  assert.equal(listRunCards(db, run.id).find((r) => r.cardId === card.id)!.status, 'dropped')
+
+  const ended = endRun(db, { executorId: 'developer', actor: 'developer' })
+  assert.equal(ended.status, 'ended')
 })
