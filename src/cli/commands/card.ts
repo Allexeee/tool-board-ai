@@ -1,6 +1,17 @@
 ﻿import { createCard, editCard, getCard, listCards, type CardFilter, type CardPatch } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
+import { listDiscussion, type Discussion } from '../../core/discussion.ts'
+import { listEvents, type EventRecord } from '../../core/events.ts'
 import { findProject } from '../../core/project.ts'
+import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
+import {
+  addStep,
+  doneStep,
+  listSteps,
+  removeStep,
+  stepProgress,
+  type Step,
+} from '../../core/steps.ts'
 import type { Card, CardPhase, CardStatus } from '../../core/types.ts'
 import { boolFlag, numberFlag, stringFlag, stringsFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
@@ -49,14 +60,24 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
-  const show = (args: ParsedArgs): number => {
-    const id = args.positionals[0]
-    if (!id) throw new UserError(3, 'использование: board card show UI-1')
-
+  const requireCard = (id: string | undefined, usage: string) => {
+    if (!id) throw new UserError(3, `использование: ${usage}`)
     const card = getCard(db, id)
     if (!card) throw new UserError(3, `карточка ${id} не найдена`)
+    return card
+  }
 
-    ok(card, formatCard(card))
+  const show = (args: ParsedArgs): number => {
+    const card = requireCard(args.positionals[0], 'board card show UI-1')
+    const detail = {
+      ...card,
+      steps: listSteps(db, card.id),
+      refs: listRefs(db, card.id),
+      discussion: listDiscussion(db, card.id),
+      events: listEvents(db, card.id),
+    }
+
+    ok(detail, formatCard(card, detail.steps, detail.refs, detail.discussion, detail.events))
     return 0
   }
 
@@ -97,12 +118,108 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const step = (args: ParsedArgs): number => {
+    const action = args.positionals[0]
+    const card = requireCard(
+      args.positionals[1],
+      'использование: board card step add|done|remove|list UI-1 ...',
+    )
+    const actor = stringFlag(args, 'as')
+
+    if (action === 'add') {
+      const text = args.positionals.slice(2).join(' ')
+      if (!text) {
+        throw new UserError(3, 'использование: board card step add UI-1 "текст шага"')
+      }
+      const created = addStep(db, { cardId: card.id, text, actor })
+      ok(created, `${card.id} · шаг ${created.seq} добавлен: ${created.text}`)
+      return 0
+    }
+
+    if (action === 'done') {
+      const updated = doneStep(db, {
+        cardId: card.id,
+        seq: positiveNumber(args.positionals[2], 'номер шага'),
+        actor,
+      })
+      ok(
+        updated,
+        `${card.id} · шаг ${updated.seq} ${updated.done ? 'отмечен' : 'снова открыт'}: ${updated.text}`,
+      )
+      return 0
+    }
+
+    if (action === 'remove') {
+      const removed = removeStep(db, {
+        cardId: card.id,
+        seq: positiveNumber(args.positionals[2], 'номер шага'),
+        actor,
+      })
+      ok(removed, `${card.id} · шаг ${removed.seq} удалён: ${removed.text}`)
+      return 0
+    }
+
+    if (action === 'list') {
+      const steps = listSteps(db, card.id)
+      ok(steps, formatSteps(steps, stepProgress(db, card.id)))
+      return 0
+    }
+
+    throw new UserError(3, 'использование: board card step add|done|remove|list UI-1 ...')
+  }
+
+  const ref = (args: ParsedArgs): number => {
+    const action = args.positionals[0]
+    const card = requireCard(
+      args.positionals[1],
+      'использование: board card ref add|remove|list UI-1 ...',
+    )
+    const actor = stringFlag(args, 'as')
+
+    if (action === 'add') {
+      const kind = stringFlag(args, 'kind')
+      if (!kind) throw new UserError(3, 'нужен --kind link|doc|spec')
+      const value = stringFlag(args, 'value')
+      if (!value) throw new UserError(3, 'нужен --value «ссылка или путь»')
+
+      const added = addRef(db, {
+        cardId: card.id,
+        kind: kind as Ref['kind'],
+        value,
+        title: stringFlag(args, 'title'),
+        actor,
+      })
+      ok(added, `${card.id} · ссылка #${added.id} добавлена: ${added.kind} ${added.value}`)
+      return 0
+    }
+
+    if (action === 'remove') {
+      const removed = removeRef(db, {
+        cardId: card.id,
+        id: positiveNumber(args.positionals[2], 'номер ссылки'),
+        actor,
+      })
+      ok(removed, `${card.id} · ссылка #${removed.id} удалена: ${removed.value}`)
+      return 0
+    }
+
+    if (action === 'list') {
+      const refs = listRefs(db, card.id)
+      ok(refs, formatRefs(refs))
+      return 0
+    }
+
+    throw new UserError(3, 'использование: board card ref add|remove|list UI-1 ...')
+  }
+
   try {
     if (args.sub === 'add') return add(args)
     if (args.sub === 'list') return list(args)
     if (args.sub === 'show') return show(args)
     if (args.sub === 'edit') return edit(args)
-    throw new UserError(3, 'использование: board card add|list|show|edit')
+    if (args.sub === 'step') return step(args)
+    if (args.sub === 'ref') return ref(args)
+    throw new UserError(3, 'использование: board card add|list|show|edit|step|ref')
   } finally {
     db.close()
   }
@@ -127,11 +244,29 @@ function switchFlag(args: ParsedArgs, positive: string, negative: string): boole
   return undefined
 }
 
+function positiveNumber(raw: string | undefined, label: string): number {
+  const value = Number(raw)
+  if (raw === undefined || raw.trim() === '' || !Number.isInteger(value) || value < 1) {
+    throw new UserError(3, `${label} — целое число от 1`)
+  }
+  return value
+}
+
 function value(text: string | number | null): string {
   return text === null || text === '' ? '—' : String(text)
 }
 
-function formatCard(card: Card): string {
+function shortTime(iso: string): string {
+  return iso.slice(0, 16).replace('T', ' ')
+}
+
+function formatCard(
+  card: Card,
+  steps: Step[],
+  refs: Ref[],
+  discussion: Discussion[],
+  events: EventRecord[],
+): string {
   const lines = [
     `${card.id} · ${card.title}`,
     `статус: ${card.status} · фаза: ${card.phase} · навык: ${value(card.skill)}`,
@@ -141,6 +276,64 @@ function formatCard(card: Card): string {
   ]
   if (card.note !== null && card.note !== '') lines.push(`заметка: ${card.note}`)
   if (card.body !== '') lines.push('', card.body)
+
+  lines.push('', formatSteps(steps, progressOf(steps)))
+  lines.push('', formatRefs(refs))
+  lines.push('', formatDiscussion(discussion))
+  lines.push('', formatEvents(events))
+  return lines.join('\n')
+}
+
+function progressOf(steps: Step[]): { done: number; total: number } {
+  return { done: steps.filter((step) => step.done).length, total: steps.length }
+}
+
+function formatSteps(steps: Step[], progress: { done: number; total: number }): string {
+  const lines = [`ШАГИ (${progress.done}/${progress.total})`]
+  if (steps.length === 0) lines.push('  шагов нет')
+  for (const step of steps) {
+    lines.push(`  ${step.done ? '[x]' : '[ ]'} ${step.seq}. ${step.text}`)
+  }
+  return lines.join('\n')
+}
+
+function formatRefs(refs: Ref[]): string {
+  const lines = ['ССЫЛКИ']
+  if (refs.length === 0) lines.push('  ссылок нет')
+  for (const ref of refs) {
+    const title = ref.title === null ? '' : ` — ${ref.title}`
+    lines.push(`  ${ref.id}. ${ref.kind} ${ref.value}${title}`)
+  }
+  return lines.join('\n')
+}
+
+function formatDiscussion(discussion: Discussion[]): string {
+  const lines = ['ОБСУЖДЕНИЕ']
+  if (discussion.length === 0) lines.push('  обсуждения нет')
+  for (const item of discussion) {
+    if (item.kind === 'answer') {
+      lines.push(
+        `  ответ #${item.id} → вопрос #${value(item.answerTo)} · ${item.author} · ${shortTime(item.createdAt)}`,
+      )
+    } else if (item.kind === 'question') {
+      lines.push(
+        `  вопрос #${item.id} · ${item.author} · ${shortTime(item.createdAt)} · ${item.status}`,
+      )
+    } else {
+      lines.push(`  ${item.kind} #${item.id} · ${item.author} · ${shortTime(item.createdAt)}`)
+    }
+    lines.push(`      ${item.text}`)
+  }
+  return lines.join('\n')
+}
+
+function formatEvents(events: EventRecord[]): string {
+  const lines = ['ЖУРНАЛ']
+  if (events.length === 0) lines.push('  событий нет')
+  for (const event of events) {
+    const note = event.note === null ? '' : ` — ${event.note}`
+    lines.push(`  ${shortTime(event.at)} ${event.type} ${event.actor}${note}`)
+  }
   return lines.join('\n')
 }
 

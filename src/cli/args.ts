@@ -19,7 +19,7 @@ const KNOWN_FLAGS = new Set([
   'summary', 'waive-dependents', 'done', 'reopen', 'severity', 'text', 'verdict',
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',
-  'merge-commit', 'block',
+  'merge-commit', 'block', 'question',
 ])
 
 const BOOLEAN_FLAGS = new Set([

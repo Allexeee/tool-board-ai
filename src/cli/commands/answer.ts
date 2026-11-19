@@ -1,22 +1,56 @@
-import { findProject } from '../../core/project.ts'
+import type { DatabaseSync } from 'node:sqlite'
+import { answer, openQuestions } from '../../core/discussion.ts'
 import { openDb } from '../../core/db.ts'
-import { answer } from '../../core/questions.ts'
-import { stringFlag, type ParsedArgs } from '../args.ts'
-import { ok } from '../output.ts'
+import { findProject } from '../../core/project.ts'
+import { numberFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
+import { ok } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
-  if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
+  if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
 
-  const id = args.positionals[0]
-  const text = args.positionals.slice(1).join(' ') || stringFlag(args, 'text')
-  const actor = stringFlag(args, 'as') ?? 'owner'
+  try {
+    const cardId = args.positionals[0]
+    const text = args.positionals.slice(1).join(' ')
+    if (!cardId || !text) {
+      throw new UserError(3, 'использование: board answer UI-1 "ответ" --as owner')
+    }
 
-  if (!id || !text) throw new UserError(3, 'использование: answer Q1 "ответ"')
+    const reply = answer(db, {
+      cardId,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      questionId: resolveQuestion(db, cardId, numberFlag(args, 'question')),
+      text,
+    })
+    ok(
+      reply,
+      `${reply.cardId} · ответ #${reply.id} на вопрос #${reply.answerTo}: ${reply.text}`,
+    )
+    return 0
+  } finally {
+    db.close()
+  }
+}
 
-  const question = answer(db, { id, answer: text, actor })
-  ok(question, `${question.id}  ответ принят: ${question.answer}`)
-  return 0
+/** Без --question отвечаем единственному открытому вопросу; иначе просим номер. */
+function resolveQuestion(
+  db: DatabaseSync,
+  cardId: string,
+  explicit: number | undefined,
+): number {
+  if (explicit !== undefined) return explicit
+
+  const open = openQuestions(db, cardId)
+  if (open.length === 0) {
+    throw new UserError(3, `у карточки ${cardId} открытых вопросов нет`)
+  }
+  if (open.length > 1) {
+    throw new UserError(
+      3,
+      `у карточки ${cardId} несколько открытых вопросов: укажите --question <id>`,
+    )
+  }
+  return open[0]!.id
 }
