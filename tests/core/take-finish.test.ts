@@ -233,3 +233,55 @@ test('block помечает run_cards blocked: run next пропускает, r
   endRun(db, { executorId: 'developer', actor: 'developer' })
   assert.equal(listRunCards(db, run.id).find((row) => row.cardId === first.id)!.status, 'dropped')
 })
+
+test('take отказывает, пока в забеге есть карточка в работе, и пускает после block', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const first = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const second = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+  editCard(db, { id: first.id, actor: 'owner', patch: { needsMerge: false } })
+  editCard(db, { id: second.id, actor: 'owner', patch: { needsMerge: false } })
+  startRun(db, { executorId: 'developer', cardIds: [first.id, second.id], actor: 'developer' })
+
+  takeCard(db, { id: first.id, actor: 'developer', root: '' })
+  assert.throws(
+    () => takeCard(db, { id: second.id, actor: 'developer', root: '' }),
+    /в работе/,
+  )
+
+  blockCard(db, { id: first.id, actor: 'developer', reason: 'needs_decision' })
+  assert.equal(takeCard(db, { id: second.id, actor: 'developer', root: '' }).status, 'in_progress')
+})
+
+test('после finish первой карточки вторая берётся', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const first = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const second = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+  editCard(db, { id: first.id, actor: 'owner', patch: { needsMerge: false } })
+  editCard(db, { id: second.id, actor: 'owner', patch: { needsMerge: false } })
+  startRun(db, { executorId: 'developer', cardIds: [first.id, second.id], actor: 'developer' })
+
+  takeCard(db, { id: first.id, actor: 'developer', root: '' })
+  finishCard(db, { id: first.id, actor: 'developer', summary: 'готово', root: '' })
+
+  assert.equal(takeCard(db, { id: second.id, actor: 'developer', root: '' }).status, 'in_progress')
+})
+
+test('finish отказывает, если общий worktree не на ветке карточки, и не мержит', (t) => {
+  const { root, db } = repoBoard(t)
+  const { cardId, branch, worktree } = taken(root, db)
+
+  // Общий worktree переключён на другую ветку (dev): finish карточки на card/<id>
+  // не должен молча делать sync с dev в чужой ветке.
+  runGit(worktree, ['checkout', 'dev'])
+  const devHead = runGit(root, ['rev-parse', 'dev'])
+
+  assert.throws(
+    () => finishCard(db, { id: cardId, actor: 'developer', summary: 'x', root }),
+    /ветке/,
+  )
+  assert.equal(getCard(db, cardId)!.status, 'in_progress')
+  assert.equal(getCard(db, cardId)!.branch, branch)
+  assert.equal(runGit(root, ['rev-parse', 'dev']), devHead, 'dev не сдвинулся')
+})

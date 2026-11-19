@@ -49,7 +49,7 @@ export function resolveBranches(_root: string): { main: string; dev: string } {
   return { main: 'main', dev: 'dev' }
 }
 
-function currentBranch(dir: string): string | null {
+export function currentBranch(dir: string): string | null {
   try {
     return runGit(dir, ['symbolic-ref', '--short', 'HEAD'])
   } catch {

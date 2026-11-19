@@ -7,6 +7,7 @@ import { addDep, isSatisfied, listDeps, refreshReadiness } from './deps.ts'
 import { comment, openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
 import {
+  currentBranch,
   ensureWorktree,
   isAncestor,
   mergeCommitFor,
@@ -18,7 +19,7 @@ import {
 } from './git.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
-import { getActiveRun, RUN_LEASE_MS } from './runs.ts'
+import { getActiveRun, listRunCards, RUN_LEASE_MS } from './runs.ts'
 import { addStep } from './steps.ts'
 import type { Card, CardStatus } from './types.ts'
 
@@ -564,6 +565,17 @@ export function takeCard(db: DatabaseSync, input: { id: string; actor: string; r
       throw new UserError(3, `у исполнителя ${actor} нет активного забега с карточкой ${card.id}`)
     }
 
+    // Одна карточка в работе на забег: следующую берут после finish или block.
+    const otherInProgress = listRunCards(db, run.id).some(
+      (row) => row.status === 'in_progress' && row.cardId !== card.id,
+    )
+    if (otherInProgress) {
+      throw new UserError(
+        3,
+        `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
+      )
+    }
+
     let branch: string | null = card.branch
     if (card.needsMerge) {
       branch = startCardBranch(input.root, actor, card).branch
@@ -634,6 +646,13 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
         throw new UserError(3, `у карточки ${card.id} нет ветки: сначала board take`)
       }
       const worktree = ensureWorktree(input.root, actor)
+      const checkedOut = currentBranch(worktree)
+      if (checkedOut !== card.branch) {
+        throw new UserError(
+          3,
+          `рабочее дерево ${worktree} на ветке ${checkedOut ?? 'без ветки'}, а карточка ${card.id} — на ${card.branch}: сначала board take`,
+        )
+      }
       if (runGit(worktree, ['status', '--porcelain']) !== '') {
         throw new UserError(
           3,
