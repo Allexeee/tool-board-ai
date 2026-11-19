@@ -1,341 +1,143 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
-import { listExecutors } from './executors.ts'
-import { agentProblems, formatAgentProblem } from './agents.ts'
-import { listTasks } from './tasks.ts'
-import { listFeatures } from './features.ts'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { hookStatus } from './git/hooks.ts'
-import { branchExists, isRepo, runGit } from './git/git.ts'
-import { openCodeFilesPresent } from './opencode.ts'
-import { stalePoolTasks } from './pool.ts'
-import { staleBranches } from './git/clean.ts'
+import { join, resolve } from 'node:path'
+import { listCards } from './cards.ts'
+import { getExecutor } from './executors.ts'
+import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
+import { reclaimExpired } from './runs.ts'
+import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 
-export interface Check {
-  name: string
-  ok: boolean
-  detail?: string
+export interface DoctorResult {
+  errors: string[]
+  warnings: string[]
 }
 
-const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
-const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
+/**
+ * Диагностика доски (§12 `board doctor`). Ошибки — доска не настроена или
+ * несовместима; предупреждения — рабочее состояние, требующее внимания.
+ * Git остаётся источником истины по мержу: кэш `in_dev`/`in_main` пересчитывается
+ * для карточек с `merge_commit`, когда репозиторий доступен (§7.3).
+ */
+export function doctorData(db: DatabaseSync, root: string): DoctorResult {
+  const errors: string[] = []
+  const warnings: string[] = []
 
-export function doctorReport(
-  db: DatabaseSync,
-  options: {
-    ownerStaleDays?: number
-    root?: string
-    devBranch?: string
-    branches?: { main: string; dev: string }
-    branchRetentionDays?: number
-    schedulerEnabled?: boolean
-  } = {},
-): { checks: Check[] } {
-  const checks: Check[] = []
-  const ownerStaleDays = options.ownerStaleDays ?? 3
-
-  // схема проверяется при открытии базы, здесь остаётся то, что может сломаться в работе
-  const quick = db.prepare('pragma quick_check').get() as Record<string, string> | undefined
-  const integrity = quick ? Object.values(quick)[0] : 'нет ответа'
-  checks.push({
-    name: 'целостность базы',
-    ok: integrity === 'ok',
-    detail: integrity === 'ok' ? 'ok' : `quick_check: ${integrity}`,
-  })
-
-  const executors = listExecutors(db)
-  checks.push({
-    name: 'исполнители',
-    ok: executors.length > 0,
-    detail: executors.length === 0 ? 'никого нет: добавьте исполнителя' : executors.map((e) => e.id).join(', '),
-  })
-
-  const skills = new Set(executors.flatMap((executor) => executor.skills))
-  const unstaffed = new Set(
-    listTasks(db, { status: 'ready' })
-      .map((task) => task.skill)
-      .filter((skill) => !skills.has(skill)),
-  )
-  checks.push({
-    name: 'навыки',
-    ok: unstaffed.size === 0,
-    detail: unstaffed.size === 0 ? 'все навыки закрыты' : 'без исполнителя: ' + [...unstaffed].join(', '),
-  })
-
-  const waitingOwner = listTasks(db, { status: 'needs_owner' }).filter(
-    (task) => task.createdAt < daysAgo(ownerStaleDays),
-  )
-  checks.push({
-    name: 'ждёт владельца',
-    ok: waitingOwner.length === 0,
-    detail: waitingOwner.length === 0 ? 'нет зависших' : `${waitingOwner.length} задач старше ${ownerStaleDays} дней`,
-  })
-
-  const blocked = listTasks(db, { status: 'blocked' }).filter((task) => task.createdAt < daysAgo(3))
-  checks.push({
-    name: 'blocked',
-    ok: blocked.length === 0,
-    detail: blocked.length === 0 ? 'нет зависших' : `${blocked.length} задач старше 3 дней`,
-  })
-
-  const staleQuick = listTasks(db, { status: 'active' }).filter((task) => {
-    if (task.size !== 'XS') return false
-    const taken = db
-      .prepare("select max(at) as at from events where subject = ? and type = 'task.taken'")
-      .get(task.id) as { at: string | null }
-    return (taken.at ?? task.createdAt) < minutesAgo(15)
-  })
-  checks.push({
-    name: 'быстрая полоса',
-    ok: staleQuick.length === 0,
-    detail: staleQuick.length === 0 ? 'нет XS старше 15 минут' : `переоценить: ${staleQuick.map((t) => t.id).join(', ')}`,
-  })
-
-  const priority = fairness(db)
-  checks.push(priority)
-
-  const orphanHand = db
-    .prepare('select task_id from hand where task_id not in (select id from tasks)')
-    .all() as Array<{ task_id: string }>
-  checks.push({
-    name: 'журнал',
-    ok: orphanHand.length === 0,
-    detail: orphanHand.length === 0 ? 'ссылки целы' : `руки ссылаются на пропавшие задачи: ${orphanHand.map((r) => r.task_id).join(', ')}`,
-  })
-
-  if (options.root) {
-    checks.push(...gitChecks(db, options.root, options.devBranch ?? 'dev'))
-    checks.push({
-      name: 'плагин OpenCode',
-      ok: openCodeFilesPresent(options.root).plugin,
-      detail: openCodeFilesPresent(options.root).plugin
-        ? 'на месте'
-        : 'нет .opencode/plugins/toolbox-al — выполните init',
-    })
-
-    const agentCount = executors.filter((executor) => executor.kind === 'agent').length
-    const agentDrift = agentCount > 0 ? agentProblems(options.root, executors) : []
-    checks.push({
-      name: 'агенты OpenCode',
-      ok: agentDrift.length === 0,
-      detail:
-        agentCount === 0
-          ? 'исполнителей-агентов нет'
-          : agentDrift.length === 0
-            ? `файлы сходятся с базой: ${agentCount}`
-            : 'расходятся с базой: ' +
-              agentDrift.map(formatAgentProblem).join(', ') +
-              ' — выполните executor sync',
-    })
-
-    const pendingFiles = [
-      '.opencode/plugins/toolbox-al/index.ts',
-      '.opencode/skills/toolbox-al/SKILL.md',
-      '.opencode/skills/toolbox-al-setup/SKILL.md',
-      'AGENTS.md',
-    ].filter((relative) => existsSync(join(options.root!, `${relative}.new`)))
-
-    checks.push({
-      name: 'обновление файлов',
-      ok: pendingFiles.length === 0,
-      detail:
-        pendingFiles.length === 0
-          ? 'применены'
-          : 'ждут переноса: ' + pendingFiles.map((file) => `${file}.new`).join(', '),
-    })
+  if (!existsSync(join(root, '.board', 'board.db'))) {
+    errors.push('.board/board.db не найден: выполните board init')
   }
 
-  const noWorktree = listFeatures(db).filter(
-    (feature) => feature.status === 'active' && !feature.worktree,
-  )
-  checks.push({
-    name: 'каталоги фич назначены',
-    ok: noWorktree.length === 0,
-    detail:
-      noWorktree.length === 0
-        ? 'на месте'
-        : 'без каталога: ' + noWorktree.map((feature) => feature.id).join(', ') + ' — выполните feature start',
-  })
-
-  const closedWithDir = listFeatures(db).filter(
-    (feature) =>
-      (feature.status === 'done' || feature.status === 'cancelled') &&
-      feature.worktree &&
-      existsSync(feature.worktree),
-  )
-  checks.push({
-    name: 'каталоги закрытых фич',
-    ok: closedWithDir.length === 0,
-    detail:
-      closedWithDir.length === 0
-        ? 'прибраны'
-        : 'лежат: ' +
-          closedWithDir.map((feature) => feature.id).join(', ') +
-          ' — выполните feature clean ' +
-          closedWithDir[0].id,
-  })
-
-  if (options.root) {
-    const stale = staleBranches(db, {
-      root: options.root,
-      config: { branches: options.branches ?? { main: 'main', dev: 'dev' }, branchRetentionDays: options.branchRetentionDays },
-    })
-    checks.push({
-      name: 'ветки закрытых фич',
-      ok: stale.length === 0,
-      detail:
-        stale.length === 0
-          ? 'прибраны'
-          : 'ждут решения: ' +
-            stale.map((item) => `${item.branch} (${item.featureId}: ${item.why})`).join(', '),
-    })
+  const repo = isRepo(root)
+  if (!repo) {
+    errors.push('не git-репозиторий: ветки и коммиты недоступны')
+  } else {
+    const { main, dev } = resolveBranches(root)
+    if (!branchExists(root, main)) errors.push(`ветки ${main} нет: релиз некуда сливать`)
+    if (!branchExists(root, dev)) errors.push(`ветки ${dev} нет: карточкам некуда сливаться`)
   }
 
-  const stalePlans = db
-    .prepare('select id from plans where stale_at is not null and applied_at is null')
-    .all() as Array<{ id: string }>
-  checks.push({
-    name: 'планы',
-    ok: stalePlans.length === 0,
-    detail:
-      stalePlans.length === 0
-        ? 'актуальны'
-        : 'устарели после правки запроса: ' + stalePlans.map((plan) => plan.id).join(', '),
-  })
-
-  const scopeMisses = db
-    .prepare(
-      "select e.after as after, s.feature_id as feature_id " +
-        'from events e ' +
-        'left join tasks t on t.id = e.subject ' +
-        'left join stages s on s.id = t.stage_id ' +
-        "where e.type = 'task.outside_scope' order by e.id",
-    )
-    .all() as Array<{ after: string | null; feature_id: string | null }>
-
-  const missesByFeature = new Map<string, Set<string>>()
-  for (const miss of scopeMisses) {
-    const featureId = miss.feature_id ?? 'без фичи'
-    const files = missesByFeature.get(featureId) ?? new Set<string>()
-    for (const file of filesFromEvent(miss.after)) files.add(file)
-    missesByFeature.set(featureId, files)
+  if (!getExecutor(db, 'owner')) {
+    errors.push('нет исполнителя owner: выполните board init')
   }
 
-  const misses = [...missesByFeature.entries()]
-  checks.push({
-    name: 'промахи области',
-    ok: misses.length === 0,
-    detail:
-      misses.length === 0
-        ? 'правок вне области не было'
-        : 'закрыты с правками вне области: ' +
-          misses
-            .map(([featureId, files]) => (files.size > 0 ? `${featureId} (${[...files].join(', ')})` : featureId))
-            .join(', '),
-  })
-
-  const stale = stalePoolTasks(db, 7)
-  checks.push({
-    name: 'пул',
-    ok: stale.length === 0,
-    detail: stale.length === 0 ? 'зависших нет' : `зависло ${stale.length}: ${stale.map((task) => task.id).join(', ')}`,
-  })
-
-  const routines = (db.prepare('select count(*) as c from routines').get() as { c: number }).c
-  if (routines > 0) {
-    checks.push({
-      name: 'тикер',
-      ok: options.schedulerEnabled === true,
-      detail:
-        options.schedulerEnabled === true
-          ? 'включён'
-          : 'выключен: рутины по расписанию не запустятся (toolbox-al scheduler enable)',
-    })
+  const version = schemaVersionOf(db)
+  if (version !== SCHEMA_VERSION) {
+    errors.push(`схема ${version} не совпадает с ожидаемой ${SCHEMA_VERSION}`)
   }
 
-  return { checks }
+  const reclaimed = reclaimExpired(db)
+  if (reclaimed > 0) {
+    warnings.push(`lease истёк у ${reclaimed} забегов: карточки возвращены в очередь`)
+  }
+
+  if (repo) {
+    refreshMergeStateFor(db, root, warnings)
+    checkWorktrees(root, warnings)
+  }
+
+  checkCards(db, warnings)
+
+  return { errors, warnings }
 }
 
-function gitChecks(db: DatabaseSync, root: string, devBranch: string): Check[] {
-  const checks: Check[] = []
-
-  if (!isRepo(root)) {
-    return [{ name: 'git', ok: true, detail: 'не репозиторий: ветки и коммиты выключены' }]
-  }
-
-  const gitDir = runGit(root, ['rev-parse', '--absolute-git-dir'])
-  const status = hookStatus(gitDir)
-
-  checks.push({
-    name: 'git-хук',
-    ok: status === 'current',
-    detail:
-      status === 'current'
-        ? `защищены коммит и merge в ${devBranch} и main`
-        : status === 'legacy'
-          ? 'хук старого формата: выполните toolbox-al init, merge в main не защищён'
-          : 'хук не установлен: коммит и merge в main пройдут',
-  })
-
-  checks.push({
-    name: 'ветка dev',
-    ok: branchExists(root, devBranch),
-    detail: branchExists(root, devBranch) ? devBranch : `ветки ${devBranch} нет: этапы некуда сливать`,
-  })
-
-  const missing = listFeatures(db)
-    .filter((feature) => feature.worktree && !existsSync(feature.worktree))
-    .map((feature) => feature.id)
-
-  checks.push({
-    name: 'каталоги фич существуют',
-    ok: missing.length === 0,
-    detail: missing.length === 0 ? 'на месте' : `нет каталога у: ${missing.join(', ')}`,
-  })
-
-  return checks
-}
-
-function filesFromEvent(after: string | null): string[] {
-  if (!after) return []
+function branchExists(root: string, name: string): boolean {
   try {
-    const parsed = JSON.parse(after) as { files?: unknown }
-    return Array.isArray(parsed.files) ? parsed.files.map(String) : []
+    runGit(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Пересчитывает `in_dev`/`in_main`; при недоступности git — предупреждение. */
+function refreshMergeStateFor(db: DatabaseSync, root: string, warnings: string[]): void {
+  for (const card of listCards(db)) {
+    if (card.mergeCommit === null) continue
+    try {
+      refreshMergeState(db, root, card)
+    } catch {
+      warnings.push(`git недоступен: состояние in_dev/in_main карточки ${card.id} не обновлено`)
+      break
+    }
+  }
+}
+
+/** Зарегистрированные в git worktree под `.worktrees/`: пропавшие или грязные. */
+function checkWorktrees(root: string, warnings: string[]): void {
+  const wtDir = normalizePath(join(root, '.worktrees'))
+  for (const path of registeredWorktrees(root)) {
+    if (!normalizePath(path).startsWith(wtDir + '/')) continue
+    if (!existsSync(path)) {
+      warnings.push(`worktree ${path} зарегистрирован, но каталога нет`)
+      continue
+    }
+    try {
+      if (runGit(path, ['status', '--porcelain']) !== '') {
+        warnings.push(`worktree ${path} грязный: закоммитьте или откатите изменения`)
+      }
+    } catch {
+      warnings.push(`worktree ${path} не удалось проверить`)
+    }
+  }
+}
+
+function registeredWorktrees(root: string): string[] {
+  try {
+    return runGit(root, ['worktree', 'list', '--porcelain'])
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => line.slice('worktree '.length).trim())
+      .filter(Boolean)
   } catch {
     return []
   }
 }
 
-function fairness(db: DatabaseSync): Check {
-  const features = listFeatures(db)
-  if (features.length === 0) return { name: 'приоритеты', ok: true, detail: 'фич нет' }
+/** Карточки, мешающие релизу: код в dev без done, критические находки, ревью. */
+function checkCards(db: DatabaseSync, warnings: string[]): void {
+  const cards = listCards(db)
 
-  const first = features[0]
-  const stages = db.prepare('select id from stages where feature_id = ?').all(first.id) as Array<{ id: string }>
-  const stageIds = stages.map((stage) => stage.id)
-  if (stageIds.length === 0) return { name: 'приоритеты', ok: true, detail: 'у первой фичи нет этапов' }
-
-  const placeholders = stageIds.map(() => '?').join(', ')
-  const tasks = db
-    .prepare(`select id, status from tasks where stage_id in (${placeholders})`)
-    .all(...stageIds) as Array<{ id: string; status: string }>
-
-  const ready = tasks.filter((task) => task.status === 'ready').length
-  const active = tasks.filter((task) => task.status === 'active').length
-  const expediteActive = (
-    db.prepare("select count(*) as c from tasks where class = 'expedite' and status = 'active'").get() as { c: number }
-  ).c
-
-  if (ready > 0 && active === 0 && expediteActive > 0) {
-    return {
-      name: 'приоритеты',
-      ok: false,
-      detail: `фича ${first.id} ранга 1 стоит без работы, пока идёт срочное`,
-    }
+  const inDevNotDone = cards.filter(
+    (card) => card.inDev && card.status !== 'done' && card.revertedAt === null,
+  )
+  if (inDevNotDone.length > 0) {
+    warnings.push(
+      `в dev есть карточки не done: ${inDevNotDone.map((c) => `${c.id} (${c.status})`).join(', ')}`,
+    )
   }
 
-  return { name: 'приоритеты', ok: true, detail: 'очередь соответствует рангам' }
+  const critical = cards.filter(
+    (card) => card.severity === 'critical' && card.status !== 'done' && card.status !== 'cancelled',
+  )
+  if (critical.length > 0) {
+    warnings.push(`открыты критические находки (critical): ${critical.map((c) => c.id).join(', ')}`)
+  }
+
+  const review = cards.filter((card) => card.status === 'review')
+  if (review.length > 0) {
+    warnings.push(`карточки на ревью: ${review.map((c) => c.id).join(', ')}`)
+  }
 }
 
-
-
+function normalizePath(path: string): string {
+  return resolve(path).replace(/\\/g, '/').toLowerCase()
+}

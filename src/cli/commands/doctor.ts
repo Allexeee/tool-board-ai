@@ -1,26 +1,38 @@
-import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { doctorReport } from '../../core/doctor.ts'
-import { ok } from '../output.ts'
+import { doctorData, type DoctorResult } from '../../core/doctor.ts'
+import { findProject } from '../../core/project.ts'
+import type { ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
+import { ok } from '../output.ts'
 
-export default async function command() {
+export default async function command(_args: ParsedArgs) {
   const project = findProject(process.cwd())
-  if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
-  const db = openDb(project.dbPath, { allowOutdated: true })
+  if (!project) throw new UserError(3, 'проект не найден: выполните board init')
+  const db = openDb(project.dbPath)
 
-  const report = doctorReport(db, {
-    ownerStaleDays: project.config.ownerStaleDays,
-    root: project.root,
-    devBranch: project.config.branches.dev,
-    schedulerEnabled: project.config.scheduler,
-  })
-  const bad = report.checks.filter((check) => !check.ok)
+  try {
+    const result = doctorData(db, project.root)
+    ok(result, renderDoctor(result))
+    if (result.errors.length > 0) return 3
+    if (result.warnings.length > 0) return 1
+    return 0
+  } finally {
+    db.close()
+  }
+}
 
-  const text =
-    report.checks.map((check) => `${check.ok ? 'ок  ' : '!   '}${check.name.padEnd(18)} ${check.detail ?? ''}`).join('\n') +
-    (bad.length > 0 ? `\n\nпроблем: ${bad.length}` : '\n\nвсё в порядке')
-
-  ok(report, text)
-  return bad.length > 0 ? 1 : 0
+function renderDoctor(result: DoctorResult): string {
+  if (result.errors.length === 0 && result.warnings.length === 0) {
+    return 'всё в порядке'
+  }
+  const lines: string[] = []
+  for (const error of result.errors) lines.push(`!   ${error}`)
+  for (const warning of result.warnings) lines.push(`~   ${warning}`)
+  lines.push('')
+  lines.push(
+    result.errors.length > 0
+      ? `ошибок: ${result.errors.length}`
+      : `предупреждений: ${result.warnings.length}`,
+  )
+  return lines.join('\n')
 }

@@ -1,52 +1,119 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { seedCard } from '../helpers/board.ts'
+import { makeRepo } from '../helpers/repo.ts'
+import { openDb } from '../../src/core/db.ts'
 
-const bin = resolve('bin/toolbox-al.ts')
+const bin = resolve('bin/board.ts')
 
-function run(args: string[]) {
+function run(dir: string, args: string[]) {
   const result = spawnSync(process.execPath, [bin, ...args], {
-    cwd: mkdtempSync(join(tmpdir(), 'al-help-')),
+    cwd: dir,
     encoding: 'utf8',
     windowsHide: true,
   })
-  return { code: result.status, out: result.stdout, err: result.stderr }
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
-test('help перечисляет все команды верхнего уровня', () => {
-  const { code, out } = run(['help'])
+/** Запуск без проекта — для help/version/неизвестной команды. */
+function runCli(args: string[]) {
+  return run(tmpdir(), args)
+}
 
-  assert.equal(code, 0)
-  for (const command of ['pool', 'upgrade', 'version', 'reopen', 'dispatch', 'request', 'feature', 'task', 'map']) {
-    assert.match(out, new RegExp(command), command)
+const NEW_COMMANDS = [
+  'init',
+  'executor',
+  'card',
+  'queue',
+  'run',
+  'take',
+  'finish',
+  'block',
+  'touch',
+  'ask',
+  'answer',
+  'decision',
+  'term',
+  'command',
+  'review',
+  'release',
+  'now',
+  'doctor',
+]
+
+const OLD_COMMANDS = ['feature', 'stage', 'plan', 'routine']
+
+test('help перечисляет новые команды и не упоминает старые', () => {
+  const { status, stdout } = runCli(['--help'])
+  assert.equal(status, 0)
+  for (const command of NEW_COMMANDS) {
+    assert.match(stdout, new RegExp(`\\b${command}\\b`), command)
+  }
+  for (const command of OLD_COMMANDS) {
+    assert.doesNotMatch(stdout, new RegExp(command), command)
   }
 })
 
-test('help упоминает map и task context', () => {
-  const { out } = run(['help'])
-
-  assert.match(out, /^\s+map\b/m)
-  assert.match(out, /task context/)
+test('help объясняет --json и коды выхода', () => {
+  const { stdout } = runCli(['help'])
+  assert.match(stdout, /--json/)
+  assert.match(stdout, /0 — успех|0\s*—\s*успех/)
+  assert.match(stdout, /3/)
 })
 
-test('help объясняет, что роль живёт в .opencode/agents и обновляется sync', () => {
-  const { out } = run(['help'])
-
-  assert.match(out, /^\s+task brief\b/m)
-  assert.match(out, /executor sync/)
-  assert.match(out, /\.opencode\/agents/)
+test('неизвестная команда — код 3', () => {
+  const { status, stderr } = runCli(['nope'])
+  assert.equal(status, 3)
+  assert.match(stderr, /неизвестная команда/)
 })
 
-test('help показывает пример вызова dispatch', () => {
-  const { out } = run(['--help'])
-  assert.match(out, /пример: toolbox-al dispatch/)
+test('--version печатает версию из package.json', () => {
+  const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
+  const { status, stdout } = runCli(['--version'])
+  assert.equal(status, 0)
+  assert.equal(stdout.trim(), pkg.version)
 })
 
-test('неизвестная команда по-прежнему ошибка', () => {
-  const { code, err } = run(['nonsense'])
-  assert.equal(code, 3)
-  assert.match(err, /неизвестная команда/)
+test('doctor --json возвращает { errors, warnings }', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'board-doctor-json-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+
+  assert.equal(run(dir, ['init']).status, 0)
+
+  // без git — ошибка «не репозиторий», код 3, но форма JSON остаётся.
+  const result = run(dir, ['doctor', '--json'])
+  assert.equal(result.status, 3)
+  const data = JSON.parse(result.stdout) as { errors: string[]; warnings: string[] }
+  assert.deepEqual(Object.keys(data).sort(), ['errors', 'warnings'])
+  assert.ok(Array.isArray(data.errors))
+  assert.ok(Array.isArray(data.warnings))
+  assert.ok(data.errors.some((e) => /git|репозиторий/.test(e)), data.errors.join(' | '))
+})
+
+test('doctor: чистая доска — код 0', (t) => {
+  const repo = makeRepo()
+  t.after(() => repo.close())
+  assert.equal(run(repo.root, ['init']).status, 0)
+
+  const result = run(repo.root, ['doctor'])
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.match(result.stdout, /всё в порядке/)
+})
+
+test('doctor: предупреждение — код 1', (t) => {
+  const repo = makeRepo()
+  t.after(() => repo.close())
+  assert.equal(run(repo.root, ['init']).status, 0)
+
+  const db = openDb(join(repo.root, '.board', 'board.db'))
+  seedCard(db, { phase: 'task', status: 'review' })
+  db.close()
+
+  const result = run(repo.root, ['doctor'])
+  assert.equal(result.status, 1, result.stdout + result.stderr)
+  assert.match(result.stdout, /ревью/)
 })
