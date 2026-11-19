@@ -1,34 +1,26 @@
-import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { advanceTime } from '../../core/clock.ts'
-import { takeTask, assertFeatureWorktree } from '../../core/lease.ts'
-import { getTask } from '../../core/tasks.ts'
+import { takeCard } from '../../core/lifecycle.ts'
+import { findProject } from '../../core/project.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
-import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
+import { ok } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
-  if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
+  if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
-  advanceTime(db)
 
-  const executor = stringFlag(args, 'as')
-  if (!executor) throw new UserError(3, 'не указан исполнитель: --as w1')
+  try {
+    const id = args.positionals[0]
+    const actor = stringFlag(args, 'as')
+    if (!id || !actor) {
+      throw new UserError(3, 'использование: board take UI-1 --as developer')
+    }
 
-  // задача фичи без рабочего каталога всё равно не закроется: отказываем до аренды
-  const requested = args.positionals[0]
-  if (requested) {
-    const task = getTask(db, requested)
-    if (task) assertFeatureWorktree(db, task)
+    const card = takeCard(db, { id, actor, root: project.root })
+    ok(card, `${card.id} в работе: ${card.title}${card.branch ? ` · ветка ${card.branch}` : ''}`)
+    return 0
+  } finally {
+    db.close()
   }
-
-  const task = takeTask(db, {
-    executor,
-    taskId: args.positionals[0],
-    leaseMinutes: project.config.leaseMinutes,
-  })
-
-  ok(task, `${task.id}  ${task.title}\nаренда до ${new Date(task.leaseUntil!).toLocaleString('ru-RU')}`)
-  return 0
 }

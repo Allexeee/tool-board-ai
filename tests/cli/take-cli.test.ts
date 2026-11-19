@@ -1,102 +1,136 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { editCard, getCard } from '../../src/core/cards.ts'
 import { openDb } from '../../src/core/db.ts'
-import { addDep } from '../../src/core/deps.ts'
+import { runGit } from '../../src/core/git.ts'
+import { initProject } from '../../src/core/project.ts'
+import { getActiveRun, listRunCards } from '../../src/core/runs.ts'
+import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
+import { makeRepo } from '../helpers/repo.ts'
 
-const bin = resolve('bin/toolbox-al.ts')
-const flags = ['--dod', 'шаг сделан', '--size', 'XS', '--skill', 'backend', '--scope', 'src/**']
+const bin = resolve('bin/board.ts')
 
-function run(dir: string, args: string[]) {
-  const result = spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', windowsHide: true })
+interface Result {
+  code: number | null
+  out: string
+  err: string
+}
+
+function run(dir: string, args: string[]): Result {
+  const result = spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    windowsHide: true,
+  })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 
-function git(dir: string, args: string[]) {
-  execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+function json(dir: string, args: string[]): Record<string, unknown> {
+  const result = run(dir, [...args, '--json'])
+  assert.equal(result.code, 0, result.err)
+  return JSON.parse(result.out) as Record<string, unknown>
 }
 
-/**
- * Цепочка из двух шагов в руке: T2 зависит от T1.
- * Рука хранит оба шага заранее, поэтому take без id должен брать только разрешённый.
- */
-function repo(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'al-take-'))
-  execFileSync('git', ['init', '-q'], { cwd: dir, windowsHide: true })
-  git(dir, ['config', 'user.email', 't@e.x'])
-  git(dir, ['config', 'user.name', 'T'])
-  writeFileSync(join(dir, 'README.md'), 'x')
-  git(dir, ['add', '.'])
-  git(dir, ['commit', '-q', '-m', 'init'])
-  // done задачи пула коммитит в корне: ветка main для него запрещена
-  git(dir, ['checkout', '-q', '-b', 'dev'])
-
-  run(dir, ['init'])
-  run(dir, ['executor', 'add', 'w1', '--skills', 'backend'])
-  git(dir, ['add', '.'])
-  // dev защищён хуком init: настройка проекта — не задача, разрешаем явно
-  execFileSync('git', ['commit', '-q', '-m', 'setup'], {
-    cwd: dir,
-    env: { ...process.env, AL_ALLOW: '1' },
-    windowsHide: true,
-  })
-
-  run(dir, ['task', 'add', 'Первый шаг', ...flags])
-  run(dir, ['task', 'add', 'Второй шаг', ...flags])
-
-  const db = openDb(join(dir, '.toolbox-al', 'tracker.db'))
-  addDep(db, 'T2', 'T1')
+/** Проект с git-репозиторием, исполнителем developer и карточкой в scope src/**. */
+function repoProject(t: { after: (fn: () => void) => void }): { root: string; cardId: string } {
+  const repo = makeRepo()
+  initProject(repo.root)
+  const db = openDb(join(repo.root, '.board', 'board.db'))
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { scope: ['src/**'] } })
   db.close()
-
-  const hand = run(dir, ['hand', 'set', 'T1', 'T2', '--as', 'w1'])
-  assert.equal(hand.code, 0, hand.err)
-
-  return dir
+  t.after(() => repo.close())
+  return { root: repo.root, cardId: card.id }
 }
 
-test('take без id берёт первый готовый шаг, а после done — следующий', () => {
-  const dir = repo()
+test('take → finish через CLI мержит в dev', (t) => {
+  const { root, cardId } = repoProject(t)
 
-  const first = run(dir, ['take', '--as', 'w1'])
-  assert.equal(first.code, 0, first.err)
-  assert.match(first.out, /T1\s+Первый шаг/)
+  const started = run(root, ['run', 'start', '--as', 'developer', '--cards', cardId])
+  assert.equal(started.code, 0, started.err)
 
-  mkdirSync(join(dir, 'src'), { recursive: true })
-  writeFileSync(join(dir, 'src/a.ts'), 'a')
-  const closed = run(dir, ['done', 'T1', '--as', 'w1', '--summary', 'шаг сделан'])
-  assert.equal(closed.code, 0, closed.err)
+  const taken = json(root, ['take', cardId, '--as', 'developer'])
+  assert.equal(taken.status, 'in_progress')
+  assert.ok(taken.branch)
 
-  // новых команд для разблокировки не нужно: готовность пересчитывает само взятие
-  const second = run(dir, ['take', '--as', 'w1'])
-  assert.equal(second.code, 0, second.err)
-  assert.match(second.out, /T2\s+Второй шаг/)
+  const wt = join(root, '.worktrees', 'developer')
+  mkdirSync(join(wt, 'src'), { recursive: true })
+  writeFileSync(join(wt, 'src', 'app.ts'), 'export const x = 1\n')
+  runGit(wt, ['add', '.'])
+  runGit(wt, ['commit', '-m', 'add app'])
+
+  const finished = json(root, ['finish', cardId, '--as', 'developer', '--summary', 'готово'])
+  assert.equal(finished.status, 'done')
+  assert.ok(finished.mergeCommit)
+  assert.equal(finished.inDev, true)
 })
 
-test('next обходит будущий шаг цепочки и показывает готовый', () => {
-  const dir = repo()
+test('finish без --as и --summary отказывает', (t) => {
+  const { root, cardId } = repoProject(t)
+  run(root, ['run', 'start', '--as', 'developer', '--cards', cardId])
+  json(root, ['take', cardId, '--as', 'developer'])
 
-  const next = run(dir, ['next', '--as', 'w1'])
-  assert.equal(next.code, 0, next.err)
-  assert.match(next.out, /T1\s+XS\s+Первый шаг/)
-  assert.doesNotMatch(next.out, /T2/)
+  const noActor = run(root, ['finish', cardId])
+  assert.equal(noActor.code, 3)
+  assert.match(noActor.err, /--as/)
+
+  const noSummary = run(root, ['finish', cardId, '--as', 'developer'])
+  assert.equal(noSummary.code, 3)
+  assert.match(noSummary.err, /отчёт/)
 })
 
-test('take без id объясняет, какого шага ждёт рука', () => {
-  const dir = repo()
+test('block помечает run_cards blocked, run next берёт следующую', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'] })
+  const first = seedCard(fixture.db, { phase: 'task', status: 'ready', position: 1 })
+  const second = seedCard(fixture.db, { phase: 'task', status: 'ready', position: 2 })
+  editCard(fixture.db, { id: first.id, actor: 'owner', patch: { needsMerge: false } })
+  editCard(fixture.db, { id: second.id, actor: 'owner', patch: { needsMerge: false } })
 
-  // лимит WIP поднят, иначе отказ был бы про лимит, а не про ожидание зависимости
-  const db = openDb(join(dir, '.toolbox-al', 'tracker.db'))
-  db.prepare("update executors set wip_limit = 2 where id = 'w1'").run()
-  db.close()
+  json(fixture.root, ['run', 'start', '--as', 'developer', '--cards', `${first.id},${second.id}`])
+  json(fixture.root, ['take', first.id, '--as', 'developer'])
 
-  const first = run(dir, ['take', '--as', 'w1'])
-  assert.equal(first.code, 0, first.err)
-  assert.match(first.out, /T1\s+Первый шаг/)
+  const blocked = json(fixture.root, [
+    'block', first.id, '--as', 'developer', '--reason', 'needs_decision', '--note', 'какой SSO?',
+  ])
+  assert.equal(blocked.status, 'blocked')
 
-  const second = run(dir, ['take', '--as', 'w1'])
-  assert.equal(second.code, 1)
-  assert.match(second.err, /T2 ждёт T1/)
+  const run = getActiveRun(fixture.db, 'developer')!
+  assert.equal(listRunCards(fixture.db, run.id).find((row) => row.cardId === first.id)!.status, 'blocked')
+
+  const next = json(fixture.root, ['run', 'next', '--as', 'developer'])
+  assert.equal(next.id, second.id)
+})
+
+test('ask --block задаёт вопрос и блокирует карточку', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  const card = seedCard(fixture.db, {})
+
+  const question = json(fixture.root, ['ask', card.id, 'Нужен ли SSO?', '--as', 'developer', '--block'])
+  assert.equal(question.kind, 'question')
+  assert.equal(getCard(fixture.db, card.id)!.status, 'blocked')
+})
+
+test('touch продлевает lease через CLI', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(fixture.db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(fixture.db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+
+  json(fixture.root, ['run', 'start', '--as', 'developer', '--cards', card.id])
+  json(fixture.root, ['take', card.id, '--as', 'developer'])
+  fixture.db
+    .prepare("update runs set lease_until = '2000-01-01T00:00:00.000Z' where executor_id = 'developer'")
+    .run()
+
+  const touched = json(fixture.root, ['touch', card.id, '--as', 'developer'])
+  assert.ok((touched.leaseUntil as string) > '2000-01-01T00:00:00.000Z')
+  assert.equal(getActiveRun(fixture.db, 'developer')!.leaseUntil, touched.leaseUntil)
 })

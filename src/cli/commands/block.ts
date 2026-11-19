@@ -1,25 +1,30 @@
-import { findProject } from '../../core/project.ts'
 import { openDb } from '../../core/db.ts'
-import { blockTask, type BlockReason } from '../../core/block.ts'
+import { blockCard } from '../../core/lifecycle.ts'
+import { findProject } from '../../core/project.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
-import { ok } from '../output.ts'
 import { UserError } from '../errors.ts'
+import { ok } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
-  if (!project) throw new UserError(3, 'проект не найден: выполните toolbox-al init')
+  if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
 
-  const taskId = args.positionals[0]
-  const executor = stringFlag(args, 'as')
-  const reason = stringFlag(args, 'reason') as BlockReason | undefined
-  const note = stringFlag(args, 'note') ?? ''
+  try {
+    const id = args.positionals[0]
+    const actor = stringFlag(args, 'as')
+    const reason = stringFlag(args, 'reason')
+    if (!id || !actor || !reason) {
+      throw new UserError(
+        3,
+        'использование: board block UI-1 --as developer --reason needs_decision --note «...»',
+      )
+    }
 
-  if (!taskId || !executor || !reason) {
-    throw new UserError(3, 'использование: block F1.S1-1 --as w1 --reason needs_data --note "чего не хватает"')
+    const card = blockCard(db, { id, actor, reason, note: stringFlag(args, 'note') })
+    ok(card, `${card.id} заблокирована: ${reason}`)
+    return 0
+  } finally {
+    db.close()
   }
-
-  const task = blockTask(db, { taskId, executor, reason, note })
-  ok(task, `${task.id}  ${task.status}  ${reason}: ${note}`)
-  return 0
 }

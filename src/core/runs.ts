@@ -17,7 +17,7 @@ import type {
 } from './types.ts'
 
 /** Забег держит lease два часа; карточки наследуют срок забега (§8.5). */
-const RUN_LEASE_MS = 2 * 60 * 60 * 1000
+export const RUN_LEASE_MS = 2 * 60 * 60 * 1000
 
 const OWNER = 'owner'
 

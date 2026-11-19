@@ -6,8 +6,19 @@ import { tx } from './db.ts'
 import { addDep, isSatisfied, listDeps, refreshReadiness } from './deps.ts'
 import { comment, openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
+import {
+  ensureWorktree,
+  isAncestor,
+  mergeCommitFor,
+  mergeToDev,
+  outOfScope,
+  runGit,
+  startCardBranch,
+  syncWithDev,
+} from './git.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
+import { getActiveRun, RUN_LEASE_MS } from './runs.ts'
 import { addStep } from './steps.ts'
 import type { Card, CardStatus } from './types.ts'
 
@@ -271,6 +282,15 @@ export function blockCard(
        updated_at = ? where id = ?`,
     ).run(at, card.id)
 
+    // Карточка остаётся в забеге с пометкой blocked (§8.3): `run next` её
+    // пропустит, `run end` снимет корректно.
+    if (card.runId) {
+      db.prepare("update run_cards set status = 'blocked' where run_id = ? and card_id = ?").run(
+        card.runId,
+        card.id,
+      )
+    }
+
     const updated = getCard(db, card.id)!
     appendEvent(db, {
       type: 'card.blocked',
@@ -512,5 +532,203 @@ export function applyShapeFile(
     }
 
     return { card: getCard(db, card.id)!, newCards }
+  })
+}
+
+/**
+ * Взятие карточки в работу §8.3: `booked` → `in_progress`. Держатель, закрытые
+ * зависимости и активный забег обязательны. Для `needs_merge=true` создаётся
+ * worktree и ветка карточки от свежего `dev`; грязный worktree или ошибка
+ * создания откатывают переход. Lease забега продлевается на два часа.
+ */
+export function takeCard(db: DatabaseSync, input: { id: string; actor: string; root: string }): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+
+    if (card.status !== 'booked') {
+      throw new UserError(3, `карточка ${card.id} не забронирована: ${card.status}`)
+    }
+    if (card.holder !== actor) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} может взять только держатель (сейчас: ${card.holder ?? '—'})`,
+      )
+    }
+    const unmet = listDeps(db, card.id).filter((dep) => !isSatisfied(db, dep))
+    if (unmet.length > 0) {
+      throw new UserError(3, `зависимость ${unmet.join(', ')} карточки ${card.id} не закрыта`)
+    }
+    const run = getActiveRun(db, actor)
+    if (!run || run.id !== card.runId) {
+      throw new UserError(3, `у исполнителя ${actor} нет активного забега с карточкой ${card.id}`)
+    }
+
+    let branch: string | null = card.branch
+    if (card.needsMerge) {
+      branch = startCardBranch(input.root, actor, card).branch
+    }
+
+    const at = nowIso()
+    const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
+    db.prepare(
+      `update cards set status = 'in_progress', branch = ?, lease_until = ?, updated_at = ? where id = ?`,
+    ).run(branch, leaseUntil, at, card.id)
+    db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
+    db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
+      run.id,
+      card.id,
+    )
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.taken',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+    })
+    return updated
+  })
+}
+
+export interface FinishInput {
+  id: string
+  actor: string
+  summary: string
+  root: string
+  noMerge?: boolean
+  mergeCommit?: string
+}
+
+/**
+ * Сдача карточки §7.2: `in_progress` → `review`/`done`. Для `needs_merge=true`
+ * worktree должен быть чистым, затем `syncWithDev`, проверка `scope` и мерж в
+ * `dev` без fast-forward; конфликт останавливает команду. `--no-merge` не
+ * мержит, но требует чистый worktree, scope и merge-коммит в `dev`.
+ */
+export function finishCard(db: DatabaseSync, input: FinishInput): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+    const summary = requireSummary(input.summary)
+
+    if (card.holder !== actor) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} может закрыть только держатель (сейчас: ${card.holder ?? '—'})`,
+      )
+    }
+    if (card.status !== 'in_progress') {
+      throw new UserError(3, `карточка ${card.id} не в работе: ${card.status}`)
+    }
+    if (input.noMerge && !card.needsMerge) {
+      throw new UserError(3, `--no-merge применим только к needs_merge=true (карточка ${card.id})`)
+    }
+
+    let mergeCommit: string | null = null
+    let inDev = false
+
+    if (card.needsMerge) {
+      if (!card.branch) {
+        throw new UserError(3, `у карточки ${card.id} нет ветки: сначала board take`)
+      }
+      const worktree = ensureWorktree(input.root, actor)
+      if (runGit(worktree, ['status', '--porcelain']) !== '') {
+        throw new UserError(
+          3,
+          `рабочее дерево ${worktree} грязное: сначала закоммитьте или откатите изменения`,
+        )
+      }
+
+      if (input.noMerge) {
+        const out = outOfScope(input.root, card.branch, card.scope)
+        if (out.length > 0) {
+          throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
+        }
+        mergeCommit = input.mergeCommit ?? mergeCommitFor(input.root, card.branch)
+        if (!mergeCommit) {
+          throw new UserError(3, `merge-коммит ветки ${card.branch} не найден в dev`)
+        }
+        inDev = isAncestor(input.root, mergeCommit, 'dev')
+        if (!inDev) {
+          throw new UserError(3, `коммит ${mergeCommit} не является предком dev`)
+        }
+      } else {
+        syncWithDev(input.root, worktree, card.branch)
+        const out = outOfScope(input.root, card.branch, card.scope)
+        if (out.length > 0) {
+          throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
+        }
+        mergeCommit = mergeToDev(input.root, card.branch, `merge ${card.id}: ${summary}`)
+        inDev = isAncestor(input.root, mergeCommit, 'dev')
+      }
+    }
+
+    const status = card.reviewRequired ? 'review' : 'done'
+    const at = nowIso()
+    db.prepare(
+      `update cards set status = ?, summary = ?, done_at = ?, merge_commit = ?, in_dev = ?, in_main = 0,
+       updated_at = ? where id = ?`,
+    ).run(status, summary, status === 'done' ? at : null, mergeCommit, inDev ? 1 : 0, at, card.id)
+
+    if (card.runId) {
+      db.prepare('update run_cards set status = ? where run_id = ? and card_id = ?').run(
+        status,
+        card.runId,
+        card.id,
+      )
+    }
+
+    refreshReadiness(db)
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.finished',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+      note: summary,
+    })
+    return updated
+  })
+}
+
+/**
+ * Продление lease §8.5: карточка и её забег получают ещё два часа. Команда
+ * касается только карточек, которые держит исполнитель.
+ */
+export function touchCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+
+    if (card.holder !== actor) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} может продлить только держатель (сейчас: ${card.holder ?? '—'})`,
+      )
+    }
+
+    const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
+    db.prepare('update cards set lease_until = ?, updated_at = ? where id = ?').run(
+      leaseUntil,
+      nowIso(),
+      card.id,
+    )
+    if (card.runId) {
+      db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, card.runId)
+    }
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.touched',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+    })
+    return updated
   })
 }
