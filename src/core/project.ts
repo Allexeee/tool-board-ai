@@ -148,7 +148,9 @@ export function initProject(
     created.push('docs/board/terminology.md')
   }
 
-  if (ensureSettings(root).created) created.push('.board/settings.json')
+  const ensured = ensureSettings(root)
+  if (ensured.created) created.push('.board/settings.json')
+  const settings = ensured.settings
 
   const db = openDb(dbPath)
   try {
@@ -161,7 +163,7 @@ export function initProject(
 
   if (updateGitignore(root)) created.push('.gitignore')
 
-  const opencode = writeOpenCodeFiles(root, options)
+  const opencode = writeOpenCodeFiles(root, { ...options, settings })
   created.push(...opencode.created)
   updated.push(...opencode.updated)
 

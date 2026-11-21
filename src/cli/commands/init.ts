@@ -1,4 +1,5 @@
-﻿import { initProject } from '../../core/project.ts'
+﻿import { writeReviewerAgent } from '../../core/opencode.ts'
+import { initProject } from '../../core/project.ts'
 import { ensureSettings, type BoardSettings } from '../../core/settings.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
@@ -21,6 +22,7 @@ export default async function command(args: ParsedArgs) {
     })
   ) {
     settings = await runSetupWizard(root, settings)
+    writeReviewerAgent(root, settings, true)
   }
 
   const lines: string[] = []

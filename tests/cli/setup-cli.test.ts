@@ -61,6 +61,19 @@ test('setup: все режимы обновляются флагами', (t) => 
   assert.deepEqual(shown.specReview, { mode: 'self', largeSpecChars: 4000 })
 })
 
+test('setup: создаёт и удаляет board-reviewer.md по модели', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  const agent = join(fixture.root, '.opencode', 'agents', 'board-reviewer.md')
+
+  json(fixture.root, ['setup', '--reviewer-model', 'acme/reviewer'])
+  assert.match(readFileSync(agent, 'utf8'), /model: acme\/reviewer/)
+  assert.doesNotMatch(readFileSync(agent, 'utf8'), /#max|#high/)
+
+  json(fixture.root, ['setup', '--reviewer-model', ''])
+  assert.equal(existsSync(agent), false)
+})
+
 test('setup: показывает effective reviewer model из сессии', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)

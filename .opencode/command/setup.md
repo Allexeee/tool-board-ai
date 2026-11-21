@@ -3,13 +3,17 @@ description: Настройки доски
 subagent: false
 ---
 
-Спроси владельца, включать ли ревью после каждого забега. Покажи текущие
-настройки: `board setup --show --json`.
+Покажи `board setup --show --json` и спроси владельца:
 
-Затем выполни одно:
+- spec review: auto/none/self/subagent;
+- большой spec, символов (0 — выключить правило);
+- run review: none/self/subagent/auto (проверяет plan и код);
+- модель ревьюера: provider/model без #variant.
 
-- `board setup --review-after-run` — включить;
-- `board setup --no-review-after-run` — выключить.
+Затем выполни:
 
-Если владелец не хочет менять настройку — ничего не выполняй. Не меняй другие
-настройки.
+```bash
+board setup --spec-review <mode> --large-spec <n> --run-review <mode> --reviewer-model <provider/model>
+```
+
+Если владелец не хочет менять настройку — ничего не выполняй.

@@ -1,3 +1,4 @@
+import { writeReviewerAgent } from '../../core/opencode.ts'
 import { findProject } from '../../core/project.ts'
 import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
 import {
@@ -68,6 +69,7 @@ export default async function command(args: ParsedArgs) {
 
   if (Object.keys(patch).length > 0) {
     const next = updateSettings(project.root, patch)
+    writeReviewerAgent(project.root, next, true)
     const effective = effectiveReviewerModel(next, context)
     ok({ ...next, effectiveReviewerModel: effective }, human(next, effective))
     return 0
@@ -80,6 +82,7 @@ export default async function command(args: ParsedArgs) {
   }
 
   const next = await runSetupWizard(project.root, current)
+  writeReviewerAgent(project.root, next, true)
   const effective = effectiveReviewerModel(next, context)
   ok({ ...next, effectiveReviewerModel: effective }, human(next, effective))
   return 0

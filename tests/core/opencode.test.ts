@@ -3,8 +3,9 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeOpenCodeFiles } from '../../src/core/opencode.ts'
+import { writeOpenCodeFiles, writeReviewerAgent } from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
+import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'board-oc-'))
 
@@ -69,13 +70,46 @@ test('плагин передаёт модель сессии в CLI', () => {
   assert.match(plugin, /plan/)
 })
 
-test('команда setup показывает и переключает ревью после забега', () => {
+test('reviewer agent создаётся с default-моделью и удаляется без неё', () => {
+  const root = tmp()
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    reviewer: { model: 'opencode-go/deepseek-v4.1-flash' },
+  }
+  writeOpenCodeFiles(root, { settings })
+  const path = join(root, '.opencode', 'agents', 'board-reviewer.md')
+  const agent = readFileSync(path, 'utf8')
+  assert.match(agent, /mode: subagent/)
+  assert.match(agent, /model: opencode-go\/deepseek-v4\.1-flash/)
+  assert.doesNotMatch(agent, /#max|#high/)
+
+  writeReviewerAgent(root, { ...settings, reviewer: { model: null } }, true)
+  assert.equal(existsSync(path), false)
+})
+
+test('spec-review и review команды — оркестраторы с plan/acceptance', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const spec = readFileSync(join(root, '.opencode', 'command', 'spec-review.md'), 'utf8')
+  const review = readFileSync(join(root, '.opencode', 'command', 'review.md'), 'utf8')
+  assert.match(spec, /subagent: false/)
+  assert.match(spec, /card spec-review/)
+  assert.match(spec, /specReview\.mode/)
+  assert.match(review, /subagent: false/)
+  assert.match(review, /--plan done\|failed/)
+  assert.match(review, /acceptance|критери/)
+  assert.match(review, /board-reviewer/)
+})
+
+test('команда setup описывает режимы ревьюеров', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const command = readFileSync(join(root, '.opencode', 'command', 'setup.md'), 'utf8')
   assert.match(command, /board setup --show/)
-  assert.match(command, /--review-after-run/)
-  assert.match(command, /--no-review-after-run/)
+  assert.match(command, /--spec-review/)
+  assert.match(command, /--large-spec/)
+  assert.match(command, /--run-review/)
+  assert.match(command, /--reviewer-model/)
 })
 
 test('writeOpenCodeFiles идемпотентен: второй вызов ничего не создаёт', () => {

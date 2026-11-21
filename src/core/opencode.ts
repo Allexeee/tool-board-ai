@@ -1,5 +1,6 @@
-﻿import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+﻿import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { BoardSettings } from './settings.ts'
 
 /**
  * Файлы OpenCode, которые `board init` кладёт в проект: тонкий плагин, скилл и
@@ -18,11 +19,13 @@ export const AGENTS_BLOCK = [
   'Доска карточек: `board` (если CLI в PATH); в плагине OpenCode — `BOARD_CLI`.',
   '',
   '- Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.',
-  '- Карточка: запрос → `card shape` → `card submit` → владелец `card approve`/`card reject`.',
-  '- Работа: `run start` → `take` → `finish --summary` → `run next` → `run end`.',
+  '- Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.',
+  '- После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.',
+  '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`.',
   '- Нужно решение владельца — `block`/`ask`; карточка ждёт.',
-  '- Ревью — свежий субагент командой `/review`; CLI субагентов не порождает.',
-  '- Ревью после каждого забега — настройка `/setup` (по умолчанию выкл.); если `run end` вернул `review=true`, запусти `/review`.',
+  '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
+  '- Ревью идёт одним циклом: findings становятся карточками; critical блокирует release, important/other — backlog.',
+  '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
   '- После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.',
   '- Коммит и мерж делает `finish`; агент в git не пишет. `main` меняется только `release` владельцем.',
   AGENTS_END,
@@ -30,7 +33,7 @@ export const AGENTS_BLOCK = [
 
 export const SKILL_SOURCE = `---
 name: board
-description: Доска карточек: смотреть now, разбирать, брать забег, закрывать, ревьюить
+description: Доска карточек: смотреть now, разбирать spec, брать забег, закрывать, ревьюить
 ---
 
 # board
@@ -45,21 +48,28 @@ description: Доска карточек: смотреть now, разбират
 
 \`board now\` (инструмент \`board_now\`): \`now 0\` — владельцу, \`now 3\` — открытые карточки, \`now 1\`/\`now 2\` — забеги.
 
-## Жизненный цикл карточки
+## Карточка: spec и plan
 
-1. Запрос → разбор: \`board card shape <ID> --as <исполнитель> [--from card.json]\`. Заполни body, шаги, навык, importance/urgency, needs_merge, review_required, scope, зависимости.
-2. На утверждение: \`board card submit <ID> --as <исполнитель>\`.
-3. Владелец: \`board card approve <ID>\` или \`board card reject <ID> --reason "..."\`.
+1. Запрос → разбор: \`board card shape <ID> --as <исполнитель> [--from card.json]\`.
+2. Если есть открытые вопросы — вытащи ответы у владельца (\`ask\`/\`block\`). Угадывать нельзя.
+3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки** (\`--acceptance\` или \`acceptance\` в JSON). План (\`steps\`) при shape не пишется.
+4. Spec review: \`/spec-review\`. Режим смотри в \`board card show <ID> --json\` → \`specReview.mode\`:
+   - \`none\` — проверка не нужна;
+   - \`self\` — проверь сам по чек-листу;
+   - \`subagent\` — запусти \`board-reviewer\`.
+5. Если spec неполный, сначала дополни его из контекста проекта, затем задай вопрос владельцу. Результат запиши: \`board card spec-review <ID> --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."\`.
+6. \`board card submit <ID> --as <исполнитель>\`; владелец делает \`card approve\` или \`card reject\`.
+7. После approve менять spec/acceptance/scope нельзя. Нужно изменение — \`board card amend <ID> --as <исполнитель> --reason "..."\`, затем снова review и approve.
 
 ## Забег и выполнение
 
 1. \`board run start --as <исполнитель> --cards <ID>,...\` (или \`--suggest 1\`).
 2. \`board take <ID> --as <исполнитель>\` — карточка в работе.
-3. Работаешь.
-4. \`board finish <ID> --as <исполнитель> --summary "..."\` — сдать (review или done).
-5. \`board run next --as <исполнитель>\` — следующая карточка.
-6. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег.
-   Если в ответе \`review=true\` (настройка включена), запусти \`/review\`.
+3. Перед кодом напиши **plan**: \`board card step add <ID> "шаг + проверка"\`, \`card edit --scope ...\`; каждый критерий приёмки должен быть отображён на шаг.
+4. Если plan требует нового поведения или scope — остановись, \`block\`/\`ask\` владельцу; не меняй spec молча.
+5. \`board finish <ID> --as <исполнитель> --summary "..."\` — сдать (review или done).
+6. \`board run next --as <исполнитель>\` — следующая карточка.
+7. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег. Если \`reviewMode\` не \`none\`, запусти \`/review\`.
 
 ## Если не можешь
 
@@ -68,24 +78,26 @@ description: Доска карточек: смотреть now, разбират
 
 ## Ревью
 
-\`board review list --json\` — карточки на ревью. Свежий субагент проверяет и выносит вердикт:
-
-\`board review submit <ID> --verdict done|reopen --note "..." --reviewer <id>\`.
-
-Находки: \`board review finding <ID> --severity critical|important|other --text "..."\`.
+- \`/spec-review\` — полнота spec до approve. Может быть self или субагентом.
+- \`/review\` — run review: соответствие plan и код; пакет — \`board review list --json\`. Субагент \`board-reviewer\` работает на default-варианте модели, не в Max.
+- Findings: \`board review finding <ID> --severity critical|important|other --text "..."\`.
+- Вердикт: \`board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer <id>\`.
+- \`plan failed\` требует \`reopen\`. \`done\` с findings разрешён: findings становятся карточками.
+- Один цикл: findings не переоткрывают исходную карточку; \`critical\` блокирует release, \`important\`/\`other\` идут в backlog. Второй reopen — только владелец.
+- Finding-карточки после approve могут собраться в отдельный fix run.
 
 ## Настройки
 
-После установки плагина, если \`board setup --show --json\` вернул
-\`setupAt: null\`, спроси владельца и запусти \`/setup\`.
+После установки плагина, если \`board setup --show --json\` вернул \`setupAt: null\`, спроси владельца и запусти \`/setup\`.
 
-\`board setup --show --json\` — текущие настройки. Ревью после каждого забега:
+\`board setup --show --json\` — текущие настройки. Режимы:
 
-- \`board setup --review-after-run\` — включить;
-- \`board setup --no-review-after-run\` — выключить.
+- \`board setup --spec-review auto|none|self|subagent\`;
+- \`board setup --large-spec 6000\`;
+- \`board setup --run-review none|self|subagent|auto\`;
+- \`board setup --reviewer-model provider/model\` (без \`#variant\`).
 
-Если включено, после \`board run end\` с \`review=true\` запусти \`/review\`.
-Если выключено, review-карточки ждут ручного ревью. По умолчанию выключено.
+Если владелец не хочет менять настройку — ничего не выполняй.
 
 ## Решения и термины
 
@@ -97,7 +109,8 @@ description: Доска карточек: смотреть now, разбират
 
 - Работай в ветке карточки; коммит и мерж делает \`board finish\`. В \`main\` не пиши — его меняет \`release\` владельца.
 - Причина обязательна у block/cancel/reject/reopen; \`finish\` требует \`--summary\`.
-- Ревью своей карточки не давай: вердикт — свежий субагент.
+- Ревью своей карточки не давай: для кода вердикт — свежий субагент. Spec review может быть self по настройке.
+- Один цикл ревью: не переоткрывай карточку из-за стилистических улучшений.
 `
 
 export const PLUGIN_SOURCE = `// Инструменты: board_now, board_setup, board_card, board_run, board_take,
@@ -517,11 +530,11 @@ export default Plugin.define({
 `
 
 export const COMMAND_SOURCE = `---
-description: Ревью карточек свежим субагентом
-subagent: true
+description: Ревью забега: plan и код
+subagent: false
 ---
 
-Ты — свежий ревьюер. Проверь карточки ниже и вынеси вердикт по каждой.
+Ты — ревьюер. Не редактируй файлы.
 
 Пакет карточек на ревью (\`board review list --json\`):
 
@@ -529,13 +542,37 @@ subagent: true
 
 Порядок:
 
-1. По каждой карточке проверь шаги, body, scope и diff (команда diff указана в пакете).
-2. Если карточек на ревью нет — сообщи, что ревьюить нечего.
-3. Вердикт по каждой карточке:
-   - принято: \`board review submit <ID> --verdict done --note "..." --reviewer review\`
-   - на доработку: \`board review submit <ID> --verdict reopen --note "..." --reviewer review\`
-4. Находки оформляй до вердикта: \`board review finding <ID> --severity critical|important|other --text "..."\`.
-5. Критические находки блокируют \`main\`, пока не закрыты.
+1. Если предыдущий \`run end\` вернул \`reviewMode: subagent\`, запусти субагента
+   \`board-reviewer\` и передай ему этот пакет. Если \`self\` — проверь сам.
+2. По каждой карточке проверь:
+   - spec и все критерии приёмки;
+   - все шаги plan выполнены, scope не превышен;
+   - код: корректность, тесты, обработка ошибок, безопасность.
+3. Findings оформляй до вердикта: \`board review finding <ID> --severity critical|important|other --text "..."\`.
+4. Вердикт: \`board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer review\`.
+   - \`plan failed\` требует \`reopen\`;
+   - \`plan done\` с code-findings — \`done\`; findings станут карточками.
+5. Один цикл: не переоткрывай карточку из-за стиля. \`critical\` блокирует
+   release; \`important\`/\`other\` — backlog. Второй reopen — только владелец.
+6. Если карточек нет — сообщи, что ревьюить нечего.
+`
+
+export const SPEC_REVIEW_COMMAND_SOURCE = `---
+description: Проверка полноты spec карточки
+subagent: false
+---
+
+Проверь spec карточки $1. Не редактируй код.
+
+1. Прочитай \`board card show $1 --json\` и возьми \`specReview.mode\`.
+2. \`none\` — скажи, что проверка не требуется.
+3. \`self\` — проверь сам: problem/why, результат, критерии приёмки, non-goals,
+   ограничения, зависимости, риски и возможность написать plan.
+4. \`subagent\` — запусти \`board-reviewer\` и передай ему spec и acceptance.
+5. Если spec неполный, сначала дополни его из контекста проекта, затем задай
+   вопрос владельцу (\`ask\`/\`block\`). Не делай submit.
+6. Запиши результат: \`board card spec-review $1 --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."\`.
+7. Владелец утверждает spec через \`board card approve $1\`.
 `
 
 export const SETUP_COMMAND_SOURCE = `---
@@ -543,21 +580,50 @@ description: Настройки доски
 subagent: false
 ---
 
-Спроси владельца, включать ли ревью после каждого забега. Покажи текущие
-настройки: \`board setup --show --json\`.
+Покажи \`board setup --show --json\` и спроси владельца:
 
-Затем выполни одно:
+- spec review: auto/none/self/subagent;
+- большой spec, символов (0 — выключить правило);
+- run review: none/self/subagent/auto (проверяет plan и код);
+- модель ревьюера: provider/model без #variant.
 
-- \`board setup --review-after-run\` — включить;
-- \`board setup --no-review-after-run\` — выключить.
+Затем выполни:
 
-Если владелец не хочет менять настройку — ничего не выполняй. Не меняй другие
-настройки.
+\`\`\`bash
+board setup --spec-review <mode> --large-spec <n> --run-review <mode> --reviewer-model <provider/model>
+\`\`\`
+
+Если владелец не хочет менять настройку — ничего не выполняй.
 `
+
+export function reviewerAgentSource(model: string): string {
+  return `---
+description: Read-only reviewer for spec, plan and code
+mode: subagent
+model: ${model}
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: allow
+---
+
+Ты — свежий ревьюер. Не редактируй файлы. Проверяй spec/acceptance, plan и
+код. Findings — с file:line. Вердикт записывай через
+\`board review submit --plan done|failed\`.
+`
+}
 
 export interface OpenCodeWriteOptions {
   /** Перезаписать сгенерированные файлы, даже если они уже есть. */
   refresh?: boolean
+  /** Настройки нужны для генерации board-reviewer.md. */
+  settings?: BoardSettings
 }
 
 export interface OpenCodeWriteResult {
@@ -565,11 +631,38 @@ export interface OpenCodeWriteResult {
   updated: string[]
 }
 
+/** Пишет или удаляет board-reviewer.md по reviewer.model. */
+export function writeReviewerAgent(
+  root: string,
+  settings: BoardSettings,
+  refresh = false,
+): OpenCodeWriteResult {
+  const relative = '.opencode/agents/board-reviewer.md'
+  const path = join(root, relative)
+  const model = settings.reviewer.model
+
+  if (!model) {
+    if (!existsSync(path)) return { created: [], updated: [] }
+    rmSync(path, { force: true })
+    return { created: [], updated: [relative] }
+  }
+
+  const content = reviewerAgentSource(model)
+  const exists = existsSync(path)
+  if (exists && !refresh) return { created: [], updated: [] }
+  if (exists && readFileSync(path, 'utf8') === content) return { created: [], updated: [] }
+
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, content, 'utf8')
+  return exists ? { created: [], updated: [relative] } : { created: [relative], updated: [] }
+}
+
 /**
- * Пишет в `root` скилл, плагин, команды ревью и настроек, и ставит блок
- * `board:begin`/`board:end` в `AGENTS.md`. По умолчанию существующие файлы не
- * перезаписываются; `refresh` обновляет их шаблонами (нужно после апгрейда
- * CLI). Блок между маркерами заменяется на канонический всегда.
+ * Пишет в `root` скилл, плагин, команды ревью/настроек и (при settings)
+ * board-reviewer.md, и ставит блок `board:begin`/`board:end` в `AGENTS.md`.
+ * По умолчанию существующие файлы не перезаписываются; `refresh` обновляет их
+ * шаблонами (нужно после апгрейда CLI). Блок между маркерами заменяется на
+ * канонический всегда.
  */
 export function writeOpenCodeFiles(
   root: string,
@@ -582,6 +675,7 @@ export function writeOpenCodeFiles(
     ['.opencode/skills/board/SKILL.md', SKILL_SOURCE],
     ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
     ['.opencode/command/review.md', COMMAND_SOURCE],
+    ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
     ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
   ]
   for (const [relative, content] of files) {
@@ -593,6 +687,12 @@ export function writeOpenCodeFiles(
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, content, 'utf8')
     ;(exists ? updated : created).push(relative)
+  }
+
+  if (options.settings) {
+    const agent = writeReviewerAgent(root, options.settings, options.refresh === true)
+    created.push(...agent.created)
+    updated.push(...agent.updated)
   }
 
   const agentsPath = join(root, 'AGENTS.md')
