@@ -136,6 +136,36 @@ test('editCard меняет поля запроса до submit', (t) => {
   assert.equal(listEvents(db, card.id)[1].actor, 'developer')
 })
 
+test('spec и acceptance сохраняются, specRev растёт при правке', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+
+  const card = createCard(db, {
+    group: 'UI',
+    title: 'Форма',
+    body: 'spec',
+    skill: 'dev',
+    author: 'owner',
+  })
+  assert.equal(card.acceptance, '')
+  assert.equal(card.specRev, 1)
+
+  const withAcceptance = editCard(db, {
+    id: card.id,
+    actor: 'developer',
+    patch: { acceptance: ['первый', 'второй'] },
+  })
+  assert.equal(withAcceptance.acceptance, 'первый\nвторой')
+  assert.equal(withAcceptance.specRev, 2)
+
+  const withScope = editCard(db, {
+    id: card.id,
+    actor: 'developer',
+    patch: { scope: ['src/**'] },
+  })
+  assert.equal(withScope.specRev, 3)
+})
+
 test('после submit навык неизменяем, остальные поля меняются', (t) => {
   const { db, close } = makeBoard()
   t.after(close)

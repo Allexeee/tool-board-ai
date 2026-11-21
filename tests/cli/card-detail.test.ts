@@ -33,6 +33,21 @@ function json(dir: string, args: string[]) {
   return JSON.parse(result.out)
 }
 
+test('card show --json отдаёт spec, plan, acceptance и specRev', (t) => {
+  const dir = project(t)
+  json(dir, ['card', 'edit', 'UI-1', '--spec', 'Нужен вход'])
+  json(dir, ['card', 'edit', 'UI-1', '--acceptance', 'Вход работает'])
+  json(dir, ['card', 'step', 'add', 'UI-1', 'Написать форму'])
+
+  const shown = json(dir, ['card', 'show', 'UI-1'])
+  assert.equal(shown.spec, 'Нужен вход')
+  assert.equal(shown.body, 'Нужен вход')
+  assert.equal(shown.acceptance, 'Вход работает')
+  assert.equal(shown.specRev, 3)
+  assert.deepEqual(shown.plan, shown.steps)
+  assert.equal(shown.plan[0].text, 'Написать форму')
+})
+
 test('card step add/done/list/remove работает через CLI', (t) => {
   const dir = project(t)
 

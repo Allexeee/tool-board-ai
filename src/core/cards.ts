@@ -11,6 +11,7 @@ export interface NewCardInput {
   group: string
   title: string
   body?: string
+  acceptance?: string[]
   skill: string
   author: string
 }
@@ -26,6 +27,7 @@ export interface CardFilter {
 export interface CardPatch {
   title?: string
   body?: string
+  acceptance?: string[]
   skill?: string
   importance?: number | null
   urgency?: number | null
@@ -65,6 +67,7 @@ interface Row {
   group_seq: number
   title: string
   body: string
+  acceptance: string
   phase: string
   status: string
   skill: string | null
@@ -81,6 +84,8 @@ interface Row {
   run_id: string | null
   branch: string | null
   attempt: number
+  spec_rev: number
+  review_reopens: number
   merge_commit: string | null
   in_dev: number
   in_main: number
@@ -104,6 +109,7 @@ const toCard = (row: Row): Card => ({
   groupSeq: row.group_seq,
   title: row.title,
   body: row.body,
+  acceptance: row.acceptance,
   phase: row.phase as CardPhase,
   status: row.status as CardStatus,
   skill: row.skill,
@@ -120,6 +126,8 @@ const toCard = (row: Row): Card => ({
   runId: row.run_id,
   branch: row.branch,
   attempt: row.attempt,
+  specRev: row.spec_rev,
+  reviewReopens: row.review_reopens,
   mergeCommit: row.merge_commit,
   inDev: row.in_dev === 1,
   inMain: row.in_main === 1,
@@ -154,6 +162,13 @@ function normalizeScope(raw: string[]): string[] {
   return raw.map((value) => value.trim()).filter(Boolean)
 }
 
+function normalizeAcceptance(raw: string[]): string {
+  return raw
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
 function filterValues<T extends string>(value: T | T[], allowed: readonly T[], label: string): T[] {
   const values = Array.isArray(value) ? value : [value]
   for (const item of values) {
@@ -170,6 +185,7 @@ interface CardInsert {
   groupSeq: number
   title: string
   body: string
+  acceptance: string
   phase: CardPhase
   status: CardStatus
   skill: string
@@ -180,18 +196,18 @@ interface CardInsert {
 function insertCard(db: DatabaseSync, card: CardInsert): void {
   db.prepare(
     `insert into cards (
-       id, group_prefix, group_seq, title, body, phase, status, skill,
+       id, group_prefix, group_seq, title, body, acceptance, phase, status, skill,
        importance, urgency, position, needs_merge, review_required, scope,
        severity, origin_card_id, summary, holder, run_id, branch, attempt,
-       merge_commit, in_dev, in_main, reverted_at, revert_commit, waive_deps,
-       lease_until, previous_holder, created_at, updated_at, shaped_at,
-       approved_at, done_at, cancel_reason, note
+       spec_rev, review_reopens, merge_commit, in_dev, in_main, reverted_at,
+       revert_commit, waive_deps, lease_until, previous_holder, created_at,
+       updated_at, shaped_at, approved_at, done_at, cancel_reason, note
      ) values (
-       ?, ?, ?, ?, ?, ?, ?, ?,
+       ?, ?, ?, ?, ?, ?, ?, ?, ?,
        null, null, null, ?, 0, '[]',
        null, null, null, null, null, null, 1,
-       null, 0, 0, null, null, 0,
-       null, null, ?, ?,
+       1, 0, null, 0, 0, null,
+       null, 0, null, null, ?, ?,
        null, null, null, null, null
      )`,
   ).run(
@@ -200,6 +216,7 @@ function insertCard(db: DatabaseSync, card: CardInsert): void {
     card.groupSeq,
     card.title,
     card.body,
+    card.acceptance,
     card.phase,
     card.status,
     card.skill,
@@ -231,6 +248,7 @@ export function createCard(db: DatabaseSync, input: NewCardInput): Card {
       groupSeq: Number(id.slice(dashed + 1)),
       title,
       body: input.body ?? '',
+      acceptance: normalizeAcceptance(input.acceptance ?? []),
       phase: isOwner ? 'task' : 'request',
       status: isOwner ? 'ready' : 'new',
       skill,
@@ -305,14 +323,24 @@ export function editCard(
     const patch = input.patch
     const sets: string[] = []
     const params: (string | number | null)[] = []
+    let specChanged = false
 
     if (patch.title !== undefined) {
       sets.push('title = ?')
       params.push(requiredText(patch.title, 'нужен заголовок карточки'))
     }
-    if (patch.body !== undefined) {
+    if (patch.body !== undefined && patch.body !== card.body) {
       sets.push('body = ?')
       params.push(patch.body)
+      specChanged = true
+    }
+    if (patch.acceptance !== undefined) {
+      const acceptance = normalizeAcceptance(patch.acceptance)
+      if (acceptance !== card.acceptance) {
+        sets.push('acceptance = ?')
+        params.push(acceptance)
+        specChanged = true
+      }
     }
     if (patch.skill !== undefined) {
       const skill = requiredText(patch.skill, 'нужен навык карточки')
@@ -357,8 +385,12 @@ export function editCard(
       params.push(patch.reviewRequired ? 1 : 0)
     }
     if (patch.scope !== undefined) {
-      sets.push('scope = ?')
-      params.push(JSON.stringify(normalizeScope(patch.scope)))
+      const scope = normalizeScope(patch.scope)
+      if (JSON.stringify(scope) !== JSON.stringify(card.scope)) {
+        sets.push('scope = ?')
+        params.push(JSON.stringify(scope))
+        specChanged = true
+      }
     }
     if (patch.note !== undefined) {
       sets.push('note = ?')
@@ -367,6 +399,7 @@ export function editCard(
 
     if (sets.length === 0) return card
 
+    if (specChanged) sets.push('spec_rev = spec_rev + 1')
     sets.push('updated_at = ?')
     params.push(nowIso())
     params.push(card.id)

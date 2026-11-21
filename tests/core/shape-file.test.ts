@@ -16,14 +16,14 @@ function board(t: { after: (fn: () => void) => void }): Board {
 }
 
 const planJson = {
-  body: 'Форма входа с валидацией',
+  spec: 'Форма входа с валидацией',
+  acceptance: ['Форма отправляется', 'Ошибки показываются'],
   skill: 'dev',
   importance: 3,
   urgency: 2,
   needs_merge: true,
   review_required: true,
   scope: ['src/**', 'tests/**'],
-  steps: ['Написать форму', 'Добавить тест'],
   refs: [{ kind: 'spec', value: 'docs/specs/login.md' }],
   deps: [] as string[],
   new_cards: [
@@ -39,7 +39,7 @@ const planJson = {
   new_deps: [['UI-1', 'gen']],
 }
 
-test('applyShapeFile применяет поля, шаги, ссылки и создаёт новые карточки', (t) => {
+test('applyShapeFile применяет spec, acceptance, ссылки и создаёт новые карточки', (t) => {
   const { db } = board(t)
   const card = seedCard(db)
   shapeCard(db, { id: card.id, actor: 'developer' })
@@ -53,8 +53,9 @@ test('applyShapeFile применяет поля, шаги, ссылки и со
   assert.equal(shaped.reviewRequired, true)
   assert.deepEqual(shaped.scope, ['src/**', 'tests/**'])
   assert.equal(shaped.body, 'Форма входа с валидацией')
+  assert.equal(shaped.acceptance, 'Форма отправляется\nОшибки показываются')
 
-  assert.equal(listSteps(db, card.id).length, 2)
+  assert.equal(listSteps(db, card.id).length, 0)
   assert.equal(listRefs(db, card.id).length, 1)
 
   assert.equal(result.newCards.length, 1)
@@ -64,6 +65,22 @@ test('applyShapeFile применяет поля, шаги, ссылки и со
 
   // new_deps [['UI-1', 'gen']] разрешается в зависимость card → новая карточка
   assert.deepEqual(listDeps(db, card.id), [result.newCards[0].id])
+})
+
+test('applyShapeFile отклоняет steps: план пишется при take', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db)
+  shapeCard(db, { id: card.id, actor: 'developer' })
+
+  assert.throws(
+    () => applyShapeFile(db, {
+      id: card.id,
+      actor: 'developer',
+      file: { steps: ['Написать форму'] } as never,
+    }),
+    (error: { code?: number }) => error.code === 3,
+  )
+  assert.equal(listSteps(db, card.id).length, 0)
 })
 
 test('applyShapeFile резолвит deps по ID существующих карточек', (t) => {

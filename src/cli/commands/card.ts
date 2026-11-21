@@ -48,7 +48,8 @@ export default async function command(args: ParsedArgs) {
     const card = createCard(db, {
       group,
       title,
-      body: stringFlag(args, 'body'),
+      body: stringFlag(args, 'spec') ?? stringFlag(args, 'body'),
+      acceptance: stringsFlag(args, 'acceptance'),
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
     })
@@ -84,9 +85,12 @@ export default async function command(args: ParsedArgs) {
 
   const show = (args: ParsedArgs): number => {
     const card = requireCard(args.positionals[0], 'board card show UI-1')
+    const steps = listSteps(db, card.id)
     const detail = {
       ...card,
-      steps: listSteps(db, card.id),
+      spec: card.body,
+      plan: steps,
+      steps,
       refs: listRefs(db, card.id),
       deps: listDeps(db, card.id),
       discussion: listDiscussion(db, card.id),
@@ -108,8 +112,9 @@ export default async function command(args: ParsedArgs) {
 
     const title = stringFlag(args, 'title')
     if (title !== undefined) patch.title = title
-    const body = stringFlag(args, 'body')
+    const body = stringFlag(args, 'spec') ?? stringFlag(args, 'body')
     if (body !== undefined) patch.body = body
+    if (args.flags['acceptance'] !== undefined) patch.acceptance = stringsFlag(args, 'acceptance')
     const skill = stringFlag(args, 'skill')
     if (skill !== undefined) patch.skill = skill
 
@@ -453,6 +458,9 @@ function parseShapeFile(path: string): ShapeFile {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new UserError(3, `файл ${path}: ожидался объект JSON`)
   }
+  if ('steps' in parsed) {
+    throw new UserError(3, `файл ${path}: steps пишутся при take, не при shape`)
+  }
 
   const file = parsed as ShapeFile
   // Минимальная проверка до изменения карточки: новая карточка без группы
@@ -511,6 +519,9 @@ function formatCard(
   ]
   if (card.note !== null && card.note !== '') lines.push(`заметка: ${card.note}`)
   if (card.body !== '') lines.push('', card.body)
+  if (card.acceptance !== '') {
+    lines.push('', 'КРИТЕРИИ ПРИЁМКИ', ...card.acceptance.split('\n').map((line) => `  - ${line}`))
+  }
 
   lines.push('', formatDeps(db, deps))
   lines.push('', formatSteps(steps, progressOf(steps)))

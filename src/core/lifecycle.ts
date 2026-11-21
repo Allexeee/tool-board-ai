@@ -22,7 +22,6 @@ import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
 import { getActiveRun, listRunCards, RUN_LEASE_MS } from './runs.ts'
-import { addStep } from './steps.ts'
 import type { Card, CardStatus } from './types.ts'
 
 /** Навык owner означает owner-карточку: владелец закрывает её одной командой. */
@@ -475,21 +474,25 @@ export interface ShapeFileNewCard {
   group: string
   title: string
   skill: string
+  spec?: string
   body?: string
+  acceptance?: string[]
   needs_merge?: boolean
   review_required?: boolean
   scope?: string[]
 }
 
 export interface ShapeFile {
+  spec?: string
+  /** Старый алиас spec. */
   body?: string
+  acceptance?: string[]
   skill?: string
   importance?: number
   urgency?: number
   needs_merge?: boolean
   review_required?: boolean
   scope?: string[]
-  steps?: string[]
   refs?: Array<{ kind: string; value: string; title?: string }>
   deps?: string[]
   new_cards?: ShapeFileNewCard[]
@@ -521,11 +524,16 @@ export function applyShapeFile(
     if (typeof file !== 'object' || file === null || Array.isArray(file)) {
       throw new UserError(3, 'файл разбора — объект JSON')
     }
+    if ('steps' in file) {
+      throw new UserError(3, 'steps пишутся при take, не при shape')
+    }
 
     // Поля карточки — через editCard: он переиспользует валидацию оценок,
     // owner-инвариантов и неизменяемости навыка.
     const patch: CardPatch = {}
-    if (file.body !== undefined) patch.body = file.body
+    const spec = file.spec ?? file.body
+    if (spec !== undefined) patch.body = spec
+    if (file.acceptance !== undefined) patch.acceptance = file.acceptance
     if (file.skill !== undefined) patch.skill = file.skill
     if (file.importance !== undefined) patch.importance = file.importance
     if (file.urgency !== undefined) patch.urgency = file.urgency
@@ -533,8 +541,6 @@ export function applyShapeFile(
     if (file.review_required !== undefined) patch.reviewRequired = file.review_required
     if (file.scope !== undefined) patch.scope = file.scope
     if (Object.keys(patch).length > 0) editCard(db, { id: card.id, actor, patch })
-
-    for (const text of file.steps ?? []) addStep(db, { cardId: card.id, text, actor })
     for (const ref of file.refs ?? []) {
       addRef(db, {
         cardId: card.id,
@@ -556,7 +562,8 @@ export function applyShapeFile(
       const created = createCard(db, {
         group: item.group,
         title: item.title,
-        body: item.body,
+        body: item.spec ?? item.body,
+        acceptance: item.acceptance,
         skill: item.skill,
         author: actor,
       })

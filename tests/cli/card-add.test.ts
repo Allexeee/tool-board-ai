@@ -52,6 +52,24 @@ test('card add заводит запрос и печатает его в json', 
   assert.equal(card.reviewRequired, false)
 })
 
+test('card add принимает spec и повторяемый acceptance', (t) => {
+  const dir = project(t)
+
+  const card = json(dir, [
+    'card', 'add',
+    '--group', 'UI',
+    '--title', 'Форма входа',
+    '--skill', 'dev',
+    '--spec', 'Что и зачем',
+    '--acceptance', 'Первый критерий',
+    '--acceptance', 'Второй критерий',
+  ])
+
+  assert.equal(card.body, 'Что и зачем')
+  assert.equal(card.acceptance, 'Первый критерий\nВторой критерий')
+  assert.equal(card.specRev, 1)
+})
+
 test('card add с навыком owner создаёт задачу в ready', (t) => {
   const dir = project(t)
 

@@ -62,6 +62,7 @@ export interface Card {
   groupSeq: number
   title: string
   body: string
+  acceptance: string
   phase: CardPhase
   status: CardStatus
   skill: string | null
@@ -78,6 +79,8 @@ export interface Card {
   runId: string | null
   branch: string | null
   attempt: number
+  specRev: number
+  reviewReopens: number
   mergeCommit: string | null
   inDev: boolean
   inMain: boolean
