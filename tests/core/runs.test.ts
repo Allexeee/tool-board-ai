@@ -19,6 +19,7 @@ import {
   startRun,
 } from '../../src/core/runs.ts'
 import { finishCard } from '../../src/core/lifecycle.ts'
+import { submitVerdict } from '../../src/core/review.ts'
 import type { Card, CardStatus } from '../../src/core/types.ts'
 import { makeBoard, seedCard, seedExecutor, seedRun } from '../helpers/board.ts'
 
@@ -686,6 +687,37 @@ test('endRun с reviewMode переносит done-карточки в post-hoc 
   assert.equal(after.mergeCommit, 'abc')
   assert.equal(after.summary, 'ok')
   assert.equal(listRunCards(db, run.id)[0].status, 'review')
+})
+
+test('run end не переоткрывает уже отревьюенную done-карточку', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: [card.id],
+    actor: 'developer',
+    reviewMode: 'subagent',
+  })
+
+  db.prepare("update cards set status = 'review', holder = 'developer' where id = ?").run(card.id)
+  db.prepare("update run_cards set status = 'review' where run_id = ? and card_id = ?").run(
+    run.id,
+    card.id,
+  )
+
+  submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'review',
+    verdict: 'done',
+    planCompliance: 'done',
+    mode: 'subagent',
+  })
+  assert.equal(getCard(db, card.id)!.status, 'done')
+
+  endRun(db, { executorId: 'developer', actor: 'developer', reviewMode: 'subagent' })
+  assert.equal(getCard(db, card.id)!.status, 'done')
+  assert.equal(listRunCards(db, run.id)[0].status, 'reviewed')
 })
 
 test('reclaimExpired возвращает просроченную shaping-карточку в new', (t) => {

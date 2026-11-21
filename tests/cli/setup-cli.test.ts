@@ -74,6 +74,20 @@ test('setup: создаёт и удаляет board-reviewer.md по модел�
   assert.equal(existsSync(agent), false)
 })
 
+test('setup: создаёт board-reviewer.md из effective-модели сессии', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  const agent = join(fixture.root, '.opencode', 'agents', 'board-reviewer.md')
+
+  run(fixture.root, ['setup', '--spec-review', 'self'], {
+    BOARD_SESSION_MODEL: 'acme/main',
+    BOARD_MODEL_VARIANT: 'max',
+  })
+
+  assert.match(readFileSync(agent, 'utf8'), /model: acme\/main/)
+  assert.doesNotMatch(readFileSync(agent, 'utf8'), /#max|#high/)
+})
+
 test('setup: показывает effective reviewer model из сессии', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)

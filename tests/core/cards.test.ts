@@ -209,6 +209,28 @@ test('после submit spec locked, остальные поля меняютс�
   )
 })
 
+test('review_required после approve меняет только владелец', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+
+  const card = createCard(db, {
+    group: 'UI',
+    title: 'Форма',
+    skill: 'dev',
+    author: 'owner',
+  })
+  db.prepare("update cards set status = 'ready', review_required = 1 where id = ?").run(card.id)
+
+  assert.throws(
+    () => editCard(db, { id: card.id, actor: 'developer', patch: { reviewRequired: false } }),
+    /владелец/,
+  )
+  assert.equal(getCard(db, card.id)!.reviewRequired, true)
+
+  const owner = editCard(db, { id: card.id, actor: 'owner', patch: { reviewRequired: false } })
+  assert.equal(owner.reviewRequired, false)
+})
+
 test('навык меняется, пока карточка shaping', (t) => {
   const { db, close } = makeBoard()
   t.after(close)

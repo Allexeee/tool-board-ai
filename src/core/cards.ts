@@ -321,6 +321,17 @@ export function editCard(
 
     const actor = requiredText(input.actor, 'нужен автор изменения')
     const patch = input.patch
+    if (
+      patch.reviewRequired !== undefined &&
+      card.status !== 'new' &&
+      card.status !== 'shaping' &&
+      actor !== OWNER_SKILL
+    ) {
+      throw new UserError(
+        3,
+        `менять review_required карточки ${card.id} после approve может только владелец`,
+      )
+    }
     const touchesSpec =
       patch.body !== undefined ||
       patch.acceptance !== undefined ||

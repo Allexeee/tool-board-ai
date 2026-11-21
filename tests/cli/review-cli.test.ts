@@ -27,6 +27,32 @@ function fixture(t: { after: (fn: () => void) => void }) {
   return board
 }
 
+test('review list отдаёт reopens, прошлые вердикты и открытые findings', (t) => {
+  const { root, db } = fixture(t)
+  const card = seedCard(db, { phase: 'task', status: 'review', position: 1 })
+  db.prepare('update cards set review_reopens = 1 where id = ?').run(card.id)
+  db.prepare(
+    `insert into reviews (card_id, reviewer, verdict, note, at, kind, mode, spec_rev, plan_compliance)
+     values (?, 'review', 'reopen', 'план не выполнен', '2026-01-01', 'run', 'subagent', 1, 'failed')`,
+  ).run(card.id)
+  const finding = run(root, [
+    'review', 'finding', card.id,
+    '--severity', 'important',
+    '--text', 'добавить тест',
+  ])
+  assert.equal(finding.code, 0, finding.err)
+
+  const items = JSON.parse(run(root, ['review', 'list', '--json']).out) as Array<{
+    reviewReopens: number
+    reviews: Array<{ verdict: string; planCompliance: string }>
+    findings: Array<{ severity: string; title: string }>
+  }>
+  assert.equal(items[0].reviewReopens, 1)
+  assert.equal(items[0].reviews[0].verdict, 'reopen')
+  assert.equal(items[0].reviews[0].planCompliance, 'failed')
+  assert.equal(items[0].findings[0].severity, 'important')
+})
+
 test('review submit требует --plan', (t) => {
   const { root, db } = fixture(t)
   const card = seedCard(db, { phase: 'task', status: 'review', position: 1 })

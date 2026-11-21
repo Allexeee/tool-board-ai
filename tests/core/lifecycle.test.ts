@@ -200,6 +200,25 @@ test('amend возвращает утверждённый spec в shaping и т�
   assert.equal(approveCard(db, { id: card.id, actor: 'owner' }).status, 'ready')
 })
 
+test('amend не обходит открытый вопрос', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db)
+  shapeCard(db, { id: card.id, actor: 'developer' })
+  ask(db, { cardId: card.id, author: 'owner', text: 'Какой scope?' })
+  blockCard(db, {
+    id: card.id,
+    actor: 'developer',
+    reason: 'needs_decision',
+    note: 'нужен ответ',
+  })
+
+  assert.throws(
+    () => amendCard(db, { id: card.id, actor: 'developer', reason: 'обойти вопрос' }),
+    /вопрос|ответ/,
+  )
+  assert.equal(getCard(db, card.id)!.status, 'blocked')
+})
+
 test('amend запрещён для карточки в работе', (t) => {
   const { db } = board(t)
   const card = shapedRequest(t, db)
@@ -404,6 +423,17 @@ test('cancel отменяет карточку: держатель или вла
   const byOwner = cancelCard(db, { id: ready.id, actor: 'owner', reason: 'передумал' })
   assert.equal(byOwner.status, 'cancelled')
   assert.equal(byOwner.waiveDeps, false)
+})
+
+test('reopen — только владелец, не-owner не обходит review', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review', position: 1 })
+
+  assert.throws(
+    () => reopenCard(db, { id: card.id, actor: 'developer', reason: 'обойти ревью' }),
+    /владелец/,
+  )
+  assert.equal(getCard(db, card.id)!.status, 'review')
 })
 
 test('reopen увеличивает попытку, пишет previous_holder и двигает в начало очереди', (t) => {

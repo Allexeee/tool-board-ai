@@ -28,6 +28,7 @@ const ACTIVE_CARD_STATUSES: readonly RunCardStatus[] = [
   'blocked',
   'done',
   'review',
+  'reviewed',
 ]
 
 interface RunRow {
@@ -610,7 +611,8 @@ export function endRun(
     if (reviewMode !== 'none') {
       for (const row of listRunCards(db, run.id)) {
         const card = getCard(db, row.cardId)
-        if (!card || card.status !== 'done') continue
+        // Уже отревьюенная карточка имеет run_cards.status='done' после verdict.
+        if (!card || row.status !== 'done' || card.status !== 'done') continue
         const before = card
         const at = nowIso()
         db.prepare(

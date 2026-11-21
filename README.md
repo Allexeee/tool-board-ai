@@ -91,8 +91,10 @@ board card add --group UI --title "Форма входа" --skill dev
 - **Запрос** (`phase=request`) → разбор: `card shape UI-1 --as developer [--from card.json]`.
 - Разбирающий заполняет **spec** (`body`): проблему/why, результат, non-goals, ограничения, риски и **критерии приёмки** (`acceptance`). План (`steps`) здесь не пишется.
 - **Spec review** (если включён): `/spec-review` или `card spec-review UI-1 --as developer --mode self|subagent --verdict done`.
+- **Scope** задаётся здесь же: `card edit UI-1 --scope 'src/**' --scope 'tests/**'`.
 - **На утверждение**: `card submit UI-1 --as developer`. Владелец утверждает **spec**: `card approve UI-1` или `card reject UI-1 --reason "..."`.
 - После approve менять spec/acceptance/scope нельзя; изменение — `card amend UI-1 --as developer --reason "..."`, затем повторный review и approve.
+- `card reopen` — команда владельца; агент не обходит ею ревью и лимит переоткрытий.
 
 `needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 0–3. Зависимости — `card dep`.
 
@@ -104,13 +106,12 @@ board card add --group UI --title "Форма входа" --skill dev
 board run start --as developer --cards UI-1,UI-7   # или --suggest 1
 board take UI-1 --as developer
 board card step add UI-1 "Написать форму + тест"   # plan пишется при take
-board card edit UI-1 --scope 'src/**'
 board finish UI-1 --as developer --summary "готово"
 board run next --as developer
 board run end --as developer [--review|--no-review]
 ```
 
-`take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` или `done`. Если `runReview.mode != none`, `finish` отправляет в review все карточки забега, включая `review_required=false`.
+`take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` или `done`. Если `runReview.mode != none`, `finish` отправляет в review все карточки забега, включая `review_required=false`. Если plan требует нового scope, `card edit` после approve не поможет: нужен `block`/`ask`, затем `card amend` и повторное утверждение.
 
 Если нужен владелец — `block UI-1 --as developer --reason needs_decision --note "..."` или `ask UI-1 "вопрос" --as developer [--block]`. Ответ — `answer UI-1 "ответ"`.
 

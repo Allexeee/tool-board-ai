@@ -130,7 +130,7 @@ test('run end: ревью после забега берётся из настр
   assert.match(plain.out, /ревью после забега выключено/)
   assert.equal(getRun(db, 'RUN-1')!.review, false)
 
-  json(root, ['setup', '--review-after-run'])
+  json(root, ['setup', '--review-after-run', '--reviewer-model', 'acme/model'])
   json(root, ['run', 'start', '--as', 'developer', '--cards', cards[1].id])
   const enabled = run(root, ['run', 'end', '--as', 'developer'])
   assert.equal(enabled.code, 0, enabled.err)
@@ -248,6 +248,19 @@ test('run end --no-review не трогает done-карточки', (t) => {
   assert.equal(ended.reviewMode, 'none')
   assert.equal(ended.reviewCards, 0)
   assert.equal((json(fixture.root, ['card', 'show', card.id]) as { status: string }).status, 'done')
+})
+
+test('run end с subagent без reviewer.model — код 2', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(fixture.db, { phase: 'task', status: 'ready', position: 1 })
+
+  json(fixture.root, ['setup', '--run-review', 'subagent'])
+  json(fixture.root, ['run', 'start', '--as', 'developer', '--cards', card.id])
+  const ended = run(fixture.root, ['run', 'end', '--as', 'developer'])
+  assert.equal(ended.code, 2)
+  assert.match(ended.err, /reviewer\.model|--reviewer-model/)
 })
 
 test('run list снимает просроченный lease', (t) => {

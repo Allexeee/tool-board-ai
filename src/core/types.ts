@@ -27,6 +27,7 @@ export type RunCardStatus =
   | 'dropped'
   | 'done'
   | 'review'
+  | 'reviewed'
 
 export interface Run {
   id: string

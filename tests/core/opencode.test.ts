@@ -70,6 +70,17 @@ test('плагин передаёт модель сессии в CLI', () => {
   assert.match(plugin, /plan/)
 })
 
+test('reviewer agent берёт effective-модель сессии, если настройка пуста', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root, {
+    settings: DEFAULT_SETTINGS,
+    context: { variant: 'max', sessionModel: 'acme/main#max' },
+  })
+  const agent = readFileSync(join(root, '.opencode', 'agents', 'board-reviewer.md'), 'utf8')
+  assert.match(agent, /model: acme\/main/)
+  assert.doesNotMatch(agent, /#max|#high/)
+})
+
 test('reviewer agent создаётся с default-моделью и удаляется без неё', () => {
   const root = tmp()
   const settings = {

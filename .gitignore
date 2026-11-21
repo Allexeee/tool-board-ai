@@ -5,3 +5,4 @@ node_modules/
 .worktrees/
 .superpowers/
 *.log
+.opencode/agents/board-reviewer.md

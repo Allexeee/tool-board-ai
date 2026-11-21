@@ -1,5 +1,10 @@
 ﻿import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import {
+  effectiveReviewerModel,
+  modelContext,
+  type ModelContext,
+} from './review-policy.ts'
 import type { BoardSettings } from './settings.ts'
 
 /**
@@ -65,8 +70,8 @@ description: Доска карточек: смотреть now, разбират
 
 1. \`board run start --as <исполнитель> --cards <ID>,...\` (или \`--suggest 1\`).
 2. \`board take <ID> --as <исполнитель>\` — карточка в работе.
-3. Перед кодом напиши **plan**: \`board card step add <ID> "шаг + проверка"\`, \`card edit --scope ...\`; каждый критерий приёмки должен быть отображён на шаг.
-4. Если plan требует нового поведения или scope — остановись, \`block\`/\`ask\` владельцу; не меняй spec молча.
+3. Перед кодом напиши **plan**: \`board card step add <ID> "шаг + проверка"\`; scope уже зафиксирован в spec при разборе.
+4. Если plan требует нового поведения или scope — остановись, \`block\`/\`ask\` владельцу; после approve \`card edit\` не меняет scope, нужен \`card amend\`.
 5. \`board finish <ID> --as <исполнитель> --summary "..."\` — сдать (review или done).
 6. \`board run next --as <исполнитель>\` — следующая карточка.
 7. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег. Если \`reviewMode\` не \`none\`, запусти \`/review\`.
@@ -110,6 +115,7 @@ description: Доска карточек: смотреть now, разбират
 - Работай в ветке карточки; коммит и мерж делает \`board finish\`. В \`main\` не пиши — его меняет \`release\` владельца.
 - Причина обязательна у block/cancel/reject/reopen; \`finish\` требует \`--summary\`.
 - Ревью своей карточки не давай: для кода вердикт — свежий субагент. Spec review может быть self по настройке.
+- \`card reopen\` — только владелец; агент не обходит ею ревью и лимит переоткрытий.
 - Один цикл ревью: не переоткрывай карточку из-за стилистических улучшений.
 `
 
@@ -544,7 +550,8 @@ subagent: false
 
 1. Если предыдущий \`run end\` вернул \`reviewMode: subagent\`, запусти субагента
    \`board-reviewer\` и передай ему этот пакет. Если \`self\` — проверь сам.
-2. По каждой карточке проверь:
+2. Если \`reviewReopens > 0\` — проверь только diff и открытые findings;
+   не перепроверяй всю карточку. Иначе проверь:
    - spec и все критерии приёмки;
    - все шаги plan выполнены, scope не превышен;
    - код: корректность, тесты, обработка ошибок, безопасность.
@@ -624,6 +631,8 @@ export interface OpenCodeWriteOptions {
   refresh?: boolean
   /** Настройки нужны для генерации board-reviewer.md. */
   settings?: BoardSettings
+  /** Модель текущей сессии; по умолчанию читается из env плагина. */
+  context?: ModelContext
 }
 
 export interface OpenCodeWriteResult {
@@ -636,10 +645,11 @@ export function writeReviewerAgent(
   root: string,
   settings: BoardSettings,
   refresh = false,
+  context: ModelContext = modelContext(process.env),
 ): OpenCodeWriteResult {
   const relative = '.opencode/agents/board-reviewer.md'
   const path = join(root, relative)
-  const model = settings.reviewer.model
+  const model = effectiveReviewerModel(settings, context)
 
   if (!model) {
     if (!existsSync(path)) return { created: [], updated: [] }
@@ -690,7 +700,12 @@ export function writeOpenCodeFiles(
   }
 
   if (options.settings) {
-    const agent = writeReviewerAgent(root, options.settings, options.refresh === true)
+    const agent = writeReviewerAgent(
+      root,
+      options.settings,
+      options.refresh === true,
+      options.context ?? modelContext(process.env),
+    )
     created.push(...agent.created)
     updated.push(...agent.updated)
   }

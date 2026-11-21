@@ -178,6 +178,12 @@ export function submitVerdict(
         at,
         card.id,
       )
+      if (card.runId) {
+        db.prepare("update run_cards set status = 'reviewed' where run_id = ? and card_id = ?").run(
+          card.runId,
+          card.id,
+        )
+      }
     } else {
       db.prepare(
         `update cards set status = 'ready', previous_holder = ?, holder = null, run_id = null,

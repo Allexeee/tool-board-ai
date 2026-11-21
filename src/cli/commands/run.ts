@@ -14,7 +14,11 @@
 import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { findProject } from '../../core/project.ts'
-import { modelContext, resolveRunReviewMode } from '../../core/review-policy.ts'
+import {
+  effectiveReviewerModel,
+  modelContext,
+  resolveRunReviewMode,
+} from '../../core/review-policy.ts'
 import { readSettings } from '../../core/settings.ts'
 import type { Run, RunReviewMode } from '../../core/types.ts'
 import {
@@ -154,6 +158,13 @@ export default async function command(args: ParsedArgs) {
     } else {
       reviewMode =
         run.reviewMode ?? resolveRunReviewMode({ settings, context }).mode
+    }
+
+    if (reviewMode === 'subagent' && effectiveReviewerModel(settings, context) === null) {
+      throw new UserError(
+        2,
+        'run review требует субагента, но reviewer.model не задан: board setup --reviewer-model или выберите self',
+      )
     }
 
     const ended = endRun(db, { executorId, actor: executorId, reviewMode })

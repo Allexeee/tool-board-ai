@@ -281,6 +281,12 @@ export function amendCard(
         `карточку ${card.id} нельзя изменить из ${card.status}: сначала block или reopen`,
       )
     }
+    if (openQuestions(db, card.id).length > 0) {
+      throw new UserError(
+        3,
+        `у карточки ${card.id} есть открытые вопросы: сначала ответьте на них`,
+      )
+    }
 
     const now = new Date()
     const at = now.toISOString()
@@ -476,6 +482,9 @@ export function reopenCard(
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
     const reason = requireReason(input.reason)
+    if (actor !== OWNER) {
+      throw new UserError(3, 'переоткрывать карточку может только владелец')
+    }
     if (!REOPENABLE.includes(card.status)) {
       throw new UserError(3, `карточку ${card.id} в статусе ${card.status} нельзя переоткрыть`)
     }

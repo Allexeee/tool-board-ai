@@ -32,6 +32,16 @@ interface ReviewItem {
   branch: string | null
   mergeCommit: string | null
   steps: Step[]
+  reviewReopens: number
+  reviews: Array<{
+    verdict: string
+    reviewer: string
+    note: string | null
+    at: string
+    mode: string | null
+    planCompliance: string | null
+  }>
+  findings: Array<{ id: string; title: string; severity: string | null; status: string }>
   refs: Ref[]
   discussion: ReturnType<typeof listDiscussion>
   diff: string | null
@@ -45,6 +55,28 @@ export default async function command(args: ParsedArgs) {
   const list = (args: ParsedArgs): number => {
     const items: ReviewItem[] = listReviewCards(db).map((card) => {
       const steps = listSteps(db, card.id)
+      const reviews = db
+        .prepare(
+          "select verdict, reviewer, note, at, mode, plan_compliance from reviews where card_id = ? and kind = 'run' order by id desc",
+        )
+        .all(card.id) as Array<{
+        verdict: string
+        reviewer: string
+        note: string | null
+        at: string
+        mode: string | null
+        plan_compliance: string | null
+      }>
+      const findings = db
+        .prepare(
+          "select id, title, severity, status from cards where origin_card_id = ? and status not in ('done', 'cancelled') order by id",
+        )
+        .all(card.id) as Array<{
+        id: string
+        title: string
+        severity: string | null
+        status: string
+      }>
       return {
         id: card.id,
         title: card.title,
@@ -59,6 +91,16 @@ export default async function command(args: ParsedArgs) {
         branch: card.branch,
         mergeCommit: card.mergeCommit,
         steps,
+        reviewReopens: card.reviewReopens,
+        reviews: reviews.map((row) => ({
+          verdict: row.verdict,
+          reviewer: row.reviewer,
+          note: row.note,
+          at: row.at,
+          mode: row.mode,
+          planCompliance: row.plan_compliance,
+        })),
+        findings,
         refs: listRefs(db, card.id),
         discussion: listDiscussion(db, card.id),
         diff: card.mergeCommit ? `git diff ${card.mergeCommit}^1 ${card.mergeCommit}` : null,
@@ -191,6 +233,13 @@ function formatReviewList(items: ReviewItem[]): string {
       if (item.body !== '') lines.push(`  spec: ${item.spec}`)
       if (item.acceptance !== '') {
         lines.push(`  acceptance: ${item.acceptance.split('\n').join(' | ')}`)
+      }
+      if (item.reviewReopens > 0) lines.push(`  reopens: ${item.reviewReopens}`)
+      for (const review of item.reviews) {
+        lines.push(`  review: ${review.verdict} · plan ${review.planCompliance ?? '—'}`)
+      }
+      for (const finding of item.findings) {
+        lines.push(`  finding: ${finding.id} · ${finding.severity ?? '—'} · ${finding.status}`)
       }
       for (const step of item.steps) {
         lines.push(`  [${step.done ? 'x' : ' '}] ${step.seq}. ${step.text}`)
