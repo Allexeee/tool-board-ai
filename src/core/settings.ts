@@ -1,24 +1,88 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { UserError } from '../cli/errors.ts'
 import { nowIso } from './clock.ts'
+
+export type SpecReviewSetting = 'auto' | 'none' | 'self' | 'subagent'
+export type RunReviewSetting = 'auto' | 'none' | 'self' | 'subagent'
 
 /** Локальные настройки доски: файл `.board/settings.json`, не база. */
 export interface BoardSettings {
-  version: 1
-  /** Ревью после каждого забега: по умолчанию выключено. */
-  reviewAfterRun: boolean
+  version: 2
+  reviewer: { model: string | null }
+  specReview: { mode: SpecReviewSetting; largeSpecChars: number }
+  runReview: { mode: RunReviewSetting }
   /** Когда мастер настроек последний раз завершался; null — ещё не запускался. */
   setupAt: string | null
 }
 
 export const DEFAULT_SETTINGS: BoardSettings = {
-  version: 1,
-  reviewAfterRun: false,
+  version: 2,
+  reviewer: { model: null },
+  specReview: { mode: 'auto', largeSpecChars: 6000 },
+  runReview: { mode: 'none' },
   setupAt: null,
 }
 
 export function settingsPath(root: string): string {
   return join(root, '.board', 'settings.json')
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function setupAtValue(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : null
+}
+
+function specModeValue(raw: unknown, fallback: SpecReviewSetting): SpecReviewSetting {
+  return raw === 'auto' || raw === 'none' || raw === 'self' || raw === 'subagent' ? raw : fallback
+}
+
+function runModeValue(raw: unknown, fallback: RunReviewSetting): RunReviewSetting {
+  return raw === 'auto' || raw === 'none' || raw === 'self' || raw === 'subagent' ? raw : fallback
+}
+
+function largeSpecValue(raw: unknown, fallback: number): number {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : fallback
+}
+
+/** Читает модель без варианта; невалидное значение при чтении считается пустым. */
+function reviewerModelValue(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const value = raw.trim()
+  if (value === '' || !/^[^/\s#]+\/[^/\s#]+$/.test(value)) return null
+  return value
+}
+
+function normalizeSettings(raw: unknown): BoardSettings {
+  if (!isRecord(raw)) return structuredClone(DEFAULT_SETTINGS)
+
+  const version = Number(raw.version)
+  if (version === 1 || typeof raw.reviewAfterRun === 'boolean') {
+    return {
+      version: 2,
+      reviewer: { model: null },
+      specReview: { mode: 'auto', largeSpecChars: 6000 },
+      runReview: { mode: raw.reviewAfterRun === true ? 'subagent' : 'none' },
+      setupAt: setupAtValue(raw.setupAt),
+    }
+  }
+
+  const reviewer = isRecord(raw.reviewer) ? raw.reviewer : {}
+  const spec = isRecord(raw.specReview) ? raw.specReview : {}
+  const run = isRecord(raw.runReview) ? raw.runReview : {}
+  return {
+    version: 2,
+    reviewer: { model: reviewerModelValue(reviewer.model) },
+    specReview: {
+      mode: specModeValue(spec.mode, 'auto'),
+      largeSpecChars: largeSpecValue(spec.largeSpecChars, 6000),
+    },
+    runReview: { mode: runModeValue(run.mode, 'none') },
+    setupAt: setupAtValue(raw.setupAt),
+  }
 }
 
 /**
@@ -27,18 +91,15 @@ export function settingsPath(root: string): string {
  */
 export function readSettings(root: string): BoardSettings {
   const path = settingsPath(root)
-  if (!existsSync(path)) return { ...DEFAULT_SETTINGS }
+  if (!existsSync(path)) return structuredClone(DEFAULT_SETTINGS)
 
   try {
     // PowerShell и часть редакторов пишут UTF-8 BOM: для JSON это мусор.
-    const raw = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')) as Partial<BoardSettings>
-    return {
-      version: 1,
-      reviewAfterRun: raw.reviewAfterRun === true,
-      setupAt: typeof raw.setupAt === 'string' && raw.setupAt.trim() !== '' ? raw.setupAt : null,
-    }
+    return normalizeSettings(
+      JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')),
+    )
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    return structuredClone(DEFAULT_SETTINGS)
   }
 }
 
@@ -56,21 +117,73 @@ export function ensureSettings(root: string): { settings: BoardSettings; created
   if (existsSync(settingsPath(root))) {
     return { settings: readSettings(root), created: false }
   }
-  const settings = { ...DEFAULT_SETTINGS }
+  const settings = structuredClone(DEFAULT_SETTINGS)
   writeSettings(root, settings)
   return { settings, created: true }
+}
+
+export function validateReviewerModel(raw: string | null): string | null {
+  if (raw === null) return null
+  const value = raw.trim()
+  if (value === '') return null
+  if (!/^[^/\s#]+\/[^/\s#]+$/.test(value)) {
+    throw new UserError(3, 'reviewer.model — provider/model без #variant')
+  }
+  return value
+}
+
+function validateSpecMode(raw: string): SpecReviewSetting {
+  if (raw === 'auto' || raw === 'none' || raw === 'self' || raw === 'subagent') return raw
+  throw new UserError(3, 'spec-review — auto|none|self|subagent')
+}
+
+function validateRunMode(raw: string): RunReviewSetting {
+  if (raw === 'auto' || raw === 'none' || raw === 'self' || raw === 'subagent') return raw
+  throw new UserError(3, 'run-review — auto|none|self|subagent')
+}
+
+function validateLargeSpec(raw: number): number {
+  if (!Number.isInteger(raw) || raw < 0) {
+    throw new UserError(3, 'large-spec — целое число от 0')
+  }
+  return raw
 }
 
 /** Меняет выбранные поля и отмечает, что мастер настроек завершён. */
 export function updateSettings(
   root: string,
-  patch: { reviewAfterRun?: boolean },
+  patch: {
+    reviewer?: { model?: string | null }
+    specReview?: { mode?: SpecReviewSetting; largeSpecChars?: number }
+    runReview?: { mode?: RunReviewSetting }
+  },
   now: () => string = nowIso,
 ): BoardSettings {
   const current = readSettings(root)
   const next: BoardSettings = {
-    ...current,
-    reviewAfterRun: patch.reviewAfterRun ?? current.reviewAfterRun,
+    version: 2,
+    reviewer: {
+      model:
+        patch.reviewer?.model !== undefined
+          ? validateReviewerModel(patch.reviewer.model)
+          : current.reviewer.model,
+    },
+    specReview: {
+      mode:
+        patch.specReview?.mode !== undefined
+          ? validateSpecMode(patch.specReview.mode)
+          : current.specReview.mode,
+      largeSpecChars:
+        patch.specReview?.largeSpecChars !== undefined
+          ? validateLargeSpec(patch.specReview.largeSpecChars)
+          : current.specReview.largeSpecChars,
+    },
+    runReview: {
+      mode:
+        patch.runReview?.mode !== undefined
+          ? validateRunMode(patch.runReview.mode)
+          : current.runReview.mode,
+    },
     setupAt: now(),
   }
   writeSettings(root, next)

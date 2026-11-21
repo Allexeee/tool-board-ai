@@ -34,7 +34,9 @@ export default async function command(args: ParsedArgs) {
 
   lines.push(
     '',
-    'Ревью после каждого забега: ' + (settings.reviewAfterRun ? 'включено' : 'выключено'),
+    'Ревью spec: ' + settings.specReview.mode,
+    'Ревью в конце забега: ' + settings.runReview.mode,
+    'Модель ревьюера: ' + (settings.reviewer.model ?? 'не задана'),
   )
   if (settings.setupAt === null) {
     lines.push('Мастер настроек: запустите board setup (или /setup в OpenCode)')

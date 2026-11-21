@@ -19,8 +19,10 @@ function tempDir(t: { after: (fn: () => void) => void }): string {
 
 function decision(overrides: Partial<SetupDecision> = {}): SetupDecision {
   const settings: BoardSettings = {
-    version: 1,
-    reviewAfterRun: false,
+    version: 2,
+    reviewer: { model: null },
+    specReview: { mode: 'auto', largeSpecChars: 6000 },
+    runReview: { mode: 'none' },
     setupAt: null,
   }
   return {
@@ -39,6 +41,28 @@ function ttyStream(): PassThrough & { isTTY?: boolean } {
   return stream
 }
 
+function tracker(output: PassThrough) {
+  let text = ''
+  output.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')))
+  return {
+    text: () => text,
+    waitFor(needle: string): Promise<void> {
+      return new Promise((resolve) => {
+        const check = () => {
+          if (!text.includes(needle)) return
+          output.off('data', check)
+          resolve()
+        }
+        if (text.includes(needle)) {
+          resolve()
+          return
+        }
+        output.on('data', check)
+      })
+    },
+  }
+}
+
 test('shouldRunSetup: мастер нужен только один раз и только в TTY', () => {
   assert.equal(shouldRunSetup(decision()), true)
   assert.equal(
@@ -51,69 +75,83 @@ test('shouldRunSetup: мастер нужен только один раз и т
   assert.equal(shouldRunSetup(decision({ stdoutIsTTY: false })), false)
 })
 
-test('runSetupWizard: ответ да включает ревью и отмечает setupAt', async (t) => {
+test('runSetupWizard: собирает все четыре ответа', async (t) => {
   const root = tempDir(t)
   const settings = ensureSettings(root).settings
-
-  const input = ttyStream()
-  input.end('да\n')
-  const next = await runSetupWizard(root, settings, { input, output: ttyStream() })
-
-  assert.equal(next.reviewAfterRun, true)
-  assert.ok(next.setupAt)
-  assert.equal(readSettings(root).reviewAfterRun, true)
-})
-
-test('runSetupWizard: пустой ответ оставляет текущее значение', async (t) => {
-  const root = tempDir(t)
-  const settings = ensureSettings(root).settings
-
-  const input = ttyStream()
-  input.end('\n')
-  const next = await runSetupWizard(root, settings, { input, output: ttyStream() })
-
-  assert.equal(next.reviewAfterRun, false)
-  assert.ok(next.setupAt)
-})
-
-test('runSetupWizard: непонятный ответ переспрашивает и не завершает мастер', async (t) => {
-  const root = tempDir(t)
-  const settings = ensureSettings(root).settings
-
   const input = ttyStream()
   const output = ttyStream()
-  let text = ''
-  output.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')))
-
-  const reasked = new Promise<void>((resolve) => {
-    const onData = (chunk: Buffer) => {
-      if (!chunk.toString('utf8').includes('Ответьте y/yes')) return
-      output.off('data', onData)
-      resolve()
-    }
-    output.on('data', onData)
-  })
+  const seen = tracker(output)
 
   const done = runSetupWizard(root, settings, { input, output })
-  input.write('может быть\n')
-  await reasked
-  input.end('n\n')
-  const next = await done
+  await seen.waitFor('Ревью spec')
+  input.write('self\n')
+  await seen.waitFor('Большой spec')
+  input.write('4000\n')
+  await seen.waitFor('Ревью в конце забега')
+  input.write('subagent\n')
+  await seen.waitFor('Модель ревьюера')
+  input.write('opencode-go/deepseek-v4.1-flash\n')
 
-  assert.equal(next.reviewAfterRun, false)
-  assert.match(text, /Ответьте y\/yes/)
+  const next = await done
+  assert.deepEqual(next.specReview, { mode: 'self', largeSpecChars: 4000 })
+  assert.deepEqual(next.runReview, { mode: 'subagent' })
+  assert.deepEqual(next.reviewer, { model: 'opencode-go/deepseek-v4.1-flash' })
+  assert.ok(next.setupAt)
+  assert.deepEqual(readSettings(root), next)
+})
+
+test('runSetupWizard: пустые ответы оставляют текущие значения', async (t) => {
+  const root = tempDir(t)
+  const settings = ensureSettings(root).settings
+  const input = ttyStream()
+  const output = ttyStream()
+  const seen = tracker(output)
+
+  const done = runSetupWizard(root, settings, { input, output })
+  for (const prompt of ['Ревью spec', 'Большой spec', 'Ревью в конце забега', 'Модель ревьюера']) {
+    await seen.waitFor(prompt)
+    input.write('\n')
+  }
+
+  const next = await done
+  assert.deepEqual(next.specReview, { mode: 'auto', largeSpecChars: 6000 })
+  assert.deepEqual(next.runReview, { mode: 'none' })
+  assert.deepEqual(next.reviewer, { model: null })
   assert.ok(next.setupAt)
 })
 
-test('runSetupWizard: без TTY ничего не пишет и не запускает мастер', async (t) => {
+test('runSetupWizard: невалидный режим переспрашивает', async (t) => {
   const root = tempDir(t)
   const settings = ensureSettings(root).settings
+  const input = ttyStream()
+  const output = ttyStream()
+  const seen = tracker(output)
 
+  const done = runSetupWizard(root, settings, { input, output })
+  await seen.waitFor('Ревью spec')
+  input.write('sometimes\n')
+  await seen.waitFor('Допустимо: auto')
+  input.write('self\n')
+  await seen.waitFor('Большой spec')
+  input.write('\n')
+  await seen.waitFor('Ревью в конце забега')
+  input.write('\n')
+  await seen.waitFor('Модель ревьюера')
+  input.write('\n')
+
+  const next = await done
+  assert.equal(next.specReview.mode, 'self')
+  assert.match(seen.text(), /Допустимо: auto/)
+})
+
+test('runSetupWizard: без TTY ничего не меняет', async (t) => {
+  const root = tempDir(t)
+  const settings = ensureSettings(root).settings
   const input = ttyStream()
   input.isTTY = false
-  input.end('y\n')
-  const next = await runSetupWizard(root, settings, { input, output: ttyStream() })
+  input.end('self\n')
 
+  const next = await runSetupWizard(root, settings, { input, output: ttyStream() })
   assert.deepEqual(next, settings)
   assert.equal(readSettings(root).setupAt, null)
 })

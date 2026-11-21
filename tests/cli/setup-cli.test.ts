@@ -29,41 +29,56 @@ function json(dir: string, args: string[]): Record<string, unknown> {
   return JSON.parse(result.out) as Record<string, unknown>
 }
 
-test('setup: по умолчанию ревью выключено, состояние читается через --show', (t) => {
+test('setup: v2 defaults читаются через --show', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)
 
   const shown = json(fixture.root, ['setup', '--show'])
-  assert.equal(shown.reviewAfterRun, false)
+  assert.deepEqual(shown.reviewer, { model: null })
+  assert.deepEqual(shown.specReview, { mode: 'auto', largeSpecChars: 6000 })
+  assert.deepEqual(shown.runReview, { mode: 'none' })
   assert.equal(shown.setupAt, null)
 })
 
-test('setup: включает и выключает ревью после забега', (t) => {
+test('setup: все режимы обновляются флагами', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const updated = json(fixture.root, [
+    'setup',
+    '--spec-review', 'self',
+    '--large-spec', '4000',
+    '--run-review', 'subagent',
+    '--reviewer-model', 'opencode-go/deepseek-v4.1-flash',
+  ])
+  assert.deepEqual(updated.reviewer, { model: 'opencode-go/deepseek-v4.1-flash' })
+  assert.deepEqual(updated.specReview, { mode: 'self', largeSpecChars: 4000 })
+  assert.deepEqual(updated.runReview, { mode: 'subagent' })
+  assert.match(String(updated.setupAt), /^\d{4}-\d{2}-\d{2}T/)
+
+  const shown = json(fixture.root, ['setup', '--show'])
+  assert.deepEqual(shown.specReview, { mode: 'self', largeSpecChars: 4000 })
+})
+
+test('setup: старые флаги остаются алиасами', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)
 
   const on = json(fixture.root, ['setup', '--review-after-run'])
-  assert.equal(on.reviewAfterRun, true)
-  assert.match(String(on.setupAt), /^\d{4}-\d{2}-\d{2}T/)
-
-  const shown = json(fixture.root, ['setup', '--show'])
-  assert.equal(shown.reviewAfterRun, true)
-
+  assert.deepEqual(on.runReview, { mode: 'subagent' })
   const off = json(fixture.root, ['setup', '--no-review-after-run'])
-  assert.equal(off.reviewAfterRun, false)
+  assert.deepEqual(off.runReview, { mode: 'none' })
 })
 
-test('setup: взаимоисключающие флаги — код 3', (t) => {
+test('setup: конфликтующие флаги — код 3', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)
 
-  const both = run(fixture.root, ['setup', '--review-after-run', '--no-review-after-run'])
-  assert.equal(both.code, 3)
-  assert.match(both.err, /только один флаг/)
-
-  const showAndToggle = run(fixture.root, ['setup', '--show', '--review-after-run'])
-  assert.equal(showAndToggle.code, 3)
-  assert.match(showAndToggle.err, /--show/)
+  assert.equal(run(fixture.root, ['setup', '--review-after-run', '--no-review-after-run']).code, 3)
+  assert.equal(run(fixture.root, ['setup', '--show', '--review-after-run']).code, 3)
+  assert.equal(run(fixture.root, ['setup', '--run-review', 'subagent', '--review-after-run']).code, 3)
+  assert.equal(run(fixture.root, ['setup', '--spec-review', 'sometimes']).code, 3)
+  assert.equal(run(fixture.root, ['setup', '--reviewer-model', 'provider/model#max']).code, 3)
 })
 
 test('setup без TTY не спрашивает и подсказывает терминал', (t) => {
@@ -75,7 +90,7 @@ test('setup без TTY не спрашивает и подсказывает т�
   assert.match(result.out, /Запустите в терминале: board setup/)
 })
 
-test('init --json создаёт настройки, setup.md и просит запустить мастер', (t) => {
+test('init --json создаёт v2-настройки и просит запустить мастер', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'board-init-settings-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
 
@@ -86,16 +101,23 @@ test('init --json создаёт настройки, setup.md и просит з
     created: string[]
     updated: string[]
     setupRequired: boolean
-    settings: { reviewAfterRun: boolean; setupAt: string | null }
+    settings: {
+      reviewer: { model: string | null }
+      specReview: { mode: string; largeSpecChars: number }
+      runReview: { mode: string }
+      setupAt: string | null
+    }
   }
   assert.ok(data.created.includes('.board/settings.json'))
   assert.deepEqual(data.updated, [])
   assert.equal(data.setupRequired, true)
-  assert.equal(data.settings.reviewAfterRun, false)
+  assert.deepEqual(data.settings.reviewer, { model: null })
+  assert.deepEqual(data.settings.specReview, { mode: 'auto', largeSpecChars: 6000 })
+  assert.deepEqual(data.settings.runReview, { mode: 'none' })
   assert.equal(data.settings.setupAt, null)
   assert.ok(existsSync(join(root, '.opencode', 'command', 'setup.md')))
 
-  json(root, ['setup', '--review-after-run'])
+  json(root, ['setup', '--run-review', 'subagent'])
   const again = JSON.parse(run(root, ['init', '--json']).out) as { setupRequired: boolean }
   assert.equal(again.setupRequired, false)
 })

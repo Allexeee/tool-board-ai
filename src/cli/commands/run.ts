@@ -136,7 +136,7 @@ export default async function command(args: ParsedArgs) {
       throw new UserError(3, 'укажите только один флаг: --review или --no-review')
     }
     const explicitReview = reviewFlag ? true : noReviewFlag ? false : undefined
-    const review = explicitReview ?? readSettings(project.root).reviewAfterRun
+    const review = explicitReview ?? readSettings(project.root).runReview.mode !== 'none'
     const ended = endRun(db, { executorId, actor: executorId, review })
 
     const human = [

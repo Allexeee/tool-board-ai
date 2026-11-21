@@ -20,7 +20,8 @@ const KNOWN_FLAGS = new Set([
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
-  'review-after-run', 'no-review-after-run',
+  'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
+  'large-spec', 'run-review',
 ])
 
 const BOOLEAN_FLAGS = new Set([

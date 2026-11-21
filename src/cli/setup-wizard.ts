@@ -1,6 +1,12 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
-import { updateSettings, type BoardSettings } from '../core/settings.ts'
+import {
+  updateSettings,
+  validateReviewerModel,
+  type BoardSettings,
+  type RunReviewSetting,
+  type SpecReviewSetting,
+} from '../core/settings.ts'
 
 type TtyInput = NodeJS.ReadableStream & { isTTY?: boolean }
 type TtyOutput = NodeJS.WritableStream & { isTTY?: boolean }
@@ -29,18 +35,29 @@ export function shouldRunSetup(input: SetupDecision): boolean {
   )
 }
 
-function parseAnswer(raw: string, current: boolean): boolean | undefined {
-  const text = raw.trim().toLowerCase()
-  if (text === '') return current
-  if (['y', 'yes', 'д', 'да'].includes(text)) return true
-  if (['n', 'no', 'н', 'нет'].includes(text)) return false
-  return undefined
+function oneOf<T extends string>(raw: string, values: readonly T[]): T | undefined {
+  const value = raw.trim().toLowerCase()
+  return values.includes(value as T) ? (value as T) : undefined
+}
+
+async function ask<T>(
+  question: (prompt: string) => Promise<string>,
+  output: NodeJS.WritableStream,
+  prompt: string,
+  invalid: string,
+  parse: (answer: string) => T | undefined,
+): Promise<T> {
+  for (;;) {
+    const answer = await question(prompt)
+    const parsed = parse(answer)
+    if (parsed !== undefined) return parsed
+    output.write(invalid + '\n')
+  }
 }
 
 /**
- * Интерактивный мастер настроек. Один вопрос — ревью после каждого забега.
- * В не-TTY (агент, пайп) ничего не спрашивает и возвращает текущие настройки;
- * агент использует `board setup --review-after-run|--no-review-after-run`.
+ * Интерактивный мастер настроек. Четыре вопроса: spec review, порог большого
+ * spec, run review и модель ревьюера. В не-TTY ничего не спрашивает.
  * Потоки можно подменить в тестах.
  */
 export async function runSetupWizard(
@@ -54,13 +71,57 @@ export async function runSetupWizard(
 
   const rl = createInterface({ input, output })
   try {
-    for (;;) {
-      const hint = current.reviewAfterRun ? 'Y/n' : 'y/N'
-      const answer = await rl.question(`Ревью после каждого забега? [${hint}] `)
-      const next = parseAnswer(answer, current.reviewAfterRun)
-      if (next !== undefined) return updateSettings(root, { reviewAfterRun: next })
-      output.write('Ответьте y/yes/д/да или n/no/н/нет.\n')
-    }
+    const specModes: readonly SpecReviewSetting[] = ['auto', 'none', 'self', 'subagent']
+    const runModes: readonly RunReviewSetting[] = ['auto', 'none', 'self', 'subagent']
+
+    const specMode = await ask(
+      (prompt) => rl.question(prompt),
+      output,
+      `Ревью spec [${current.specReview.mode}] (auto|none|self|subagent): `,
+      'Допустимо: auto, none, self, subagent.',
+      (answer) => (answer.trim() === '' ? current.specReview.mode : oneOf(answer, specModes)),
+    )
+
+    const largeSpecChars = await ask(
+      (prompt) => rl.question(prompt),
+      output,
+      `Большой spec, символов [${current.specReview.largeSpecChars}] (0 — выкл.): `,
+      'Нужно целое число от 0.',
+      (answer) => {
+        if (answer.trim() === '') return current.specReview.largeSpecChars
+        const value = Number(answer.trim())
+        return Number.isInteger(value) && value >= 0 ? value : undefined
+      },
+    )
+
+    const runMode = await ask(
+      (prompt) => rl.question(prompt),
+      output,
+      `Ревью в конце забега [${current.runReview.mode}] (auto|none|self|subagent): `,
+      'Допустимо: auto, none, self, subagent.',
+      (answer) => (answer.trim() === '' ? current.runReview.mode : oneOf(answer, runModes)),
+    )
+
+    const reviewerModel = await ask(
+      (prompt) => rl.question(prompt),
+      output,
+      `Модель ревьюера [${current.reviewer.model ?? 'не задана'}] (provider/model без #variant): `,
+      'Нужна модель вида provider/model без #variant.',
+      (answer) => {
+        if (answer.trim() === '') return current.reviewer.model
+        try {
+          return validateReviewerModel(answer)
+        } catch {
+          return undefined
+        }
+      },
+    )
+
+    return updateSettings(root, {
+      reviewer: { model: reviewerModel },
+      specReview: { mode: specMode, largeSpecChars },
+      runReview: { mode: runMode },
+    })
   } finally {
     rl.close()
   }
