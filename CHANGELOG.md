@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.0 — 21.11.2026
+
+Spec/plan-процесс и ревью забега.
+
+- Карточка: spec и критерии приёмки, spec review до approve; владелец утверждает spec.
+- `card amend` возвращает утверждённый spec в разбор; после approve правки spec/acceptance/scope запрещены.
+- Plan пишет исполнитель при `take`; `card shape` больше не создаёт steps.
+- Run review: режимы `none|self|subagent|auto`, проверка plan compliance и кода, один цикл.
+- Findings становятся отдельными карточками; `critical` блокирует release, `important`/`other` — backlog; один reopen, далее решает владелец.
+- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; добавлены read-only `board-reviewer`, `/spec-review` и обновлённый `/review`.
+- Мастер настроек v2: режимы spec/run review, порог большого spec, модель ревьюера.
+- Схема БД v2 и миграция v1; 350 тестов.
+
 ## v1.0.1 — 19.11.2026
 
 - `now 1` показывает текущий активный забег перед вероятными следующими.
