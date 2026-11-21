@@ -16,7 +16,7 @@ const KNOWN_FLAGS = new Set([
   'json', 'help', 'version', 'as', 'group', 'title', 'body', 'skill', 'skills',
   'phase', 'status', 'holder', 'importance', 'urgency', 'needs-merge', 'no-needs-merge',
   'review', 'no-review', 'scope', 'from', 'kind', 'value', 'reason', 'note',
-  'spec', 'acceptance', 'mode',
+  'spec', 'acceptance', 'mode', 'plan',
   'summary', 'waive-dependents', 'done', 'reopen', 'severity', 'text', 'verdict',
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',

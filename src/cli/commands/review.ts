@@ -1,4 +1,5 @@
 ﻿import { readFileSync } from 'node:fs'
+import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { listDiscussion } from '../../core/discussion.ts'
 import { findProject } from '../../core/project.ts'
@@ -9,6 +10,7 @@ import {
   submitVerdict,
   type FindingInput,
 } from '../../core/review.ts'
+import { getRun } from '../../core/runs.ts'
 import { listSteps, type Step } from '../../core/steps.ts'
 import type { Card, Severity } from '../../core/types.ts'
 import { stringFlag, type ParsedArgs } from '../args.ts'
@@ -101,6 +103,20 @@ export default async function command(args: ParsedArgs) {
     const reviewer = stringFlag(args, 'reviewer') ?? stringFlag(args, 'as')
     if (!reviewer) throw new UserError(3, 'нужен --reviewer <id> ревьюера')
 
+    const planCompliance = stringFlag(args, 'plan')
+    if (planCompliance !== 'done' && planCompliance !== 'failed') {
+      throw new UserError(3, 'нужен --plan done|failed')
+    }
+    const requestedMode = stringFlag(args, 'mode')
+    if (requestedMode !== undefined && requestedMode !== 'self' && requestedMode !== 'subagent') {
+      throw new UserError(3, '--mode self|subagent')
+    }
+    const card = getCard(db, cardId)
+    const run = card?.runId ? getRun(db, card.runId) : null
+    const mode =
+      (requestedMode as 'self' | 'subagent' | undefined) ??
+      (run?.reviewMode === 'self' || run?.reviewMode === 'subagent' ? run.reviewMode : undefined)
+
     const findingsPath = stringFlag(args, 'findings')
     const findings = findingsPath ? parseFindings(findingsPath) : undefined
 
@@ -110,10 +126,12 @@ export default async function command(args: ParsedArgs) {
       verdict,
       note: stringFlag(args, 'note') ?? '',
       findings,
+      planCompliance,
+      mode,
     })
     ok(
       result,
-      `${cardId} ${verdict}${result.findings.length > 0 ? `; находок: ${result.findings.length}` : ''}`,
+      `${cardId} ${verdict} · plan ${planCompliance}${result.findings.length > 0 ? `; находок: ${result.findings.length}` : ''}`,
     )
     return 0
   }

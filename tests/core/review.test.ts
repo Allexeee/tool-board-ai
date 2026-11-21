@@ -54,7 +54,8 @@ test('reopen с критической находкой: карточка ждё
   // Критическая находка — зависимость карточки: она не готова, пока находка не done.
   assert.equal(result.card.status, 'waiting')
   assert.equal(result.card.previousHolder, card.holder)
-  assert.equal(result.card.attempt, card.attempt)
+  assert.equal(result.card.attempt, card.attempt + 1)
+  assert.equal(result.card.reviewReopens, 1)
   assert.equal(result.findings.length, 1)
   assert.equal(result.findings[0].severity, 'critical')
   assert.equal(result.findings[0].originCardId, card.id)
@@ -154,6 +155,76 @@ test('listReviewCards возвращает карточки в review в пор�
     [first.id, second.id],
   )
   assert.ok(!listReviewCards(db).some((card) => card.id === notReview.id))
+})
+
+test('plan failed требует reopen, а done с plan done пишет run-review', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+
+  assert.throws(
+    () => submitVerdict(db, {
+      cardId: card.id,
+      reviewer: 'reviewer-1',
+      verdict: 'done',
+      planCompliance: 'failed',
+    }),
+    (error: { code?: number }) => error.code === 3,
+  )
+
+  submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    verdict: 'done',
+    planCompliance: 'done',
+    mode: 'subagent',
+  })
+  const row = db.prepare('select * from reviews where card_id = ? order by id desc limit 1').get(card.id) as {
+    kind: string
+    mode: string
+    plan_compliance: string
+    spec_rev: number
+  }
+  assert.equal(row.kind, 'run')
+  assert.equal(row.mode, 'subagent')
+  assert.equal(row.plan_compliance, 'done')
+  assert.equal(row.spec_rev, card.specRev)
+  assert.equal(getCard(db, card.id)!.status, 'done')
+})
+
+test('второй reopen требует решения владельца, owner может обойти', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review', position: 1 })
+
+  submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    verdict: 'reopen',
+    note: 'первый',
+    planCompliance: 'failed',
+  })
+  assert.equal(getCard(db, card.id)!.reviewReopens, 1)
+  db.prepare("update cards set status = 'review' where id = ?").run(card.id)
+
+  assert.throws(
+    () => submitVerdict(db, {
+      cardId: card.id,
+      reviewer: 'reviewer-1',
+      verdict: 'reopen',
+      note: 'второй',
+      planCompliance: 'failed',
+    }),
+    (error: { code?: number }) => error.code === 2,
+  )
+  assert.equal(getCard(db, card.id)!.status, 'review')
+
+  const owner = submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'owner',
+    verdict: 'reopen',
+    note: 'решение владельца',
+    planCompliance: 'failed',
+  })
+  assert.equal(owner.card.reviewReopens, 2)
 })
 
 test('reopen без критических находок: карточка ready, зависимые — waiting', (t) => {

@@ -95,7 +95,7 @@ test('полный цикл карточки через CLI: init → review →
   assert.equal(inReview.header.devAhead, 1)
   assert.ok(inReview.queue.some((item: { id: string; status: string }) => item.id === 'UI-1' && item.status === 'review'))
 
-  assert.equal(run(root, ['review', 'submit', 'UI-1', '--verdict', 'done', '--reviewer', 'reviewer-1']).code, 0)
+  assert.equal(run(root, ['review', 'submit', 'UI-1', '--plan', 'done', '--verdict', 'done', '--reviewer', 'reviewer-1']).code, 0)
 
   const released = run(root, ['release'])
   assert.equal(released.code, 0, released.err)

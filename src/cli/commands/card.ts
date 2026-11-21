@@ -21,6 +21,7 @@ import { findProject } from '../../core/project.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
 import { submitVerdict } from '../../core/review.ts'
 import { modelContext, resolveSpecReviewMode } from '../../core/review-policy.ts'
+import { getRun } from '../../core/runs.ts'
 import { readSettings } from '../../core/settings.ts'
 import {
   latestSpecReview,
@@ -488,14 +489,29 @@ export default async function command(args: ParsedArgs) {
     }
     const reviewer = stringFlag(args, 'as')
     if (!reviewer) throw new UserError(3, 'нужен --as <ревьюер>')
+    const planCompliance = stringFlag(args, 'plan')
+    if (planCompliance !== 'done' && planCompliance !== 'failed') {
+      throw new UserError(3, 'нужен --plan done|failed')
+    }
+    const requestedMode = stringFlag(args, 'mode')
+    if (requestedMode !== undefined && requestedMode !== 'self' && requestedMode !== 'subagent') {
+      throw new UserError(3, '--mode self|subagent')
+    }
+    const card = requireCard(id, 'board card verdict UI-1 --plan done --done --as reviewer-1')
+    const run = card.runId ? getRun(db, card.runId) : null
+    const mode =
+      (requestedMode as 'self' | 'subagent' | undefined) ??
+      (run?.reviewMode === 'self' || run?.reviewMode === 'subagent' ? run.reviewMode : undefined)
 
     const result = submitVerdict(db, {
       cardId: id,
       reviewer,
       verdict: done ? 'done' : 'reopen',
       note: stringFlag(args, 'note') ?? '',
+      planCompliance,
+      mode,
     })
-    ok(result, `${id} ${result.card.status}`)
+    ok(result, `${id} ${result.card.status} · plan ${planCompliance}`)
     return 0
   }
 

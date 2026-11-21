@@ -31,6 +31,8 @@ export interface SubmitVerdictInput {
   verdict: 'done' | 'reopen'
   note?: string
   findings?: FindingInput[]
+  planCompliance?: 'done' | 'failed'
+  mode?: 'self' | 'subagent'
 }
 
 const SEVERITIES: readonly Severity[] = ['critical', 'important', 'other']
@@ -135,6 +137,13 @@ export function submitVerdict(
     if (verdict === 'reopen' && !note) {
       throw new UserError(3, 'переоткрытие требует причину: --note «...»')
     }
+    const planCompliance = input.planCompliance ?? 'done'
+    if (planCompliance === 'failed' && verdict !== 'reopen') {
+      throw new UserError(3, 'plan failed требует verdict reopen')
+    }
+    if (verdict === 'reopen' && card.reviewReopens >= 1 && reviewer !== OWNER) {
+      throw new UserError(2, `карточка ${card.id}: один reopen уже был, нужно решение владельца`)
+    }
 
     const findings = (input.findings ?? []).map((item) =>
       addFinding(db, {
@@ -148,8 +157,18 @@ export function submitVerdict(
     )
 
     db.prepare(
-      'insert into reviews (card_id, reviewer, verdict, note, at) values (?, ?, ?, ?, ?)',
-    ).run(card.id, reviewer, verdict, note, nowIso())
+      `insert into reviews (card_id, reviewer, verdict, note, at, kind, mode, spec_rev, plan_compliance)
+       values (?, ?, ?, ?, ?, 'run', ?, ?, ?)`,
+    ).run(
+      card.id,
+      reviewer,
+      verdict,
+      note,
+      nowIso(),
+      input.mode ?? null,
+      card.specRev,
+      planCompliance,
+    )
 
     const at = nowIso()
     if (verdict === 'done') {
@@ -162,7 +181,8 @@ export function submitVerdict(
     } else {
       db.prepare(
         `update cards set status = 'ready', previous_holder = ?, holder = null, run_id = null,
-         lease_until = null, updated_at = ? where id = ?`,
+         lease_until = null, attempt = attempt + 1, review_reopens = review_reopens + 1,
+         updated_at = ? where id = ?`,
       ).run(card.holder, at, card.id)
 
       // Переоткрытая карточка возвращается в начало очереди задач.
