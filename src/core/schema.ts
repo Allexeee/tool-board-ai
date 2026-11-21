@@ -1,8 +1,8 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
-/** Схема v1 из спецификации §13. Старые базы toolbox-al не мигрируются. */
+/** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
 create table meta (key text primary key, value text not null);
 
@@ -28,6 +28,7 @@ create table cards (
   group_seq integer not null,
   title text not null,
   body text not null default '',
+  acceptance text not null default '',
   phase text not null default 'request',
   status text not null,
   skill text,
@@ -44,6 +45,8 @@ create table cards (
   run_id text,
   branch text,
   attempt integer not null default 1,
+  spec_rev integer not null default 1,
+  review_reopens integer not null default 0,
   merge_commit text,
   in_dev integer not null default 0,
   in_main integer not null default 0,
@@ -120,6 +123,7 @@ create table runs (
   ended_at text,
   lease_until text,
   review integer not null default 0,
+  review_mode text,
   note text
 );
 create unique index idx_runs_active on runs(executor_id)
@@ -151,8 +155,24 @@ create table reviews (
   reviewer text not null,
   verdict text not null,
   note text,
-  at text not null
+  at text not null,
+  kind text not null default 'run',
+  mode text,
+  spec_rev integer,
+  plan_compliance text
 );
+`
+
+/** Добавляет поля v2 к существующей базе v1 без пересоздания таблиц. */
+const MIGRATE_V1_TO_V2 = `
+alter table cards add column acceptance text not null default '';
+alter table cards add column spec_rev integer not null default 1;
+alter table cards add column review_reopens integer not null default 0;
+alter table reviews add column kind text not null default 'run';
+alter table reviews add column mode text;
+alter table reviews add column spec_rev integer;
+alter table reviews add column plan_compliance text;
+alter table runs add column review_mode text;
 `
 
 export function schemaVersionOf(db: DatabaseSync): number {
@@ -167,14 +187,16 @@ export function schemaVersionOf(db: DatabaseSync): number {
   return row ? Number(row.value) : 0
 }
 
-/** Создаёт схему v1; на актуальной базе ничего не делает. */
+/** Создаёт схему v2 или обновляет v1; на актуальной базе ничего не делает. */
 export function migrate(db: DatabaseSync): number {
   const from = schemaVersionOf(db)
   if (from >= SCHEMA_VERSION) return from
 
   db.exec('begin immediate')
   try {
-    db.exec(DDL)
+    if (from === 0) db.exec(DDL)
+    else if (from === 1) db.exec(MIGRATE_V1_TO_V2)
+    else throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +
         'on conflict(key) do update set value = excluded.value',

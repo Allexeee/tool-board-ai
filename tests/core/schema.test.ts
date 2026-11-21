@@ -1,0 +1,39 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { DatabaseSync } from 'node:sqlite'
+import { migrate, schemaVersionOf, SCHEMA_VERSION } from '../../src/core/schema.ts'
+
+function columns(db: DatabaseSync, table: string): string[] {
+  return (db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name)
+}
+
+test('новый файл получает схему v2 с полями spec/review', () => {
+  const db = new DatabaseSync(':memory:')
+  assert.equal(migrate(db), 2)
+  assert.equal(SCHEMA_VERSION, 2)
+  assert.ok(columns(db, 'cards').includes('acceptance'))
+  assert.ok(columns(db, 'cards').includes('spec_rev'))
+  assert.ok(columns(db, 'cards').includes('review_reopens'))
+  assert.ok(columns(db, 'reviews').includes('kind'))
+  assert.ok(columns(db, 'reviews').includes('plan_compliance'))
+  assert.ok(columns(db, 'runs').includes('review_mode'))
+})
+
+test('база v1 мигрирует без потери карточки', () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(`create table meta (key text primary key, value text not null);
+    create table cards (id text primary key, body text not null default '', status text not null);
+    create table reviews (id integer primary key autoincrement, card_id text not null,
+      reviewer text not null, verdict text not null, note text, at text not null);
+    create table runs (id text primary key, executor_id text not null, status text not null,
+      created_at text not null, started_at text, ended_at text, lease_until text,
+      review integer not null default 0, note text);
+    insert into meta values ('schemaVersion', '1');
+    insert into cards values ('UI-1', 'spec', 'ready');
+    insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'review', 'done', '2026-01-01');`)
+
+  assert.equal(migrate(db), 2)
+  assert.equal(schemaVersionOf(db), 2)
+  assert.equal((db.prepare('select count(*) as n from cards').get() as { n: number }).n, 1)
+  assert.equal(columns(db, 'cards').includes('spec_rev'), true)
+})

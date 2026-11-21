@@ -37,7 +37,7 @@ exit 0
 # toolbox-al:end
 `
 
-test('makeBoard создаёт базу со всеми таблицами схемы v1', (t) => {
+test('makeBoard создаёт базу со всеми таблицами схемы v2', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)
 
@@ -55,7 +55,7 @@ test('makeBoard создаёт базу со всеми таблицами сх�
   const version = fixture.db.prepare("select value from meta where key = 'schemaVersion'").get() as
     | { value: string }
     | undefined
-  assert.equal(version?.value, '1')
+  assert.equal(version?.value, '2')
   assert.equal(fixture.db.prepare('pragma foreign_keys').get()?.foreign_keys, 1)
 })
 
