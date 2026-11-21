@@ -54,7 +54,7 @@ export function findProject(
   }
 }
 
-const GITIGNORE_ENTRIES = ['.board/', '.worktrees/']
+const GITIGNORE_ENTRIES = ['.board/', '.worktrees/', '.opencode/agents/board-reviewer.md']
 
 function updateGitignore(root: string): boolean {
   const path = join(root, '.gitignore')

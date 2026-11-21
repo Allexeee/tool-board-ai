@@ -17,8 +17,9 @@ $env:Path += ";$env:USERPROFILE\tools\tool-board-ai"
 В корне лежит `board.cmd`; он запускает `node bin\board.ts`. Проверка:
 `board --version`.
 
-Скилл `board` и команды `/review`, `/setup` вызывают `board`, поэтому CLI
-должен быть в `PATH` (хотя бы в окружении, из которого стартует OpenCode). Если не хотите
+Скилл `board` и команды `/review`, `/spec-review`, `/setup` вызывают `board`,
+поэтому CLI должен быть в `PATH` (хотя бы в окружении, из которого стартует
+OpenCode). Если не хотите
 менять `PATH` глобально, запускайте CLI как `node <путь>\bin\board.ts ...`;
 `BOARD_CLI` перекрывает путь только для инструментов плагина:
 
@@ -56,8 +57,10 @@ board now
 - `.board/settings.json` — локальные настройки (в git не попадает);
 - `docs/board/terminology.md` — термины и команды владельца;
 - `.opencode/skills/board/SKILL.md`, `.opencode/plugins/board/index.ts`,
-  `.opencode/command/review.md`, `.opencode/command/setup.md` — интеграция с
-  OpenCode;
+  `.opencode/command/review.md`, `.opencode/command/spec-review.md`,
+  `.opencode/command/setup.md` — интеграция с OpenCode;
+- `.opencode/agents/board-reviewer.md` — локальный read-only ревьюер на
+  default-варианте модели (в git не попадает);
 - блок `board` в `AGENTS.md`;
 - записи `.board/`, `.worktrees/` в `.gitignore`.
 
@@ -71,8 +74,8 @@ board init --refresh
 ```
 
 Команда перезапишет `.opencode/skills/board/SKILL.md`, плагин и команды
-`/review`/`/setup` текущими шаблонами, сохранив остальной `AGENTS.md`. Если вы
-правили эти файлы руками, изменения будут потеряны.
+`/review`/`/spec-review`/`/setup` текущими шаблонами, сохранив остальной
+`AGENTS.md`. Если вы правили эти файлы руками, изменения будут потеряны.
 
 В примерах ниже `board` — CLI из `PATH`. Если запускаете из исходников,
 замените его на `node <путь>\bin\board.ts`.
@@ -86,10 +89,12 @@ board card add --group UI --title "Форма входа" --skill dev
 ```
 
 - **Запрос** (`phase=request`) → разбор: `card shape UI-1 --as developer [--from card.json]`.
-- **На утверждение**: `card submit UI-1 --as developer`.
-- Владелец: `card approve UI-1` или `card reject UI-1 --reason "..."`.
+- Разбирающий заполняет **spec** (`body`): проблему/why, результат, non-goals, ограничения, риски и **критерии приёмки** (`acceptance`). План (`steps`) здесь не пишется.
+- **Spec review** (если включён): `/spec-review` или `card spec-review UI-1 --as developer --mode self|subagent --verdict done`.
+- **На утверждение**: `card submit UI-1 --as developer`. Владелец утверждает **spec**: `card approve UI-1` или `card reject UI-1 --reason "..."`.
+- После approve менять spec/acceptance/scope нельзя; изменение — `card amend UI-1 --as developer --reason "..."`, затем повторный review и approve.
 
-Разбирающий заполняет body, шаги (`card step`), навык, `importance`/`urgency` (оценка 0–9), `needs_merge`, `review_required`, `scope`, зависимости (`card dep`).
+`needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 0–3. Зависимости — `card dep`.
 
 ## Очередь и забег
 
@@ -98,25 +103,29 @@ board card add --group UI --title "Форма входа" --skill dev
 ```bash
 board run start --as developer --cards UI-1,UI-7   # или --suggest 1
 board take UI-1 --as developer
+board card step add UI-1 "Написать форму + тест"   # plan пишется при take
+board card edit UI-1 --scope 'src/**'
 board finish UI-1 --as developer --summary "готово"
 board run next --as developer
 board run end --as developer [--review|--no-review]
 ```
 
-`take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` (если `review_required`) или `done`.
+`take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` или `done`. Если `runReview.mode != none`, `finish` отправляет в review все карточки забега, включая `review_required=false`.
 
 Если нужен владелец — `block UI-1 --as developer --reason needs_decision --note "..."` или `ask UI-1 "вопрос" --as developer [--block]`. Ответ — `answer UI-1 "ответ"`.
 
 ## Ревью
 
-`board review list --json` отдаёт карточки на ревью (body, шаги, scope, diff). Команда `/review` в OpenCode запускает свежего субагента, который выносит вердикт по каждой:
+`board review list --json` отдаёт карточки на ревью: spec, acceptance, plan/steps, scope и diff. `/spec-review` проверяет полноту spec до approve, `/review` проверяет plan и код:
 
 ```bash
-board review submit UI-1 --verdict done --note "..." --reviewer review
+board review submit UI-1 --plan done --verdict done --note "..." --reviewer review
 board review finding UI-1 --severity critical --text "..."
 ```
 
-CLI субагентов не порождает — он готовит пакет и принимает вердикты. Находки ревью становятся запросами; `critical` блокирует `main`, пока не закрыта.
+`--plan` обязателен. `plan failed` требует `reopen`; `done` с findings разрешён. Ревью идёт одним циклом: findings становятся отдельными карточками, исходная карточка закрывается; `critical` блокирует `release`, `important`/`other` идут в backlog. Второй `reopen` — только решение владельца.
+
+CLI субагентов не порождает — он готовит пакет и принимает вердикты. Finding-карточки после approve могут собраться в отдельный fix run. Субагент `board-reviewer` работает на default-варианте `reviewer.model`, не в Max; `self` использует модель основной сессии.
 
 ## Настройки
 
@@ -125,14 +134,20 @@ CLI субагентов не порождает — он готовит пак�
 командой `/setup` или `board setup`.
 
 ```bash
-board setup --show                      # текущие настройки
-board setup --review-after-run          # включить ревью после каждого забега
-board setup --no-review-after-run       # выключить (по умолчанию)
+board setup --show                                  # текущие настройки
+board setup --spec-review auto|none|self|subagent   # проверка spec
+board setup --large-spec 6000                       # порог большого spec
+board setup --run-review none|self|subagent|auto    # run review: plan + код
+board setup --reviewer-model provider/model         # default-вариант ревьюера
 ```
 
-`run end` берёт значение из настройки; флаги `--review`/`--no-review`
-перекрывают её для конкретного забега. Включённое ревью не блокирует закрытие
-забега: агент запускает `/review` после `run end`.
+`specReview.mode=auto` (по умолчанию) выбирает субагента для Max/High или
+большого spec, иначе self. `runReview.mode=none` по умолчанию. `self` — модель
+основной сессии; `subagent` — `reviewer.model` без `#variant`. Флаги
+`run end --review/--no-review` перекрывают настройку на один забег.
+
+Старые `--review-after-run`/`--no-review-after-run` остаются алиасами
+`runReview.mode=subagent|none`.
 
 ## Релиз
 
@@ -177,10 +192,10 @@ board command add "RUN" "начать забег по очереди" --as owner
 | Команда | Что делает |
 |---|---|
 | `init [каталог] [--yes] [--refresh]` | скелет проекта, мастер настроек и обновление `.opencode` |
-| `setup [--show\|--review-after-run\|--no-review-after-run]` | настройки доски |
+| `setup [--show\|--spec-review\|--large-spec\|--run-review\|--reviewer-model]` | настройки доски |
 | `executor add\|list\|edit\|remove` | исполнители и навыки |
 | `card add\|list\|show\|edit` | карточки |
-| `card shape\|submit\|approve\|reject\|verdict\|done\|cancel\|reopen` | жизненный цикл |
+| `card shape\|spec-review\|submit\|approve\|amend\|reject\|verdict\|done\|cancel\|reopen` | жизненный цикл |
 | `card step add\|done\|remove\|list` | шаги-чек-лист |
 | `card ref add\|remove\|list` | ссылки и документы |
 | `card dep add\|remove\|list` | зависимости |
@@ -191,7 +206,7 @@ board command add "RUN" "начать забег по очереди" --as owner
 | `decision add\|list\|supersede\|obsolete` | журнал решений |
 | `term add\|list\|show` | терминология |
 | `command add\|list` | команды владельца |
-| `review list\|finding\|submit` | пакет и вердикты ревью |
+| `review list\|finding\|submit --plan done\|failed` | пакет и вердикты ревью |
 | `release` | слить `dev` в `main` |
 | `now [0\|1\|2\|3]` | терминальная доска |
 | `doctor` | диагностика |
@@ -200,4 +215,4 @@ board command add "RUN" "начать забег по очереди" --as owner
 
 ## OpenCode
 
-`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_setup`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term`, команды `/review` и `/setup`. Плагин не содержит логики: он вызывает `board … --json`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.
+`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_setup`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term`, команды `/review`, `/spec-review`, `/setup` и read-only агент `board-reviewer` (если задан `reviewer.model`). Плагин не содержит логики: он вызывает `board … --json` и передаёт модели сессии `BOARD_MODEL_VARIANT`/`BOARD_SESSION_MODEL`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.
