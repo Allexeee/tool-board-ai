@@ -46,6 +46,22 @@ export interface RunCard {
   status: RunCardStatus
 }
 
+export type ReviewKind = 'spec' | 'run'
+export type PlanCompliance = 'done' | 'failed'
+
+export interface Review {
+  id: number
+  cardId: string
+  reviewer: string
+  verdict: 'done' | 'reopen'
+  note: string | null
+  at: string
+  kind: ReviewKind
+  mode: 'self' | 'subagent' | null
+  specRev: number | null
+  planCompliance: PlanCompliance | null
+}
+
 export interface Executor {
   id: string
   kind: ExecutorKind

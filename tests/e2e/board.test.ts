@@ -46,6 +46,8 @@ function project(t: { after: (fn: () => void) => void }): string {
   t.after(() => repo.close())
   const init = run(repo.root, ['init'])
   assert.equal(init.code, 0, init.err)
+  // Старые e2e проверяют жизненный цикл, а не spec review.
+  assert.equal(run(repo.root, ['setup', '--spec-review', 'none']).code, 0)
   commitGenerated(repo.root)
   return repo.root
 }
@@ -63,7 +65,7 @@ test('полный цикл карточки через CLI: init → review →
 
   assert.equal(run(root, ['card', 'shape', 'UI-1', '--as', 'owner']).code, 0)
   assert.equal(
-    run(root, ['card', 'edit', 'UI-1', '--importance', '2', '--urgency', '3', '--scope', 'src/**', '--review']).code,
+    run(root, ['card', 'edit', 'UI-1', '--spec', 'Форма', '--acceptance', 'Форма работает', '--importance', '2', '--urgency', '3', '--scope', 'src/**', '--review']).code,
     0,
   )
   assert.equal(run(root, ['card', 'submit', 'UI-1', '--as', 'owner']).code, 0)
@@ -137,7 +139,7 @@ test('два процесса не бронируют одну карточку 
   const card = json(root, ['card', 'add', '--group', 'UI', '--title', 'Форма', '--skill', 'dev'])
   assert.equal(run(root, ['card', 'shape', card.id, '--as', 'owner']).code, 0)
   assert.equal(
-    run(root, ['card', 'edit', card.id, '--importance', '2', '--urgency', '2', '--scope', 'src/**']).code,
+    run(root, ['card', 'edit', card.id, '--spec', 'Форма', '--acceptance', 'Форма работает', '--importance', '2', '--urgency', '2', '--scope', 'src/**']).code,
     0,
   )
   assert.equal(run(root, ['card', 'submit', card.id, '--as', 'owner']).code, 0)

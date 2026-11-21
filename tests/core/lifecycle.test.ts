@@ -36,7 +36,13 @@ function shapedRequest(t: { after: (fn: () => void) => void }, db: Board['db'], 
   editCard(db, {
     id: card.id,
     actor,
-    patch: { importance: 2, urgency: 3, scope: ['src/**'] },
+    patch: {
+      body: 'spec',
+      acceptance: ['готово'],
+      importance: 2,
+      urgency: 3,
+      scope: ['src/**'],
+    },
   })
   return card
 }
@@ -51,7 +57,13 @@ test('жизненный цикл: new → shaping → approval → ready, и bl
   editCard(db, {
     id: card.id,
     actor: 'developer',
-    patch: { importance: 2, urgency: 3, scope: ['src/**'] },
+    patch: {
+      body: 'spec',
+      acceptance: ['готово'],
+      importance: 2,
+      urgency: 3,
+      scope: ['src/**'],
+    },
   })
   submitCard(db, { id: card.id, actor: 'developer' })
   assert.equal(getCard(db, card.id)!.status, 'approval')
@@ -175,7 +187,14 @@ test('owner-карточка после approval становится ready бе
   editCard(db, {
     id: card.id,
     actor: 'developer',
-    patch: { skill: 'owner', needsMerge: false, importance: 2, urgency: 2 },
+    patch: {
+      body: 'spec',
+      acceptance: ['готово'],
+      skill: 'owner',
+      needsMerge: false,
+      importance: 2,
+      urgency: 2,
+    },
   })
   submitCard(db, { id: card.id, actor: 'developer' })
   approveCard(db, { id: card.id, actor: 'owner' })

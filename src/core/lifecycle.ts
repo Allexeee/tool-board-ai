@@ -22,6 +22,7 @@ import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
 import { getActiveRun, listRunCards, RUN_LEASE_MS } from './runs.ts'
+import { assertSpecReview, type SpecReviewGate } from './spec-review.ts'
 import type { Card, CardStatus } from './types.ts'
 
 /** Навык owner означает owner-карточку: владелец закрывает её одной командой. */
@@ -122,7 +123,10 @@ export function shapeCard(db: DatabaseSync, input: { id: string; actor: string }
  * `approval`. Оценки и scope проверяются здесь, чтобы owner-инварианты и
  * обязательный scope для `needs_merge` не проскочили мимо.
  */
-export function submitCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
+export function submitCard(
+  db: DatabaseSync,
+  input: { id: string; actor: string; requiredSpecReview?: SpecReviewGate },
+): Card {
   return tx(db, () => {
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
@@ -141,6 +145,18 @@ export function submitCard(db: DatabaseSync, input: { id: string; actor: string 
     if (card.needsMerge && card.scope.length === 0) {
       throw new UserError(3, 'для needs_merge=true нужен непустой scope')
     }
+    if (card.body.trim() === '') {
+      throw new UserError(3, 'у карточки нет spec: заполните body/spec')
+    }
+    if (card.acceptance.trim() === '') {
+      throw new UserError(3, 'у карточки нет критериев приёмки: добавьте acceptance')
+    }
+
+    assertSpecReview(
+      db,
+      card,
+      input.requiredSpecReview ?? { mode: 'none', reviewerModel: null },
+    )
 
     const at = nowIso()
     db.prepare(
@@ -164,7 +180,10 @@ export function submitCard(db: DatabaseSync, input: { id: string; actor: string 
  * Утверждение владельца. Обычная карточка встаёт в очередь и пересчитывает
  * готовность; owner-карточка становится `ready` без очереди, мержа и ревью.
  */
-export function approveCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
+export function approveCard(
+  db: DatabaseSync,
+  input: { id: string; actor: string; requiredSpecReview?: SpecReviewGate },
+): Card {
   return tx(db, () => {
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
@@ -172,6 +191,12 @@ export function approveCard(db: DatabaseSync, input: { id: string; actor: string
     if (card.status !== 'approval') {
       throw new UserError(3, `карточка ${card.id} не в approval: ${card.status}`)
     }
+
+    assertSpecReview(
+      db,
+      card,
+      input.requiredSpecReview ?? { mode: 'none', reviewerModel: null },
+    )
 
     const at = nowIso()
     if (card.skill === OWNER) {

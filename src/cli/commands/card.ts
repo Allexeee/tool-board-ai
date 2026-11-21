@@ -19,6 +19,13 @@ import {
 import { findProject } from '../../core/project.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
 import { submitVerdict } from '../../core/review.ts'
+import { modelContext, resolveSpecReviewMode } from '../../core/review-policy.ts'
+import { readSettings } from '../../core/settings.ts'
+import {
+  latestSpecReview,
+  recordSpecReview,
+  type SpecReviewGate,
+} from '../../core/spec-review.ts'
 import {
   addStep,
   doneStep,
@@ -36,6 +43,20 @@ export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
+  const settings = readSettings(project.root)
+  const reviewContext = modelContext(process.env)
+
+  const specGate = (card: Card): { gate: SpecReviewGate; resolution: ReturnType<typeof resolveSpecReviewMode> } => {
+    const resolution = resolveSpecReviewMode({
+      settings,
+      specLength: card.body.length + card.acceptance.length,
+      context: reviewContext,
+    })
+    return {
+      gate: { mode: resolution.mode, reviewerModel: resolution.reviewerModel },
+      resolution,
+    }
+  }
 
   const add = (args: ParsedArgs): number => {
     const group = stringFlag(args, 'group')
@@ -86,11 +107,18 @@ export default async function command(args: ParsedArgs) {
   const show = (args: ParsedArgs): number => {
     const card = requireCard(args.positionals[0], 'board card show UI-1')
     const steps = listSteps(db, card.id)
+    const { resolution } = specGate(card)
     const detail = {
       ...card,
       spec: card.body,
       plan: steps,
       steps,
+      specReview: {
+        mode: resolution.mode,
+        reason: resolution.reason,
+        reviewerModel: resolution.reviewerModel,
+      },
+      specReviewLatest: latestSpecReview(db, card.id),
       refs: listRefs(db, card.id),
       deps: listDeps(db, card.id),
       discussion: listDiscussion(db, card.id),
@@ -309,8 +337,49 @@ export default async function command(args: ParsedArgs) {
     const actor = stringFlag(args, 'as')
     if (!actor) throw new UserError(3, 'нужен --as <исполнитель>')
 
-    const card = submitCard(db, { id, actor })
+    const existing = requireCard(id, 'board card submit UI-1 --as developer')
+    const { gate } = specGate(existing)
+    const card = submitCard(db, { id, actor, requiredSpecReview: gate })
     ok(card, `${card.id} на утверждении: ${card.title}`)
+    return 0
+  }
+
+  const specReview = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) {
+      throw new UserError(
+        3,
+        'использование: board card spec-review UI-1 --as developer --mode self|subagent --verdict done|reopen',
+      )
+    }
+    const actor = stringFlag(args, 'as')
+    if (!actor) throw new UserError(3, 'нужен --as <ревьюер>')
+    const mode = stringFlag(args, 'mode')
+    if (mode !== 'self' && mode !== 'subagent') {
+      throw new UserError(3, 'нужен --mode self|subagent')
+    }
+    const verdict = stringFlag(args, 'verdict')
+    if (verdict !== 'done' && verdict !== 'reopen') {
+      throw new UserError(3, 'нужен --verdict done|reopen')
+    }
+
+    const card = requireCard(id, 'board card spec-review UI-1 --as developer --mode self --verdict done')
+    const { gate } = specGate(card)
+    if (gate.mode === 'subagent' && mode !== 'subagent') {
+      throw new UserError(2, `spec review для ${id} требует субагента`)
+    }
+    if (gate.mode === 'subagent' && gate.reviewerModel === null) {
+      throw new UserError(2, 'reviewer.model не задан: board setup --reviewer-model или выберите self')
+    }
+
+    const review = recordSpecReview(db, {
+      cardId: id,
+      reviewer: actor,
+      mode,
+      verdict,
+      note: stringFlag(args, 'note'),
+    })
+    ok(review, `${id} spec review: ${verdict} (${mode})`)
     return 0
   }
 
@@ -318,7 +387,13 @@ export default async function command(args: ParsedArgs) {
     const id = args.positionals[0]
     if (!id) throw new UserError(3, 'использование: board card approve UI-1')
 
-    const card = approveCard(db, { id, actor: stringFlag(args, 'as') ?? 'owner' })
+    const existing = requireCard(id, 'board card approve UI-1')
+    const { gate } = specGate(existing)
+    const card = approveCard(db, {
+      id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      requiredSpecReview: gate,
+    })
     ok(card, `${card.id} утверждена: ${card.status}`)
     return 0
   }
@@ -418,6 +493,7 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'dep') return dep(args)
     if (args.sub === 'shape') return shape(args)
     if (args.sub === 'submit') return submit(args)
+    if (args.sub === 'spec-review') return specReview(args)
     if (args.sub === 'approve') return approve(args)
     if (args.sub === 'reject') return reject(args)
     if (args.sub === 'verdict') return verdict(args)
@@ -426,7 +502,7 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'reopen') return reopen(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|approve|reject|verdict|done|cancel|reopen',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|reject|verdict|done|cancel|reopen',
     )
   } finally {
     db.close()
