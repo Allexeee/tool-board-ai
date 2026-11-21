@@ -223,6 +223,25 @@ submit` требует последний `done`-review, если режим н�
 `self` не подходит, если требуется `subagent`. Записанный `subagent` подходит
 для требования `self` (более сильная проверка).
 
+### 6.5 Версия spec и повторное утверждение
+
+Spec review действителен только для той версии spec, которую проверяли.
+`cards.spec_rev` — целое, увеличивается при любом изменении `body`,
+`acceptance` или `scope`; `reviews.spec_rev` хранит проверенную версию.
+`card submit` и `card approve` принимают только review с текущим `spec_rev`.
+
+- `card reject` увеличивает `spec_rev` и делает прежний spec review
+  недействительным.
+- После approve менять `body`, `acceptance` или `scope` через обычный
+  `card edit` нельзя. Для изменения есть `card amend <ID> --as <id>
+  --reason "..."`: он увеличивает `spec_rev`, сбрасывает spec review и
+  возвращает карточку в `shaping`; затем снова spec review и approve.
+- Если исполнитель при написании plan понял, что нужен другой scope или
+  поведение, он делает `block`/`ask`, а не меняет spec молча. Владелец решает,
+  нужен ли `card amend`.
+- Мелкие редакционные правки spec тоже требуют re-approve: это цена того, что
+  spec остаётся контрактом.
+
 ## 7. Plan
 
 Plan пишет исполнитель при `take`, а не автор spec. Это правило выбрано, чтобы
@@ -291,6 +310,37 @@ review.
 улучшения не запускают новый цикл. Plan проверяется один раз в конце, а не
 переписывается после каждого изменения `dev`.
 
+### 8.5 Лимит переоткрытий
+
+`cards.review_reopens` — счётчик переоткрытий именно из run review. Он не
+смешивается с `cards.attempt` (номер ветки/попытки).
+
+- `review submit --verdict reopen` увеличивает `review_reopens` и `attempt`
+  (следующий `take` создаёт новую ветку).
+- Если `review_reopens` уже `>= 1`, не-владельческий `reopen` отклоняется с
+  кодом 2 и сообщением «нужно решение владельца». Карточка остаётся в
+  `review`, findings уже записаны; ревьюер не блокирует её и не открывает
+  второй цикл.
+- Владелец может сам выполнить `review submit --verdict done|reopen --as
+  owner` или `card reopen --as owner`. Это единственный путь обойти лимит.
+- `card reopen` для такого решения — команда владельца; остальным акторам она
+  недоступна. `review submit` остаётся путём ревьюера.
+
+### 8.6 Покрытие run review
+
+`review_required` — карточный флаг. `runReview.mode != none` — настройка
+забега. Покрытие:
+
+- `review_required=true` — карточка идёт в `review` всегда;
+- `runReview.mode != none` — все карточки забега идут в `review`, даже если
+  `review_required=false`;
+- `runReview.mode=none` — в `review` идут только карточки с
+  `review_required=true`; `/review` может проверить их вручную.
+
+`run end` возвращает `reviewMode` и число карточек на ревью. Если карточек
+нет, `/review` сообщает «ревьюить нечего». `runReview.mode=none` не запрещает
+ручное ревью уже существующих `review`-карточек.
+
 ## 9. Настройки и мастер
 
 `.board/settings.json`, версия 2:
@@ -317,6 +367,14 @@ default-варианте. Если поле пустое, CLI берёт мод�
 варианта (плагин передаёт её как `BOARD_SESSION_MODEL`). Глобальная модель по
 умолчанию (`ctx.model.default()`) — это другая настройка; её не используем
 автоматически.
+
+Если `reviewer.model` всё равно пуст:
+
+- явный `specReview.mode=subagent` или `runReview.mode=subagent` — ошибка
+  (код 2) при `card submit`/`run end` с подсказкой `board setup
+  --reviewer-model` или выбрать `self`;
+- `auto` — падает в `self` с предупреждением, чтобы не наследовать Max молча;
+- `.opencode/agents/board-reviewer.md` не создаётся, пока модель не задана.
 
 Миграция с версии 1:
 
@@ -373,16 +431,21 @@ board setup --show
 
 Новые/обновлённые OpenCode-файлы:
 
-- `/spec-review` — проверить spec: self или субагент по resolved mode, затем
-  `board card spec-review`;
-- `/review` — проверить plan и код, оформить findings, `review submit
-  --plan done|failed`;
+- `/spec-review` — оркестратор (`subagent: false`): читает resolved mode; для
+  `self` проверяет spec в основной сессии, для `subagent` запускает
+  `board-reviewer`, затем `board card spec-review`;
+- `/review` — оркестратор (`subagent: false`): читает `reviewMode`; для
+  `self` проверяет plan и код сам, для `subagent` запускает `board-reviewer`;
+  оформляет findings и `review submit --plan done|failed`;
 - `/setup` — мастер режимов; инструмент `board_setup` получает те же флаги;
-- `.opencode/agents/board-reviewer.md` — default-модель и read-only права;
+- `.opencode/agents/board-reviewer.md` — `mode: subagent`, default-модель без
+  `#variant`, read-only права (чтение/поиск/проверки, без edit);
 - скилл и `AGENTS.md` — процесс, гейты и правило одного цикла.
 
-CLI субагентов не порождает. Если режим требует субагента, это делает
-OpenCode-команда или агент; CLI только проверяет записанный режим и вердикт.
+CLI субагентов не порождает. Команды-оркестраторы запускают `board-reviewer`
+через subagent-инструмент OpenCode; CLI только проверяет записанный режим и
+вердикт. Статический `subagent: true` не используется: иначе режим `self`
+недоступен.
 
 ## 11. Команды и данные
 
@@ -394,11 +457,18 @@ OpenCode-команда или агент; CLI только проверяет �
 - `card spec-review <ID> --as <id> --mode self|subagent --verdict done|reopen
   --note "..."` — записать проверку spec.
 - `card submit` — требует spec, acceptance и пройденный spec review.
+- `card amend <ID> --as <id> --reason "..."` — изменить утверждённый spec;
+  увеличивает `spec_rev`, сбрасывает review и возвращает в `shaping`.
 - `take` — исполнитель пишет plan; plan — это steps + scope.
 - `run end` — разрешает run review mode, закрывает забег, пишет
-  `runs.review_mode` и возвращает `reviewMode`/`reviewReason`.
+  `runs.review_mode` и возвращает `reviewMode`/`reviewReason`. Старые флаги
+  `--review`/`--no-review` остаются per-run override: `--review` включает
+  `auto` (или `subagent`, если модель ревьюера задана), `--no-review` ставит
+  `none`.
 - `review submit <ID> --verdict done|reopen --plan done|failed ...` — run
   review; `--plan` обязателен, `done` с findings разрешён.
+- `card verdict` — устаревший алиас `review submit`; те же проверки, включая
+  `--plan` и лимит переоткрытий. Второго пути записи вердикта нет.
 - `review finding` — finding-карточка.
 - `setup` — режимы.
 
@@ -407,16 +477,22 @@ OpenCode-команда или агент; CLI только проверяет �
 Схема v2 (`meta.schemaVersion = 2`):
 
 - `cards.acceptance text not null default ''` — критерии, по одному на строку.
+- `cards.spec_rev integer not null default 1` — версия spec; растёт при
+  изменении `body`, `acceptance` или `scope`.
+- `cards.review_reopens integer not null default 0` — счётчик переоткрытий
+  из run review; отдельно от `attempt`.
 - `reviews.kind text not null default 'run'` — `spec|run`.
 - `reviews.mode text` — `self|subagent`.
+- `reviews.spec_rev integer` — какую версию spec проверяли.
 - `reviews.plan_compliance text` — `done|failed|null`.
 - `runs.review_mode text` — resolved mode забега.
-- `cards.attempt` используется как счётчик попыток; review reopen увеличивает
-  его и создаёт новую ветку. Повторный reopen после лимита отклоняется.
+- `cards.attempt` — номер попытки/ветки; review reopen увеличивает и его.
+  Повторный reopen после лимита отклоняется.
 
 Существующие `reviews` получают `kind='run'`; существующие карточки —
-`acceptance=''`. Старые карточки в `ready`/`in_progress` не блокируются;
-требование критериев применяется при следующем разборе.
+`acceptance=''`, `spec_rev=1`, `review_reopens=0`. Старые карточки в
+`ready`/`in_progress` не блокируются; требование критериев применяется при
+следующем разборе.
 
 ## 12. Тесты и критерии готовности
 
@@ -427,12 +503,20 @@ OpenCode-команда или агент; CLI только проверяет �
   наследования Max.
 - Spec: submit без spec, без acceptance, без spec review; self vs subagent;
   неполный spec → вопрос владельцу/block.
+- Spec revision: правка body/acceptance/scope инвалидирует review; reject
+  инвалидирует review; amend возвращает в shaping и требует re-approve;
+  submit/approve с устаревшим review отклоняются.
 - Plan: пишется при take; учитывает зависимости и актуальный dev; изменение
   scope → block/ask.
 - Run review: plan compliance + code; `done` с findings; findings становятся
   карточками; `critical` блокирует release; `important`/`other` — backlog.
+- Покрытие: `runReview.mode != none` отправляет в review все карточки забега,
+  `review_required` работает и при `none`.
 - Один цикл: после `done` карточка не возвращается в review; один reopen,
-  второй требует владельца; повторное ревью — только diff/findings.
+  второй отклоняется и оставляет карточку в review для владельца; повторное
+  ревью — только diff/findings.
+- Совместимость: `card verdict` — алиас с теми же проверками; `run end
+  --review/--no-review` перекрывают настройку на один забег.
 - E2E: забег из трёх карточек, ревью один раз, findings в backlog, release
   блокируется только critical.
 - Fix run: finding-карточки после approve собираются в отдельный забег и
@@ -460,20 +544,43 @@ OpenCode-команда или агент; CLI только проверяет �
   стоимость, критическое не теряется. Минус: часть улучшений откладывается.
   **Выбран этот вариант.**
 
-## 14. Открытые вопросы и решения владельца
+## 14. Решения и открытые вопросы
 
-1. `important` findings: backlog или блокируют приёмку? Предложение —
-   backlog с высоким приоритетом; `critical` блокирует release.
-2. Max/High → субагент для spec review: оставить как решение владельца или
-   перевернуть на self для экономии? В мастере доступны оба.
-3. Порог большого spec: 6000 символов — предложение; можно изменить.
-4. Критерии приёмки: текстовое поле по одному пункту на строку —
-   предложение; альтернатива — таблица с отметками.
-5. Старые карточки: не требовать acceptance до повторного разбора —
-   предложение.
-6. `reviewer.model`: брать модель текущей сессии без варианта — предложение;
-   владелец может указать другую модель. Глобальный default-модель не
-   использовать автоматически.
+### 14.1 Ответы builder-check
+
+1. **Версия spec.** `spec_rev` растёт при изменении body/acceptance/scope;
+   spec review хранит версию; reject инвалидирует review; после approve
+   изменения только через `card amend` и повторное утверждение.
+2. **Лимит reopen.** Считается `review_reopens`, не `attempt`. Второй
+   review-reopen отклоняется, карточка остаётся в `review`; владелец решает и
+   может сам вынести вердикт или сделать `card reopen`.
+3. **Покрытие run review.** `runReview.mode != none` отправляет в review все
+   карточки забега; `review_required` продолжает работать при `none`.
+4. **Старые команды.** `card verdict` — алиас `review submit` с теми же
+   проверками; `run end --review/--no-review` — per-run override.
+5. **Self/subagent.** Команды `/review` и `/spec-review` —
+   оркестраторы с `subagent: false`; субагента `board-reviewer` запускают
+   только для режима `subagent`.
+6. **Пустая модель ревьюера.** Явный `subagent` — ошибка с подсказкой;
+   `auto` — self с предупреждением; `board-reviewer.md` без модели не
+   создаётся.
+
+### 14.2 Решения, принятые по умолчанию
+
+1. `important`/`other` findings — backlog; `critical` блокирует release.
+2. Max/High в `auto` → субагент; субагент работает на default-варианте
+   `reviewer.model`. `self` остаётся доступным явным выбором.
+3. Большой spec — от 6000 символов (body + acceptance), настраивается; `0`
+   отключает правило.
+4. Критерии приёмки — текстовое поле, один пункт на строку.
+5. Старые карточки в `ready`/`in_progress` не требуют acceptance до
+   повторного разбора.
+6. `reviewer.model` — модель текущей сессии без варианта; владелец может
+   указать другую. Глобальную default-модель автоматически не используем.
+7. Любое изменение spec/scope после approve требует `card amend` и повторного
+   утверждения.
+8. `runReview.mode != none` покрывает все карточки забега; `review_required`
+   работает и при `none`.
 
 ## 15. Что остаётся builder'у
 
@@ -485,3 +592,10 @@ OpenCode-команда или агент; CLI только проверяет �
 - Генерация `.opencode/agents/board-reviewer.md` из `reviewer.model` и её
   обновление при `setup`/`init --refresh`.
 - Реализация одной команды `review submit --plan` без дублирования проверок.
+- `spec_rev`, `card amend`, инвалидация review и запрет правок после approve.
+- `review_reopens`, owner-override и поведение карточки в `review` после
+  лимита.
+- Покрытие run review: `finish` должен учитывать `review_required` и
+  `runReview.mode`.
+- Совместимость `card verdict` и `run end --review/--no-review`.
+- Оркестраторы `/review`/`/spec-review` и вызов `board-reviewer`.
