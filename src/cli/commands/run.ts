@@ -14,8 +14,9 @@
 import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { findProject } from '../../core/project.ts'
+import { modelContext, resolveRunReviewMode } from '../../core/review-policy.ts'
 import { readSettings } from '../../core/settings.ts'
-import type { Run } from '../../core/types.ts'
+import type { Run, RunReviewMode } from '../../core/types.ts'
 import {
   boolFlag,
   numberFlag,
@@ -35,6 +36,8 @@ export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
+  const settings = readSettings(project.root)
+  const context = modelContext(process.env)
 
   // Любая команда забега снимает просроченные lease (§8.5).
   reclaimExpired(db)
@@ -73,7 +76,8 @@ export default async function command(args: ParsedArgs) {
       cardIds = cardFlags
     }
 
-    const run = startRun(db, { executorId, cardIds, actor: executorId })
+    const reviewMode = resolveRunReviewMode({ settings, context }).mode
+    const run = startRun(db, { executorId, cardIds, actor: executorId, reviewMode })
     ok(run, `${run.id} · ${run.executorId} · ${cardIds.join(', ')}`)
     return 0
   }
@@ -135,17 +139,35 @@ export default async function command(args: ParsedArgs) {
     if (reviewFlag && noReviewFlag) {
       throw new UserError(3, 'укажите только один флаг: --review или --no-review')
     }
-    const explicitReview = reviewFlag ? true : noReviewFlag ? false : undefined
-    const review = explicitReview ?? readSettings(project.root).runReview.mode !== 'none'
-    const ended = endRun(db, { executorId, actor: executorId, review })
+
+    let reviewMode: RunReviewMode
+    if (noReviewFlag) {
+      reviewMode = 'none'
+    } else if (reviewFlag) {
+      const forced = {
+        ...settings,
+        runReview: {
+          mode: settings.runReview.mode === 'none' ? ('auto' as const) : settings.runReview.mode,
+        },
+      }
+      reviewMode = resolveRunReviewMode({ settings: forced, context }).mode
+    } else {
+      reviewMode =
+        run.reviewMode ?? resolveRunReviewMode({ settings, context }).mode
+    }
+
+    const ended = endRun(db, { executorId, actor: executorId, reviewMode })
+    const reviewCards = listRunCards(db, run.id).filter(
+      (row) => row.status === 'review' || getCard(db, row.cardId)?.status === 'review',
+    ).length
 
     const human = [
       `${ended.id} закрыт · карточек ${count}`,
       ended.review
-        ? 'ревью включено: выполните board review list или /review'
+        ? `ревью: ${reviewMode} · карточек на ревью: ${reviewCards}`
         : 'ревью после забега выключено',
     ].join('\n')
-    ok(ended, human)
+    ok({ ...ended, reviewCards }, human)
     return 0
   }
 

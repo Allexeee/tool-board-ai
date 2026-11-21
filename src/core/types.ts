@@ -18,6 +18,7 @@ export type Severity = 'critical' | 'important' | 'other'
 export type ExecutorKind = 'human' | 'agent'
 
 export type RunStatus = 'active' | 'ended' | 'cancelled' | 'lease_expired'
+export type RunReviewMode = 'none' | 'self' | 'subagent'
 
 export type RunCardStatus =
   | 'booked'
@@ -36,6 +37,7 @@ export interface Run {
   endedAt: string | null
   leaseUntil: string | null
   review: boolean
+  reviewMode: RunReviewMode | null
   note: string | null
 }
 

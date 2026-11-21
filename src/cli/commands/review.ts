@@ -20,6 +20,9 @@ interface ReviewItem {
   id: string
   title: string
   body: string
+  spec: string
+  acceptance: string
+  plan: Step[]
   status: Card['status']
   skill: string | null
   needsMerge: boolean
@@ -38,21 +41,27 @@ export default async function command(args: ParsedArgs) {
   const db = openDb(project.dbPath)
 
   const list = (args: ParsedArgs): number => {
-    const items: ReviewItem[] = listReviewCards(db).map((card) => ({
-      id: card.id,
-      title: card.title,
-      body: card.body,
-      status: card.status,
-      skill: card.skill,
-      needsMerge: card.needsMerge,
-      scope: card.scope,
-      branch: card.branch,
-      mergeCommit: card.mergeCommit,
-      steps: listSteps(db, card.id),
-      refs: listRefs(db, card.id),
-      discussion: listDiscussion(db, card.id),
-      diff: card.mergeCommit ? `git diff ${card.mergeCommit}^1 ${card.mergeCommit}` : null,
-    }))
+    const items: ReviewItem[] = listReviewCards(db).map((card) => {
+      const steps = listSteps(db, card.id)
+      return {
+        id: card.id,
+        title: card.title,
+        body: card.body,
+        spec: card.body,
+        acceptance: card.acceptance,
+        plan: steps,
+        status: card.status,
+        skill: card.skill,
+        needsMerge: card.needsMerge,
+        scope: card.scope,
+        branch: card.branch,
+        mergeCommit: card.mergeCommit,
+        steps,
+        refs: listRefs(db, card.id),
+        discussion: listDiscussion(db, card.id),
+        diff: card.mergeCommit ? `git diff ${card.mergeCommit}^1 ${card.mergeCommit}` : null,
+      }
+    })
     ok(items, formatReviewList(items))
     return 0
   }
@@ -161,7 +170,10 @@ function formatReviewList(items: ReviewItem[]): string {
         `  ветка: ${value(item.branch)} · merge: ${value(item.mergeCommit)}`,
         `  diff: ${item.diff ?? '—'}`,
       ]
-      if (item.body !== '') lines.push(`  body: ${item.body}`)
+      if (item.body !== '') lines.push(`  spec: ${item.spec}`)
+      if (item.acceptance !== '') {
+        lines.push(`  acceptance: ${item.acceptance.split('\n').join(' | ')}`)
+      }
       for (const step of item.steps) {
         lines.push(`  [${step.done ? 'x' : ' '}] ${step.seq}. ${step.text}`)
       }

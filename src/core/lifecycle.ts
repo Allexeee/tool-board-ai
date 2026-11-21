@@ -738,6 +738,7 @@ export interface FinishInput {
   root: string
   noMerge?: boolean
   mergeCommit?: string
+  forceReview?: boolean
 }
 
 /**
@@ -819,7 +820,7 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
       }
     }
 
-    const status = card.reviewRequired ? 'review' : 'done'
+    const status = card.reviewRequired || input.forceReview === true ? 'review' : 'done'
     const at = nowIso()
     db.prepare(
       `update cards set status = ?, summary = ?, done_at = ?, merge_commit = ?, in_dev = ?, in_main = 0,

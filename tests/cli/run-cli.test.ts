@@ -108,7 +108,7 @@ test('run start --cards, add, drop, next и end --review', (t) => {
   const ended = run(root, ['run', 'end', '--as', 'developer', '--review'])
   assert.equal(ended.code, 0, ended.err)
   assert.match(ended.out, /RUN-1 закрыт/)
-  assert.match(ended.out, /board review list/)
+  assert.match(ended.out, /ревью: self/)
 
   const runRecord = getRun(db, 'RUN-1')!
   assert.equal(runRecord.status, 'ended')
@@ -134,7 +134,7 @@ test('run end: ревью после забега берётся из настр
   json(root, ['run', 'start', '--as', 'developer', '--cards', cards[1].id])
   const enabled = run(root, ['run', 'end', '--as', 'developer'])
   assert.equal(enabled.code, 0, enabled.err)
-  assert.match(enabled.out, /ревью включено/)
+  assert.match(enabled.out, /ревью: subagent/)
   assert.equal(getRun(db, 'RUN-2')!.review, true)
 
   json(root, ['run', 'start', '--as', 'developer', '--cards', cards[2].id])
@@ -152,6 +152,102 @@ test('run end: --review и --no-review вместе — код 3', (t) => {
   assert.equal(both.code, 3)
   assert.match(both.err, /только один флаг/)
   assert.equal(getRun(db, 'RUN-1')!.status, 'active')
+})
+
+test('run start снимает reviewMode, finish покрывает все карточки', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(fixture.db, {
+    phase: 'task',
+    status: 'ready',
+    position: 1,
+    needsMerge: false,
+    body: 'spec',
+    acceptance: ['готово'],
+  })
+
+  json(fixture.root, ['setup', '--run-review', 'subagent', '--reviewer-model', 'acme/model'])
+  const run = json(fixture.root, ['run', 'start', '--as', 'developer', '--cards', card.id]) as {
+    reviewMode: string
+  }
+  assert.equal(run.reviewMode, 'subagent')
+
+  json(fixture.root, ['take', card.id, '--as', 'developer'])
+  const finished = json(fixture.root, ['finish', card.id, '--as', 'developer', '--summary', 'ok']) as {
+    status: string
+  }
+  assert.equal(finished.status, 'review')
+
+  const ended = json(fixture.root, ['run', 'end', '--as', 'developer']) as {
+    review: boolean
+    reviewMode: string
+    reviewCards: number
+  }
+  assert.equal(ended.review, true)
+  assert.equal(ended.reviewMode, 'subagent')
+  assert.equal(ended.reviewCards, 1)
+})
+
+test('run end --review переносит done-карточку в post-hoc review', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(fixture.db, {
+    phase: 'task',
+    status: 'ready',
+    position: 1,
+    needsMerge: false,
+    body: 'spec',
+    acceptance: ['готово'],
+  })
+
+  json(fixture.root, ['setup', '--run-review', 'none'])
+  json(fixture.root, ['run', 'start', '--as', 'developer', '--cards', card.id])
+  json(fixture.root, ['take', card.id, '--as', 'developer'])
+  assert.equal(
+    (json(fixture.root, ['finish', card.id, '--as', 'developer', '--summary', 'ok']) as { status: string }).status,
+    'done',
+  )
+
+  const ended = json(fixture.root, ['run', 'end', '--as', 'developer', '--review']) as {
+    review: boolean
+    reviewMode: string
+    reviewCards: number
+  }
+  assert.equal(ended.review, true)
+  assert.equal(ended.reviewMode, 'self')
+  assert.equal(ended.reviewCards, 1)
+  assert.equal((json(fixture.root, ['card', 'show', card.id]) as { status: string }).status, 'review')
+})
+
+test('run end --no-review не трогает done-карточки', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(fixture.db, {
+    phase: 'task',
+    status: 'ready',
+    position: 1,
+    needsMerge: false,
+    body: 'spec',
+    acceptance: ['готово'],
+  })
+
+  json(fixture.root, ['setup', '--run-review', 'none'])
+  json(fixture.root, ['run', 'start', '--as', 'developer', '--cards', card.id])
+  json(fixture.root, ['take', card.id, '--as', 'developer'])
+  json(fixture.root, ['finish', card.id, '--as', 'developer', '--summary', 'ok'])
+
+  const ended = json(fixture.root, ['run', 'end', '--as', 'developer', '--no-review']) as {
+    review: boolean
+    reviewMode: string
+    reviewCards: number
+  }
+  assert.equal(ended.review, false)
+  assert.equal(ended.reviewMode, 'none')
+  assert.equal(ended.reviewCards, 0)
+  assert.equal((json(fixture.root, ['card', 'show', card.id]) as { status: string }).status, 'done')
 })
 
 test('run list снимает просроченный lease', (t) => {

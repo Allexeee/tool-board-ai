@@ -18,6 +18,7 @@ import {
   suggestRuns,
   startRun,
 } from '../../src/core/runs.ts'
+import { finishCard } from '../../src/core/lifecycle.ts'
 import type { Card, CardStatus } from '../../src/core/types.ts'
 import { makeBoard, seedCard, seedExecutor, seedRun } from '../helpers/board.ts'
 
@@ -602,6 +603,89 @@ test('reclaimExpired закрывает просроченный забег и �
     1,
   )
   assert.equal(getRun(db, future.id)!.status, 'lease_expired')
+})
+
+test('startRun сохраняет reviewMode забега', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: [card.id],
+    actor: 'developer',
+    reviewMode: 'subagent',
+  })
+
+  assert.equal(run.reviewMode, 'subagent')
+  assert.equal(listRuns(db)[0].reviewMode, 'subagent')
+})
+
+test('finishCard.forceReview ставит review даже при review_required=false', (t) => {
+  const { db, root } = board(t)
+  const forced = seedCard(db, {
+    phase: 'task',
+    status: 'in_progress',
+    holder: 'developer',
+    needsMerge: false,
+  })
+  const plain = seedCard(db, {
+    phase: 'task',
+    status: 'in_progress',
+    holder: 'developer',
+    needsMerge: false,
+  })
+
+  const forcedCard = finishCard(db, {
+    id: forced.id,
+    actor: 'developer',
+    summary: 'готово',
+    root,
+    forceReview: true,
+  })
+  const plainCard = finishCard(db, {
+    id: plain.id,
+    actor: 'developer',
+    summary: 'готово',
+    root,
+  })
+
+  assert.equal(forcedCard.status, 'review')
+  assert.equal(plainCard.status, 'done')
+})
+
+test('endRun с reviewMode переносит done-карточки в post-hoc review', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: [card.id],
+    actor: 'developer',
+    reviewMode: 'none',
+  })
+
+  db.prepare(
+    "update cards set status = 'done', done_at = '2026-01-01', summary = 'ok', merge_commit = 'abc', in_dev = 1 where id = ?",
+  ).run(card.id)
+  db.prepare("update run_cards set status = 'done' where run_id = ? and card_id = ?").run(
+    run.id,
+    card.id,
+  )
+
+  const ended = endRun(db, {
+    executorId: 'developer',
+    actor: 'developer',
+    reviewMode: 'subagent',
+  })
+  const after = getCard(db, card.id)!
+
+  assert.equal(ended.review, true)
+  assert.equal(ended.reviewMode, 'subagent')
+  assert.equal(after.status, 'review')
+  assert.equal(after.mergeCommit, 'abc')
+  assert.equal(after.summary, 'ok')
+  assert.equal(listRunCards(db, run.id)[0].status, 'review')
 })
 
 test('reclaimExpired возвращает просроченную shaping-карточку в new', (t) => {

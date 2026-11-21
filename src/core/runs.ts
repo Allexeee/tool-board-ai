@@ -39,6 +39,7 @@ interface RunRow {
   ended_at: string | null
   lease_until: string | null
   review: number
+  review_mode: string | null
   note: string | null
 }
 
@@ -58,6 +59,7 @@ const toRun = (row: RunRow): Run => ({
   endedAt: row.ended_at,
   leaseUntil: row.lease_until,
   review: row.review === 1,
+  reviewMode: row.review_mode as Run['reviewMode'],
   note: row.note,
 })
 
@@ -259,11 +261,12 @@ function closeRun(
   status: Run['status'],
   endedAt: string,
   review: boolean,
+  reviewMode: Run['reviewMode'],
   note: string | null,
 ): Run {
   db.prepare(
-    'update runs set status = ?, ended_at = ?, review = ?, note = ? where id = ?',
-  ).run(status, endedAt, review ? 1 : 0, note, run.id)
+    'update runs set status = ?, ended_at = ?, review = ?, review_mode = ?, note = ? where id = ?',
+  ).run(status, endedAt, review ? 1 : 0, reviewMode, note, run.id)
   return getRun(db, run.id)!
 }
 
@@ -369,7 +372,12 @@ export function suggestRuns(
  */
 export function startRun(
   db: DatabaseSync,
-  input: { executorId: string; cardIds: string[]; actor: string },
+  input: {
+    executorId: string
+    cardIds: string[]
+    actor: string
+    reviewMode?: Run['reviewMode']
+  },
 ): Run {
   return tx(db, () => {
     const actor = requiredActor(input.actor)
@@ -415,12 +423,13 @@ export function startRun(
       endedAt: null,
       leaseUntil,
       review: false,
+      reviewMode: input.reviewMode ?? null,
       note: null,
     }
 
     db.prepare(
-      `insert into runs (id, executor_id, status, created_at, started_at, ended_at, lease_until, review, note)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `insert into runs (id, executor_id, status, created_at, started_at, ended_at, lease_until, review, review_mode, note)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.id,
       run.executorId,
@@ -430,6 +439,7 @@ export function startRun(
       run.endedAt,
       run.leaseUntil,
       run.review ? 1 : 0,
+      run.reviewMode,
       run.note,
     )
 
@@ -560,7 +570,13 @@ export function nextCard(
 
 export function endRun(
   db: DatabaseSync,
-  input: { executorId: string; actor: string; review?: boolean },
+  input: {
+    executorId: string
+    actor: string
+    reviewMode?: Run['reviewMode']
+    /** Старый булев флаг: true = subagent, false = none. */
+    review?: boolean
+  },
 ): Run {
   return tx(db, () => {
     const actor = requiredActor(input.actor)
@@ -582,8 +598,41 @@ export function endRun(
       )
     }
 
+    const reviewMode =
+      input.reviewMode ??
+      (input.review === true ? 'subagent' : input.review === false ? 'none' : null) ??
+      run.reviewMode ??
+      'none'
+
     releaseRunCards(db, run, actor, `забег ${run.id} закрыт`)
-    const ended = closeRun(db, run, 'ended', nowIso(), input.review === true, null)
+
+    // Пост-фактум ревью: карточки уже done, но забег просит проверить plan и код.
+    if (reviewMode !== 'none') {
+      for (const row of listRunCards(db, run.id)) {
+        const card = getCard(db, row.cardId)
+        if (!card || card.status !== 'done') continue
+        const before = card
+        const at = nowIso()
+        db.prepare(
+          "update cards set status = 'review', done_at = null, updated_at = ? where id = ?",
+        ).run(at, card.id)
+        db.prepare("update run_cards set status = 'review' where run_id = ? and card_id = ?").run(
+          run.id,
+          card.id,
+        )
+        appendEvent(db, {
+          type: 'card.review_requested',
+          actor,
+          subject: card.id,
+          before,
+          after: getCard(db, card.id),
+          note: `забег ${run.id}: ревью после done`,
+        })
+      }
+    }
+
+    const review = reviewMode !== 'none'
+    const ended = closeRun(db, run, 'ended', nowIso(), review, reviewMode, null)
 
     appendEvent(db, {
       type: 'run.ended',
@@ -591,7 +640,7 @@ export function endRun(
       subject: run.id,
       before: run,
       after: ended,
-      note: input.review === true ? 'ревью запланировано' : undefined,
+      note: review ? `ревью запланировано: ${reviewMode}` : 'ревью выключено',
     })
 
     return ended
@@ -615,7 +664,15 @@ export function releaseRun(
     if (!reason) throw new UserError(3, 'нужна причина снятия забега: --reason «...»')
 
     releaseRunCards(db, run, actor, `забег снят: ${reason}`)
-    const released = closeRun(db, run, 'cancelled', nowIso(), run.review, reason)
+    const released = closeRun(
+      db,
+      run,
+      'cancelled',
+      nowIso(),
+      run.review,
+      run.reviewMode,
+      reason,
+    )
 
     appendEvent(db, {
       type: 'run.released',
@@ -646,7 +703,15 @@ export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number
     for (const row of rows) {
       const run = toRun(row)
       releaseRunCards(db, run, 'system', `lease истёк: ${cutoff}`)
-      const expired = closeRun(db, run, 'lease_expired', cutoff, run.review, 'lease истёк')
+      const expired = closeRun(
+        db,
+        run,
+        'lease_expired',
+        cutoff,
+        run.review,
+        run.reviewMode,
+        'lease истёк',
+      )
 
       appendEvent(db, {
         type: 'run.lease_expired',
