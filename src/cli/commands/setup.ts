@@ -41,7 +41,7 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
-  if (!process.stdin.isTTY) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
     const lines = [human(current), '', 'Запустите в терминале: board setup']
     ok(current, lines.join('\n'))
     return 0

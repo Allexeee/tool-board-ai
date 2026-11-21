@@ -1,22 +1,37 @@
 ﻿import { initProject } from '../../core/project.ts'
 import { ensureSettings, type BoardSettings } from '../../core/settings.ts'
-import { runSetupWizard } from '../setup-wizard.ts'
+import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
 import { boolFlag, type ParsedArgs } from '../args.ts'
 import { ok, isJsonMode } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const dir = args.positionals[0] ?? process.cwd()
-  const { created, root } = initProject(dir)
+  const { created, updated, root } = initProject(dir, {
+    refresh: boolFlag(args, 'refresh'),
+  })
 
   let settings: BoardSettings = ensureSettings(root).settings
-  if (settings.setupAt === null && !isJsonMode() && !boolFlag(args, 'yes') && process.stdin.isTTY) {
+  if (
+    shouldRunSetup({
+      settings,
+      json: isJsonMode(),
+      yes: boolFlag(args, 'yes'),
+      stdinIsTTY: Boolean(process.stdin.isTTY),
+      stdoutIsTTY: Boolean(process.stdout.isTTY),
+    })
+  ) {
     settings = await runSetupWizard(root, settings)
   }
 
-  const lines =
-    created.length > 0
-      ? ['Создано:', ...created.map((path) => '  ' + path)]
-      : ['Доска уже настроена, ничего не менялось.']
+  const lines: string[] = []
+  if (created.length > 0) {
+    lines.push('Создано:', ...created.map((path) => '  ' + path))
+  }
+  if (updated.length > 0) {
+    lines.push('Обновлено:', ...updated.map((path) => '  ' + path))
+  }
+  if (lines.length === 0) lines.push('Доска уже настроена, ничего не менялось.')
+
   lines.push(
     '',
     'Ревью после каждого забега: ' + (settings.reviewAfterRun ? 'включено' : 'выключено'),
@@ -26,6 +41,7 @@ export default async function command(args: ParsedArgs) {
   }
   lines.push('', 'Проект: ' + root)
 
-  ok({ root, created, settings }, lines.join('\n'))
+  const setupRequired = settings.setupAt === null
+  ok({ root, created, updated, settings, setupRequired }, lines.join('\n'))
   return 0
 }

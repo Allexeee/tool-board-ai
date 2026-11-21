@@ -124,8 +124,14 @@ export default async function command(args: ParsedArgs) {
     }
 
     const count = listRunCards(db, run.id).length
-    const reviewFlag = boolFlag(args, 'review')
-    const noReviewFlag = boolFlag(args, 'no-review')
+    const strictBoolean = (name: string): boolean => {
+      const value = args.flags[name]
+      if (value === undefined) return false
+      if (value === true) return true
+      throw new UserError(3, `флаг --${name} не принимает значение`)
+    }
+    const reviewFlag = strictBoolean('review')
+    const noReviewFlag = strictBoolean('no-review')
     if (reviewFlag && noReviewFlag) {
       throw new UserError(3, 'укажите только один флаг: --review или --no-review')
     }

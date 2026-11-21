@@ -12,7 +12,9 @@ const VERSION = (JSON.parse(
 
 const HELP = `board — доска карточек для людей и агентов
 
-  init [каталог] [--yes]   создать .board/board.db и docs/board/
+  init [каталог] [--yes] [--refresh]
+                          создать .board/board.db и docs/board/; --refresh
+                          перезаписывает сгенерированные .opencode-файлы
   setup                   мастер настроек: --show, --review-after-run,
                           --no-review-after-run
 

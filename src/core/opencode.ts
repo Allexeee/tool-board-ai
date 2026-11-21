@@ -23,6 +23,7 @@ export const AGENTS_BLOCK = [
   '- Нужно решение владельца — `block`/`ask`; карточка ждёт.',
   '- Ревью — свежий субагент командой `/review`; CLI субагентов не порождает.',
   '- Ревью после каждого забега — настройка `/setup` (по умолчанию выкл.); если `run end` вернул `review=true`, запусти `/review`.',
+  '- После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.',
   '- Коммит и мерж делает `finish`; агент в git не пишет. `main` меняется только `release` владельцем.',
   AGENTS_END,
 ].join('\n')
@@ -74,6 +75,9 @@ description: Доска карточек: смотреть now, разбират
 Находки: \`board review finding <ID> --severity critical|important|other --text "..."\`.
 
 ## Настройки
+
+После установки плагина, если \`board setup --show --json\` вернул
+\`setupAt: null\`, спроси владельца и запусти \`/setup\`.
 
 \`board setup --show --json\` — текущие настройки. Ревью после каждого забега:
 
@@ -348,7 +352,10 @@ export default Plugin.define({
           cards: { type: 'string' },
           suggest: { type: 'number' },
           reason: { type: 'string' },
-          review: { type: 'boolean' },
+          review: {
+            type: 'boolean',
+            description: 'Не указывайте, чтобы взять настройку доски; true/false перекрывают её для этого забега',
+          },
           as: { type: 'string' },
         }, ['action']),
         execute: (input) => call(ctx, runArgs(input)),
@@ -504,21 +511,32 @@ subagent: false
 - \`board setup --review-after-run\` — включить;
 - \`board setup --no-review-after-run\` — выключить.
 
-Не меняй другие настройки.
+Если владелец не хочет менять настройку — ничего не выполняй. Не меняй другие
+настройки.
 `
+
+export interface OpenCodeWriteOptions {
+  /** Перезаписать сгенерированные файлы, даже если они уже есть. */
+  refresh?: boolean
+}
 
 export interface OpenCodeWriteResult {
   created: string[]
+  updated: string[]
 }
 
 /**
- * Пишет в `root` скилл, плагин, команды ревью и настроек (если их нет), и
- * ставит блок `board:begin`/`board:end` в `AGENTS.md`. Идемпотентно:
- * существующие файлы не перезаписываются, блок между маркерами заменяется на
- * канонический.
+ * Пишет в `root` скилл, плагин, команды ревью и настроек, и ставит блок
+ * `board:begin`/`board:end` в `AGENTS.md`. По умолчанию существующие файлы не
+ * перезаписываются; `refresh` обновляет их шаблонами (нужно после апгрейда
+ * CLI). Блок между маркерами заменяется на канонический всегда.
  */
-export function writeOpenCodeFiles(root: string): OpenCodeWriteResult {
+export function writeOpenCodeFiles(
+  root: string,
+  options: OpenCodeWriteOptions = {},
+): OpenCodeWriteResult {
   const created: string[] = []
+  const updated: string[] = []
 
   const files: Array<[string, string]> = [
     ['.opencode/skills/board/SKILL.md', SKILL_SOURCE],
@@ -528,10 +546,13 @@ export function writeOpenCodeFiles(root: string): OpenCodeWriteResult {
   ]
   for (const [relative, content] of files) {
     const path = join(root, relative)
-    if (existsSync(path)) continue
+    const exists = existsSync(path)
+    if (exists && !options.refresh) continue
+    if (exists && readFileSync(path, 'utf8') === content) continue
+
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, content, 'utf8')
-    created.push(relative)
+    ;(exists ? updated : created).push(relative)
   }
 
   const agentsPath = join(root, 'AGENTS.md')
@@ -541,7 +562,10 @@ export function writeOpenCodeFiles(root: string): OpenCodeWriteResult {
 
   if (begin !== -1 && end !== -1 && end > begin) {
     const next = current.slice(0, begin) + AGENTS_BLOCK + current.slice(end + AGENTS_END.length)
-    if (next !== current) writeFileSync(agentsPath, next, 'utf8')
+    if (next !== current) {
+      writeFileSync(agentsPath, next, 'utf8')
+      updated.push('AGENTS.md (блок board)')
+    }
   } else {
     const next = current.trimEnd()
       ? current.trimEnd() + '\n\n' + AGENTS_BLOCK + '\n'
@@ -551,5 +575,5 @@ export function writeOpenCodeFiles(root: string): OpenCodeWriteResult {
     created.push('AGENTS.md (блок board)')
   }
 
-  return { created }
+  return { created, updated }
 }

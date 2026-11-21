@@ -19,14 +19,14 @@ const KNOWN_FLAGS = new Set([
   'summary', 'waive-dependents', 'done', 'reopen', 'severity', 'text', 'verdict',
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',
-  'merge-commit', 'block', 'question', 'example', 'yes', 'show',
+  'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run',
 ])
 
 const BOOLEAN_FLAGS = new Set([
   'json', 'help', 'version', 'needs-merge', 'no-needs-merge', 'review', 'no-review',
   'waive-dependents', 'done', 'reopen', 'top', 'bottom', 'mine', 'all', 'block',
-  'force', 'fresh', 'no-merge', 'yes', 'show', 'review-after-run',
+  'force', 'fresh', 'no-merge', 'yes', 'show', 'refresh', 'review-after-run',
   'no-review-after-run',
 ])
 

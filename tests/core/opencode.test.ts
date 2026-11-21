@@ -34,6 +34,10 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
   assert.match(plugin, /board_now/)
   assert.match(plugin, /board_setup/)
+  assert.match(plugin, /name: 'setup'/)
+  assert.match(plugin, /'setup', '--show'/)
+  assert.match(plugin, /'setup', '--review-after-run'/)
+  assert.match(plugin, /'setup', '--no-review-after-run'/)
   assert.match(plugin, /board\.ts/)
   assert.match(plugin, /BOARD_CLI/)
   assert.match(plugin, /Plugin\.define/)
@@ -62,9 +66,26 @@ test('writeOpenCodeFiles идемпотентен: второй вызов ни�
   const root = tmp()
   const first = writeOpenCodeFiles(root)
   assert.ok(first.created.length >= 5)
+  assert.deepEqual(first.updated, [])
 
   const second = writeOpenCodeFiles(root)
   assert.deepEqual(second.created, [])
+  assert.deepEqual(second.updated, [])
+})
+
+test('writeOpenCodeFiles обновляет сгенерированные файлы только с refresh', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = join(root, '.opencode', 'plugins', 'board', 'index.ts')
+  writeFileSync(plugin, '// старый плагин\n', 'utf8')
+
+  const skipped = writeOpenCodeFiles(root)
+  assert.deepEqual(skipped.updated, [])
+  assert.equal(readFileSync(plugin, 'utf8'), '// старый плагин\n')
+
+  const refreshed = writeOpenCodeFiles(root, { refresh: true })
+  assert.ok(refreshed.updated.some((path) => path.includes('plugins/board/index.ts')))
+  assert.match(readFileSync(plugin, 'utf8'), /board_setup/)
 })
 
 test('существующий AGENTS.md сохраняется, блок board добавляется', () => {

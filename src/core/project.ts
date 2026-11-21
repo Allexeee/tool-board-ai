@@ -120,9 +120,13 @@ function stripToolboxHook(root: string): void {
   }
 }
 
-export function initProject(dir: string): { created: string[]; root: string } {
+export function initProject(
+  dir: string,
+  options: { refresh?: boolean } = {},
+): { created: string[]; updated: string[]; root: string } {
   const root = resolve(dir)
   const created: string[] = []
+  const updated: string[] = []
 
   const boardDir = join(root, '.board')
   if (!existsSync(boardDir)) {
@@ -157,10 +161,12 @@ export function initProject(dir: string): { created: string[]; root: string } {
 
   if (updateGitignore(root)) created.push('.gitignore')
 
-  created.push(...writeOpenCodeFiles(root).created)
+  const opencode = writeOpenCodeFiles(root, options)
+  created.push(...opencode.created)
+  updated.push(...opencode.updated)
 
   // Новый хук не ставим: доска не защищает ветки.
   stripToolboxHook(root)
 
-  return { created, root }
+  return { created, updated, root }
 }
