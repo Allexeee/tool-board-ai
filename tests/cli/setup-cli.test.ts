@@ -14,17 +14,18 @@ interface Result {
   err: string
 }
 
-function run(dir: string, args: string[]): Result {
+function run(dir: string, args: string[], env: NodeJS.ProcessEnv = {}): Result {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
     windowsHide: true,
+    env: { ...process.env, ...env },
   })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 
-function json(dir: string, args: string[]): Record<string, unknown> {
-  const result = run(dir, [...args, '--json'])
+function json(dir: string, args: string[], env: NodeJS.ProcessEnv = {}): Record<string, unknown> {
+  const result = run(dir, [...args, '--json'], env)
   assert.equal(result.code, 0, result.err)
   return JSON.parse(result.out) as Record<string, unknown>
 }
@@ -58,6 +59,17 @@ test('setup: все режимы обновляются флагами', (t) => 
 
   const shown = json(fixture.root, ['setup', '--show'])
   assert.deepEqual(shown.specReview, { mode: 'self', largeSpecChars: 4000 })
+})
+
+test('setup: показывает effective reviewer model из сессии', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const shown = json(fixture.root, ['setup', '--show'], {
+    BOARD_SESSION_MODEL: 'acme/reviewer',
+    BOARD_MODEL_VARIANT: 'max',
+  })
+  assert.equal(shown.effectiveReviewerModel, 'acme/reviewer')
 })
 
 test('setup: старые флаги остаются алиасами', (t) => {

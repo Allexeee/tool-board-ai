@@ -46,6 +46,9 @@ description: Доска карточек: смотреть now, разбират
 
 ## Настройки
 
+После установки плагина, если `board setup --show --json` вернул
+`setupAt: null`, спроси владельца и запусти `/setup`.
+
 `board setup --show --json` — текущие настройки. Ревью после каждого забега:
 
 - `board setup --review-after-run` — включить;

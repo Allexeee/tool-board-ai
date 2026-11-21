@@ -20,13 +20,24 @@ function resolveCli(ctx) {
   return { file: 'board', args: [] }
 }
 
-async function call(ctx, args) {
+async function call(ctx, args, context) {
   const { file, args: prefix } = resolveCli(ctx)
+  let env = process.env
+  try {
+    const session = await ctx.session.get({ sessionID: context.sessionID })
+    const model = session.model
+    env = {
+      ...process.env,
+      BOARD_MODEL_VARIANT: model.variant ?? '',
+      BOARD_SESSION_MODEL: model.providerID + '/' + model.id,
+    }
+  } catch {}
   try {
     const { stdout } = await run(file, [...prefix, ...args, '--json'], {
       cwd: ctx.location.directory,
       timeout: 120_000,
       maxBuffer: 8 * 1024 * 1024,
+      env,
     })
     return { content: stdout.trim() || '{}' }
   } catch (error) {
@@ -58,7 +69,8 @@ function cardArgs(input) {
   if (a === 'add') {
     flag(args, 'group', input.group)
     flag(args, 'title', input.title)
-    flag(args, 'body', input.body)
+    flag(args, 'spec', input.spec ?? input.body)
+    if (Array.isArray(input.acceptance)) for (const item of input.acceptance) args.push('--acceptance', String(item))
     flag(args, 'skill', input.skill)
     flag(args, 'as', input.as)
   } else if (a === 'list') {
@@ -70,7 +82,8 @@ function cardArgs(input) {
   } else if (a === 'edit') {
     if (input.id) args.push(input.id)
     flag(args, 'title', input.title)
-    flag(args, 'body', input.body)
+    flag(args, 'spec', input.spec ?? input.body)
+    if (Array.isArray(input.acceptance)) for (const item of input.acceptance) args.push('--acceptance', String(item))
     flag(args, 'skill', input.skill)
     if (input.importance !== undefined) args.push('--importance', String(input.importance))
     if (input.urgency !== undefined) args.push('--urgency', String(input.urgency))
@@ -82,6 +95,16 @@ function cardArgs(input) {
   } else if (a === 'shape' || a === 'submit') {
     if (input.id) args.push(input.id)
     flag(args, 'from', input.from)
+    flag(args, 'as', input.as)
+  } else if (a === 'spec-review') {
+    if (input.id) args.push(input.id)
+    flag(args, 'mode', input.mode)
+    flag(args, 'verdict', input.verdict)
+    flag(args, 'note', input.note)
+    flag(args, 'as', input.as)
+  } else if (a === 'amend') {
+    if (input.id) args.push(input.id)
+    flag(args, 'reason', input.reason)
     flag(args, 'as', input.as)
   } else if (a === 'approve' || a === 'done' || a === 'reopen') {
     if (input.id) args.push(input.id)
@@ -95,8 +118,10 @@ function cardArgs(input) {
     flag(args, 'as', input.as)
   } else if (a === 'verdict') {
     if (input.id) args.push(input.id)
+    flag(args, 'plan', input.plan)
     if (input.done) args.push('--done')
     if (input.reopen) args.push('--reopen')
+    flag(args, 'mode', input.mode)
     flag(args, 'note', input.note)
     flag(args, 'as', input.as)
   }
@@ -132,7 +157,9 @@ function reviewArgs(input) {
   const a = input.action
   if (a === 'submit') {
     if (input.id) args.push(input.id)
+    flag(args, 'plan', input.plan)
     flag(args, 'verdict', input.verdict)
+    flag(args, 'mode', input.mode)
     flag(args, 'note', input.note)
     flag(args, 'reviewer', input.reviewer)
     flag(args, 'findings', input.findings)
@@ -190,37 +217,45 @@ export default Plugin.define({
         name: 'now',
         description: 'Доска: открытые карточки, забеги, что ждёт владельца',
         input: schema({ tab: { type: 'string' }, as: { type: 'string' }, mine: { type: 'boolean' } }),
-        execute: (input) => {
+        execute: (input, context) => {
           const args = []
           if (input.tab) args.push(input.tab)
           if (input.mine) args.push('--mine')
           flag(args, 'as', input.as)
-          return call(ctx, ['now', ...args])
+          return call(ctx, ['now', ...args], context)
         },
       })
 
       editor.add({
         name: 'setup',
-        description: 'Настройки доски: show|review-after-run|no-review-after-run',
-        input: schema({ action: { type: 'string' } }),
-        execute: (input) => {
+        description: 'Настройки доски: show|reviewer-model|spec-review|large-spec|run-review',
+        input: schema({ action: { type: 'string' }, value: { type: 'string' } }),
+        execute: (input, context) => {
           const action = input.action ?? 'show'
-          if (action === 'show') return call(ctx, ['setup', '--show'])
-          if (action === 'review-after-run') return call(ctx, ['setup', '--review-after-run'])
-          if (action === 'no-review-after-run') return call(ctx, ['setup', '--no-review-after-run'])
+          if (action === 'show') return call(ctx, ['setup', '--show'], context)
+          const value = input.value
+          if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
+          if (['reviewer-model', 'spec-review', 'large-spec', 'run-review'].includes(action)) {
+            return call(ctx, ['setup', '--' + action, value], context)
+          }
+          if (action === 'review-after-run' || action === 'no-review-after-run') {
+            return call(ctx, ['setup', '--' + action], context)
+          }
           return { content: 'неизвестное действие setup: ' + action, isError: true }
         },
       })
 
       editor.add({
         name: 'card',
-        description: 'Карточки: add|list|show|edit|shape|submit|approve|reject|done|cancel|reopen|verdict',
+        description: 'Карточки: add|list|show|edit|shape|submit|spec-review|approve|amend|reject|done|cancel|reopen|verdict',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
           group: { type: 'string' },
           title: { type: 'string' },
           body: { type: 'string' },
+          spec: { type: 'string' },
+          acceptance: { type: 'array', items: { type: 'string' } },
           skill: { type: 'string' },
           summary: { type: 'string' },
           reason: { type: 'string' },
@@ -235,10 +270,12 @@ export default Plugin.define({
           waive_dependents: { type: 'boolean' },
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
+          mode: { type: 'string' },
+          plan: { type: 'string' },
           phase: { type: 'string' },
           status: { type: 'string' },
         }, ['action']),
-        execute: (input) => call(ctx, cardArgs(input)),
+        execute: (input, context) => call(ctx, cardArgs(input), context),
       })
 
       editor.add({
@@ -250,25 +287,29 @@ export default Plugin.define({
           cards: { type: 'string' },
           suggest: { type: 'number' },
           reason: { type: 'string' },
-          review: { type: 'boolean' },
+          review: {
+            type: 'boolean',
+            description: 'Не указывайте, чтобы взять настройку доски; true/false перекрывают её для этого забега',
+          },
           as: { type: 'string' },
         }, ['action']),
-        execute: (input) => call(ctx, runArgs(input)),
+        execute: (input, context) => call(ctx, runArgs(input), context),
       })
 
       editor.add({
         name: 'take',
         description: 'Взять карточку в работу',
         input: schema({ id: { type: 'string' }, as: { type: 'string' } }, ['id']),
-        execute: (input) => call(ctx, ['take', input.id, ...(input.as ? ['--as', input.as] : [])]),
+        execute: (input, context) =>
+          call(ctx, ['take', input.id, ...(input.as ? ['--as', input.as] : [])], context),
       })
 
       editor.add({
         name: 'finish',
         description: 'Сдать карточку с отчётом',
         input: schema({ id: { type: 'string' }, summary: { type: 'string' }, as: { type: 'string' } }, ['id', 'summary']),
-        execute: (input) =>
-          call(ctx, ['finish', input.id, '--summary', input.summary, ...(input.as ? ['--as', input.as] : [])]),
+        execute: (input, context) =>
+          call(ctx, ['finish', input.id, '--summary', input.summary, ...(input.as ? ['--as', input.as] : [])], context),
       })
 
       editor.add({
@@ -278,7 +319,7 @@ export default Plugin.define({
           { id: { type: 'string' }, reason: { type: 'string' }, note: { type: 'string' }, as: { type: 'string' } },
           ['id', 'reason'],
         ),
-        execute: (input) =>
+        execute: (input, context) =>
           call(ctx, [
             'block',
             input.id,
@@ -286,7 +327,7 @@ export default Plugin.define({
             input.reason,
             ...(input.note ? ['--note', input.note] : []),
             ...(input.as ? ['--as', input.as] : []),
-          ]),
+          ], context),
       })
 
       editor.add({
@@ -296,14 +337,14 @@ export default Plugin.define({
           { id: { type: 'string' }, text: { type: 'string' }, as: { type: 'string' }, block: { type: 'boolean' } },
           ['id', 'text'],
         ),
-        execute: (input) =>
+        execute: (input, context) =>
           call(ctx, [
             'ask',
             input.id,
             input.text,
             ...(input.block ? ['--block'] : []),
             ...(input.as ? ['--as', input.as] : []),
-          ]),
+          ], context),
       })
 
       editor.add({
@@ -313,14 +354,14 @@ export default Plugin.define({
           { id: { type: 'string' }, text: { type: 'string' }, as: { type: 'string' }, question: { type: 'number' } },
           ['id', 'text'],
         ),
-        execute: (input) =>
+        execute: (input, context) =>
           call(ctx, [
             'answer',
             input.id,
             input.text,
             ...(input.question !== undefined ? ['--question', String(input.question)] : []),
             ...(input.as ? ['--as', input.as] : []),
-          ]),
+          ], context),
       })
 
       editor.add({
@@ -335,8 +376,10 @@ export default Plugin.define({
           severity: { type: 'string' },
           text: { type: 'string' },
           findings: { type: 'string' },
+          plan: { type: 'string' },
+          mode: { type: 'string' },
         }, ['action']),
-        execute: (input) => call(ctx, reviewArgs(input)),
+        execute: (input, context) => call(ctx, reviewArgs(input), context),
       })
 
       editor.add({
@@ -351,7 +394,7 @@ export default Plugin.define({
           reason: { type: 'string' },
           as: { type: 'string' },
         }, ['action']),
-        execute: (input) => call(ctx, decisionArgs(input)),
+        execute: (input, context) => call(ctx, decisionArgs(input), context),
       })
 
       editor.add({
@@ -364,7 +407,7 @@ export default Plugin.define({
           example: { type: 'string' },
           as: { type: 'string' },
         }, ['action']),
-        execute: (input) => call(ctx, termArgs(input)),
+        execute: (input, context) => call(ctx, termArgs(input), context),
       })
     })
   },

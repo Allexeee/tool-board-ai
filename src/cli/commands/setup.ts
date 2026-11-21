@@ -1,4 +1,5 @@
 import { findProject } from '../../core/project.ts'
+import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
 import {
   readSettings,
   updateSettings,
@@ -11,11 +12,11 @@ import { boolFlag, numberFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { isJsonMode, ok } from '../output.ts'
 
-function human(settings: BoardSettings): string {
+function human(settings: BoardSettings, effectiveModel: string | null): string {
   const lines = [
     `Ревью spec: ${settings.specReview.mode} (большой spec: ${settings.specReview.largeSpecChars} символов)`,
     `Ревью в конце забега: ${settings.runReview.mode}`,
-    `Модель ревьюера: ${settings.reviewer.model ?? 'не задана'} (default-вариант)`,
+    `Модель ревьюера: ${effectiveModel ?? 'не задана'} (default-вариант)`,
     settings.setupAt
       ? `Мастер настроек: ${settings.setupAt}`
       : 'Мастер настроек ещё не запускался',
@@ -28,6 +29,8 @@ export default async function command(args: ParsedArgs) {
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
 
   const current = readSettings(project.root)
+  const context = modelContext(process.env)
+  const currentReviewer = effectiveReviewerModel(current, context)
   const show = boolFlag(args, 'show')
 
   const reviewAfterRun = boolFlag(args, 'review-after-run')
@@ -49,7 +52,7 @@ export default async function command(args: ParsedArgs) {
   }
 
   if (show || (!specMode && runMode === undefined && largeSpec === undefined && reviewerModel === undefined && !reviewAfterRun && !noReviewAfterRun && isJsonMode())) {
-    ok(current, human(current))
+    ok({ ...current, effectiveReviewerModel: currentReviewer }, human(current, currentReviewer))
     return 0
   }
 
@@ -65,17 +68,19 @@ export default async function command(args: ParsedArgs) {
 
   if (Object.keys(patch).length > 0) {
     const next = updateSettings(project.root, patch)
-    ok(next, human(next))
+    const effective = effectiveReviewerModel(next, context)
+    ok({ ...next, effectiveReviewerModel: effective }, human(next, effective))
     return 0
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    const lines = [human(current), '', 'Запустите в терминале: board setup']
-    ok(current, lines.join('\n'))
+    const lines = [human(current, currentReviewer), '', 'Запустите в терминале: board setup']
+    ok({ ...current, effectiveReviewerModel: currentReviewer }, lines.join('\n'))
     return 0
   }
 
   const next = await runSetupWizard(project.root, current)
-  ok(next, human(next))
+  const effective = effectiveReviewerModel(next, context)
+  ok({ ...next, effectiveReviewerModel: effective }, human(next, effective))
   return 0
 }

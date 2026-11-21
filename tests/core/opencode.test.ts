@@ -36,8 +36,8 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   assert.match(plugin, /board_setup/)
   assert.match(plugin, /name: 'setup'/)
   assert.match(plugin, /'setup', '--show'/)
-  assert.match(plugin, /'setup', '--review-after-run'/)
-  assert.match(plugin, /'setup', '--no-review-after-run'/)
+  assert.match(plugin, /review-after-run/)
+  assert.match(plugin, /no-review-after-run/)
   assert.match(plugin, /board\.ts/)
   assert.match(plugin, /BOARD_CLI/)
   assert.match(plugin, /Plugin\.define/)
@@ -51,6 +51,22 @@ test('команда ревью упоминает review list и review submit'
   assert.match(command, /review list/)
   assert.match(command, /review submit/)
   assert.match(command, /review finding/)
+})
+
+test('плагин передаёт модель сессии в CLI', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /ctx\.session\.get/)
+  assert.match(plugin, /context\.sessionID/)
+  assert.match(plugin, /BOARD_MODEL_VARIANT/)
+  assert.match(plugin, /BOARD_SESSION_MODEL/)
+  assert.match(plugin, /execute: \(input, context\)/)
+  assert.match(plugin, /name: 'setup'/)
+  assert.match(plugin, /reviewer-model/)
+  assert.match(plugin, /spec-review/)
+  assert.match(plugin, /amend/)
+  assert.match(plugin, /plan/)
 })
 
 test('команда setup показывает и переключает ревью после забега', () => {
