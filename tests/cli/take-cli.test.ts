@@ -41,8 +41,12 @@ function repoProject(t: { after: (fn: () => void) => void }): { root: string; ca
   commitGenerated(repo.root)
   const db = openDb(join(repo.root, '.board', 'board.db'))
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
-  editCard(db, { id: card.id, actor: 'owner', patch: { scope: ['src/**'] } })
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    position: 1,
+    scope: ['src/**'],
+  })
   db.close()
   t.after(() => repo.close())
   return { root: repo.root, cardId: card.id }

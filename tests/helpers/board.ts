@@ -62,6 +62,7 @@ export interface SeedCardInput extends Partial<NewCardInput> {
   importance?: number | null
   urgency?: number | null
   position?: number | null
+  scope?: string[]
   waiveDeps?: boolean
   doneAt?: string | null
   inDev?: boolean
@@ -83,6 +84,7 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
     group: input.group ?? 'UI',
     title: input.title ?? 'Тестовая карточка',
     body: input.body,
+    acceptance: input.acceptance,
     skill: input.skill ?? 'dev',
     author: input.author ?? 'owner',
   })
@@ -108,6 +110,10 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
   if (input.position !== undefined) {
     sets.push('position = ?')
     params.push(input.position)
+  }
+  if (input.scope !== undefined) {
+    sets.push('scope = ?')
+    params.push(JSON.stringify(input.scope))
   }
   if (input.waiveDeps !== undefined) {
     sets.push('waive_deps = ?')

@@ -6,6 +6,7 @@ import { ask, answer, listDiscussion, openQuestions } from '../../src/core/discu
 import { listEvents } from '../../src/core/events.ts'
 import { nowIso } from '../../src/core/clock.ts'
 import {
+  amendCard,
   approveCard,
   blockCard,
   cancelCard,
@@ -168,6 +169,50 @@ test('approve обычной карточки ставит её в очеред�
   assert.equal(listEvents(db, card.id).at(-1)!.type, 'card.approved')
 })
 
+test('amend возвращает утверждённый spec в shaping и требует re-approve', (t) => {
+  const { db } = board(t)
+  const card = shapedRequest(t, db)
+  submitCard(db, { id: card.id, actor: 'developer' })
+  approveCard(db, { id: card.id, actor: 'owner' })
+  const before = getCard(db, card.id)!
+
+  const amended = amendCard(db, {
+    id: card.id,
+    actor: 'developer',
+    reason: 'уточнили spec',
+  })
+
+  assert.equal(amended.status, 'shaping')
+  assert.equal(amended.phase, 'request')
+  assert.equal(amended.holder, 'developer')
+  assert.equal(amended.approvedAt, null)
+  assert.equal(amended.position, null)
+  assert.equal(amended.specRev, before.specRev + 1)
+  assert.throws(() => approveCard(db, { id: card.id, actor: 'owner' }), /approval/)
+
+  // После amend spec снова редактируется и проходит обычный путь.
+  editCard(db, {
+    id: card.id,
+    actor: 'developer',
+    patch: { body: 'уточнённый spec', acceptance: ['готово'] },
+  })
+  submitCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(approveCard(db, { id: card.id, actor: 'owner' }).status, 'ready')
+})
+
+test('amend запрещён для карточки в работе', (t) => {
+  const { db } = board(t)
+  const card = shapedRequest(t, db)
+  submitCard(db, { id: card.id, actor: 'developer' })
+  approveCard(db, { id: card.id, actor: 'owner' })
+  db.prepare("update cards set status = 'in_progress' where id = ?").run(card.id)
+
+  assert.throws(
+    () => amendCard(db, { id: card.id, actor: 'developer', reason: 'нельзя' }),
+    /нельзя|status|in_progress/,
+  )
+})
+
 test('approve — только владелец и только из approval', (t) => {
   const { db } = board(t)
   const card = shapedRequest(t, db)
@@ -220,6 +265,8 @@ test('reject возвращает в new, сохраняя содержимое,
   assert.equal(rejected.importance, 2)
   assert.equal(rejected.urgency, 3)
   assert.deepEqual(rejected.scope, ['src/**'])
+  assert.equal(rejected.approvedAt, null)
+  assert.equal(rejected.specRev, 3)
 
   const event = listEvents(db, card.id).at(-1)!
   assert.equal(event.type, 'card.rejected')

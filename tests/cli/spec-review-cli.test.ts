@@ -79,6 +79,34 @@ test('spec review: self проходит, submit и approve открываютс
   assert.equal(shown.specReviewLatest.kind, 'spec')
 })
 
+test('amend после approve сбрасывает spec review и требует новый', (t) => {
+  const { root } = project(t)
+  json(root, ['setup', '--spec-review', 'self'])
+  shaped(root)
+  json(root, ['card', 'spec-review', 'UI-1', '--as', 'developer', '--mode', 'self', '--verdict', 'done'])
+  assert.equal(run(root, ['card', 'submit', 'UI-1', '--as', 'developer']).code, 0)
+  assert.equal(run(root, ['card', 'approve', 'UI-1', '--as', 'owner']).code, 0)
+
+  const locked = run(root, ['card', 'edit', 'UI-1', '--spec', 'новый spec'])
+  assert.equal(locked.code, 3)
+  assert.match(locked.err, /amend|spec/)
+
+  const amended = run(root, [
+    'card', 'amend', 'UI-1',
+    '--as', 'developer',
+    '--reason', 'уточнили spec',
+  ])
+  assert.equal(amended.code, 0, amended.err)
+  assert.equal(json(root, ['card', 'show', 'UI-1']).status, 'shaping')
+
+  const stale = run(root, ['card', 'submit', 'UI-1', '--as', 'developer'])
+  assert.equal(stale.code, 2)
+
+  json(root, ['card', 'spec-review', 'UI-1', '--as', 'developer', '--mode', 'self', '--verdict', 'done'])
+  assert.equal(run(root, ['card', 'submit', 'UI-1', '--as', 'developer']).code, 0)
+  assert.equal(run(root, ['card', 'approve', 'UI-1', '--as', 'owner']).code, 0)
+})
+
 test('auto на Max требует субагента, self не принимается', (t) => {
   const { root } = project(t)
   json(root, [

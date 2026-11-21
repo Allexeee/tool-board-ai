@@ -38,6 +38,9 @@ const BLOCKABLE_TASK: readonly CardStatus[] = ['booked', 'in_progress']
 /** Переоткрытие возвращает карточку в работу из ревью или done. */
 const REOPENABLE: readonly CardStatus[] = ['review', 'done']
 
+/** Amend меняет уже утверждённый spec; в работе и ревью сначала block/reopen. */
+const AMENDABLE: readonly CardStatus[] = ['approval', 'ready', 'waiting', 'blocked']
+
 function requireCard(db: DatabaseSync, id: string): Card {
   const card = getCard(db, id)
   if (!card) throw new UserError(3, `карточка ${id} не найдена`)
@@ -241,7 +244,7 @@ export function rejectCard(
     const at = nowIso()
     db.prepare(
       `update cards set status = 'new', phase = 'request', holder = null, lease_until = null,
-       updated_at = ? where id = ?`,
+       approved_at = null, spec_rev = spec_rev + 1, updated_at = ? where id = ?`,
     ).run(at, card.id)
 
     // Причина отказа остаётся в обсуждении, как требует §10.1.
@@ -250,6 +253,53 @@ export function rejectCard(
     const updated = getCard(db, card.id)!
     appendEvent(db, {
       type: 'card.rejected',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+      note: reason,
+    })
+    return updated
+  })
+}
+
+/**
+ * Изменение утверждённого spec: версия растёт, review сбрасывается, карточка
+ * возвращается в shaping. В работе/ревью сначала block/reopen.
+ */
+export function amendCard(
+  db: DatabaseSync,
+  input: { id: string; actor: string; reason: string },
+): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+    const reason = requireReason(input.reason)
+    if (!AMENDABLE.includes(card.status)) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} нельзя изменить из ${card.status}: сначала block или reopen`,
+      )
+    }
+
+    const now = new Date()
+    const at = now.toISOString()
+    const leaseUntil = new Date(now.getTime() + SHAPING_LEASE_MS).toISOString()
+    db.prepare(
+      `update cards set phase = 'request', status = 'shaping', holder = ?, lease_until = ?,
+       approved_at = null, spec_rev = spec_rev + 1, position = null, shaped_at = ?,
+       updated_at = ? where id = ?`,
+    ).run(actor, leaseUntil, at, at, card.id)
+
+    comment(db, {
+      cardId: card.id,
+      author: actor,
+      text: `spec amendment: ${reason}`,
+    })
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.amended',
       actor,
       subject: card.id,
       before: card,

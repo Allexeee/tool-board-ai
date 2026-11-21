@@ -321,6 +321,16 @@ export function editCard(
 
     const actor = requiredText(input.actor, 'нужен автор изменения')
     const patch = input.patch
+    const touchesSpec =
+      patch.body !== undefined ||
+      patch.acceptance !== undefined ||
+      patch.scope !== undefined
+    if (touchesSpec && card.status !== 'new' && card.status !== 'shaping') {
+      throw new UserError(
+        3,
+        `spec карточки ${card.id} утверждён: используйте board card amend`,
+      )
+    }
     const sets: string[] = []
     const params: (string | number | null)[] = []
     let specChanged = false

@@ -6,6 +6,7 @@ import { addDep, isSatisfied, listDeps, removeDep } from '../../core/deps.ts'
 import { listDiscussion, type Discussion } from '../../core/discussion.ts'
 import { listEvents, type EventRecord } from '../../core/events.ts'
 import {
+  amendCard,
   applyShapeFile,
   approveCard,
   cancelCard,
@@ -411,6 +412,21 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const amend = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) {
+      throw new UserError(3, 'использование: board card amend UI-1 --as developer --reason «...»')
+    }
+    const actor = stringFlag(args, 'as')
+    if (!actor) throw new UserError(3, 'нужен --as <исполнитель>')
+    const reason = stringFlag(args, 'reason')
+    if (!reason) throw new UserError(3, 'нужна причина: --reason «...»')
+
+    const card = amendCard(db, { id, actor, reason })
+    ok(card, `${card.id} снова в разборе: spec_rev ${card.specRev}`)
+    return 0
+  }
+
   const done = (args: ParsedArgs): number => {
     const id = args.positionals[0]
     if (!id) throw new UserError(3, 'использование: board card done UI-9 --summary «...»')
@@ -495,6 +511,7 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'submit') return submit(args)
     if (args.sub === 'spec-review') return specReview(args)
     if (args.sub === 'approve') return approve(args)
+    if (args.sub === 'amend') return amend(args)
     if (args.sub === 'reject') return reject(args)
     if (args.sub === 'verdict') return verdict(args)
     if (args.sub === 'done') return done(args)
@@ -502,7 +519,7 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'reopen') return reopen(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|reject|verdict|done|cancel|reopen',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen',
     )
   } finally {
     db.close()

@@ -41,8 +41,7 @@ function taken(
   db: DatabaseSync,
   scope: string[] = ['src/**'],
 ): { cardId: string; branch: string; worktree: string } {
-  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
-  editCard(db, { id: card.id, actor: 'owner', patch: { scope } })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1, scope })
   startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
   takeCard(db, { id: card.id, actor: 'developer', root })
   return {

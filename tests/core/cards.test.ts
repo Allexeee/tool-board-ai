@@ -166,7 +166,7 @@ test('spec и acceptance сохраняются, specRev растёт при п�
   assert.equal(withScope.specRev, 3)
 })
 
-test('после submit навык неизменяем, остальные поля меняются', (t) => {
+test('после submit spec locked, остальные поля меняются', (t) => {
   const { db, close } = makeBoard()
   t.after(close)
 
@@ -181,11 +181,23 @@ test('после submit навык неизменяем, остальные по
   const edited = editCard(db, {
     id: card.id,
     actor: 'owner',
-    patch: { title: 'Форма', importance: 2, body: 'уточнил' },
+    patch: { title: 'Форма', importance: 2 },
   })
   assert.equal(edited.title, 'Форма')
   assert.equal(edited.importance, 2)
 
+  assert.throws(
+    () => editCard(db, { id: card.id, actor: 'owner', patch: { body: 'уточнил' } }),
+    /amend|spec/,
+  )
+  assert.throws(
+    () => editCard(db, { id: card.id, actor: 'owner', patch: { acceptance: ['x'] } }),
+    /amend|spec/,
+  )
+  assert.throws(
+    () => editCard(db, { id: card.id, actor: 'owner', patch: { scope: ['src/**'] } }),
+    /amend|spec/,
+  )
   assert.throws(
     () => editCard(db, { id: card.id, actor: 'owner', patch: { skill: 'marketer' } }),
     /навык/,
