@@ -541,6 +541,7 @@ export function resumeAfterAnswer(db: DatabaseSync, cardId: string, actor: strin
     db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(status, at, cardId)
 
     const updated = getCard(db, cardId)!
+    if (updated.phase === 'task' && updated.position === null) insertIntoQueue(db, cardId)
     appendEvent(db, {
       type: 'card.resumed',
       actor: actorName,
