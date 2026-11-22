@@ -223,6 +223,25 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-work'), /Приступаю/)
 })
 
+test('отчёт: шесть моментов и запрет отчёта по вызовам инструментов', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const read = (name: string) =>
+    readFileSync(join(root, '.opencode', 'skills', name, 'SKILL.md'), 'utf8')
+
+  const report = `${read('board-work')}\n${read('board-run')}`
+  assert.match(report, /Беру в работу/)
+  assert.match(report, /Разобрал/)
+  assert.match(report, /Приступаю/)
+  assert.match(report, /Сдал/)
+  assert.match(report, /Снял/)
+  assert.match(report, /Забег закрыт/)
+
+  for (const name of ['board-work', 'board-run']) {
+    assert.match(read(name), /о каждом вызове инструмента не отчитываться/)
+  }
+})
+
 test('refresh удаляет старый единый навык board', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
