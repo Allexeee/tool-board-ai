@@ -29,12 +29,11 @@ export interface NowFilters {
   all?: boolean
 }
 
-/** Задачи одного агента: что на руках и что доступно по его навыкам. */
+/** Карточки одного агента: запрос и задача — одна карточка с разным статусом. */
 export interface NowAgentTasks {
   id: string
   skills: string[]
-  current: Card[]
-  queue: Card[]
+  cards: Card[]
 }
 
 export interface NowProbableCard {
@@ -53,7 +52,7 @@ export interface NowView {
   header: NowHeader
   executor?: string
   skills?: string[]
-  current?: Card[]
+  cards?: Card[]
   queue?: Card[]
   probableRuns?: NowProbableRun[]
   untagged?: number
@@ -92,11 +91,16 @@ const OPEN_QUEUE_STATUSES: readonly CardStatus[] = ['ready', 'waiting']
 /** Запросы, которые ещё открыты: отменённые и закрытые не показываем. */
 const OPEN_REQUEST_STATUSES: readonly CardStatus[] = ['new', 'shaping', 'blocked']
 
-const CURRENT_ORDER: Record<string, number> = {
+/** Порядок карточек в едином списке: сначала в работе/ревью, затем доступные. */
+const CARD_ORDER: Record<string, number> = {
   in_progress: 0,
   review: 1,
   blocked: 2,
   booked: 3,
+  ready: 4,
+  waiting: 5,
+  new: 6,
+  shaping: 7,
 }
 
 /**
@@ -160,16 +164,19 @@ function agentView(
   db: DatabaseSync,
   executorId: string,
   filters: NowFilters,
-): Pick<
-  NowView,
-  'executor' | 'skills' | 'current' | 'queue' | 'probableRuns' | 'untagged'
-> {
+): Pick<NowView, 'executor' | 'skills' | 'cards' | 'probableRuns' | 'untagged'> {
   const executor = getExecutor(db, executorId)
   const skills = executor?.skills ?? []
   if (executorId === OWNER) {
-    return { executor: executorId, skills, current: [], queue: [], probableRuns: [], untagged: 0 }
+    return {
+      executor: executorId,
+      skills,
+      cards: [],
+      probableRuns: [],
+      untagged: 0,
+    }
   }
-  const tasks = tasksFor(db, executorId, skills, filters)
+  const cards = cardsForAgent(db, executor, filters)
   const probableRuns = suggestVariantRuns(db, executorId, {
     group: filters.group,
     skill: filters.skill,
@@ -178,10 +185,8 @@ function agentView(
     label: run.label ?? '',
     cards: run.cards.map((card) => ({ card, request: card.phase === 'request' })),
   }))
-  const untagged = [...tasks.current, ...tasks.queue].filter(
-    (card) => variantOf(card) === null,
-  ).length
-  return { executor: executorId, skills, ...tasks, probableRuns, untagged }
+  const untagged = cards.filter((card) => variantOf(card) === null).length
+  return { executor: executorId, skills, cards, probableRuns, untagged }
 }
 
 /** Вкладка «задачи по агентам» §11.4: по блоку на каждого другого исполнителя. */
@@ -193,50 +198,68 @@ function allAgentsView(
   const executors: NowAgentTasks[] = []
   for (const executor of listExecutors(db)) {
     if (executor.id === OWNER || executor.id === executorId) continue
-    const tasks = tasksFor(db, executor.id, executor.skills, filters)
-    if (tasks.current.length === 0 && tasks.queue.length === 0) continue
-    executors.push({ id: executor.id, skills: executor.skills, ...tasks })
+    const cards = cardsForAgent(db, executor, filters)
+    if (cards.length === 0) continue
+    executors.push({ id: executor.id, skills: executor.skills, cards })
   }
   return { executors }
 }
 
-/** Карточки на руках и доступная очередь: общий отбор для now 1 и now 2. */
-function tasksFor(
+/**
+ * Единый список карточек агента: на руках, задача в очереди и запрос.
+ * Запрос и задача — одна карточка с разным статусом.
+ */
+function cardsForAgent(
   db: DatabaseSync,
-  holder: string,
-  skills: string[],
+  executor: ReturnType<typeof getExecutor>,
   filters: NowFilters,
-): Pick<NowAgentTasks, 'current' | 'queue'> {
+): Card[] {
+  if (!executor) return []
+  const skills = executor.skills
+
   const current = listCards(db, {
     phase: 'task',
     status: [...CURRENT_STATUSES],
-    holder,
+    holder: executor.id,
     group: filters.group,
     skill: filters.skill,
-  }).sort(byCurrentOrder)
+  })
 
   const queue = listCards(db, {
     phase: 'task',
     status: [...OPEN_QUEUE_STATUSES],
     group: filters.group,
     skill: filters.skill,
-  })
-    .filter(
-      (card) =>
-        card.holder === null &&
-        card.position !== null &&
-        card.skill !== null &&
-        skills.includes(card.skill),
-    )
-    .sort(byPosition)
+  }).filter(
+    (card) =>
+      card.holder === null &&
+      card.position !== null &&
+      card.skill !== null &&
+      skills.includes(card.skill),
+  )
 
-  return { current, queue }
+  const requests = listCards(db, {
+    phase: 'request',
+    status: [...OPEN_REQUEST_STATUSES],
+    group: filters.group,
+    skill: filters.skill,
+  }).filter(
+    (card) =>
+      card.skill !== null &&
+      skills.includes(card.skill) &&
+      (card.holder === null || card.holder === executor.id),
+  )
+
+  const byId = new Map<string, Card>()
+  for (const card of [...current, ...queue, ...requests]) byId.set(card.id, card)
+  return [...byId.values()].sort(byCardOrder)
 }
 
-function byCurrentOrder(left: Card, right: Card): number {
+function byCardOrder(left: Card, right: Card): number {
   return (
-    (CURRENT_ORDER[left.status] ?? 9) - (CURRENT_ORDER[right.status] ?? 9) ||
+    (CARD_ORDER[left.status] ?? 9) - (CARD_ORDER[right.status] ?? 9) ||
     (left.position ?? 0) - (right.position ?? 0) ||
+    left.createdAt.localeCompare(right.createdAt) ||
     left.id.localeCompare(right.id)
   )
 }
@@ -302,7 +325,7 @@ const VIEW_TITLES: Record<NowViewKind, string> = {
 }
 
 const STATUS_WORDS: Record<CardStatus, string> = {
-  new: 'new',
+  new: 'новая',
   shaping: 'разбор',
   approval: 'на утверждении',
   waiting: 'ждёт',
@@ -367,7 +390,7 @@ function renderAgentTasks(lines: string[], data: NowView, painter: Painter): voi
     lines.push('владельцу — now 0')
     return
   }
-  renderTaskSections(lines, data.current ?? [], data.queue ?? [], painter)
+  renderCards(lines, data.cards ?? [], painter)
   renderProbableRuns(lines, data, painter)
 }
 
@@ -394,31 +417,22 @@ function renderAllTasks(lines: string[], data: NowView, painter: Painter): void 
   }
   for (const executor of executors) {
     lines.push('', painter(executor.id, agentColor(executor.id)))
-    renderTaskSections(lines, executor.current, executor.queue, painter)
+    renderCards(lines, executor.cards, painter)
   }
 }
 
-function renderTaskSections(
-  lines: string[],
-  current: Card[],
-  queue: Card[],
-  painter: Painter,
-): void {
-  if (current.length > 0) {
-    lines.push(`НА РУКАХ (${current.length})`)
-    for (const card of current) lines.push(cardLine(card, painter, false))
+function renderCards(lines: string[], cards: Card[], painter: Painter): void {
+  if (cards.length === 0) {
+    lines.push('карточек нет')
+    return
   }
-  if (queue.length > 0) {
-    lines.push(`ОЧЕРЕДЬ (${queue.length})`)
-    for (const card of queue) lines.push(cardLine(card, painter, true))
-  }
-  if (current.length === 0 && queue.length === 0) lines.push('задач нет')
+  lines.push(`КАРТОЧКИ (${cards.length})`)
+  for (const card of cards) lines.push(cardLine(card, painter))
 }
 
-function cardLine(card: Card, painter: Painter, withPosition: boolean): string {
+function cardLine(card: Card, painter: Painter): string {
   const status = painter(STATUS_WORDS[card.status], STATUS_COLORS[card.status] ?? 'gray')
-  const prefix = withPosition ? `  ${String(card.position ?? 0).padStart(2)}  ` : '  '
-  return `${prefix}${card.id.padEnd(7)} ${card.title}  ${status}`
+  return `  ${card.id.padEnd(7)} ${card.title}  ${status}`
 }
 
 function renderOpen(lines: string[], data: NowView, painter: Painter): void {
