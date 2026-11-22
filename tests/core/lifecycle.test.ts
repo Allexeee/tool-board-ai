@@ -739,3 +739,25 @@ test('defer/resume проверяют держателя и навык', (t) => 
   assert.throws(() => resumeCard(db, { id: card.id, actor: 'ui' }), /не подходит исполнителю/)
   assert.equal(resumeCard(db, { id: card.id, actor: 'owner' }).status, 'approval')
 })
+
+test('одна карточка в работе на держателя держится при смешении забега и одиночного take', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const standalone = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const inRun = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+  editCard(db, { id: standalone.id, actor: 'owner', patch: { needsMerge: false } })
+  editCard(db, { id: inRun.id, actor: 'owner', patch: { needsMerge: false } })
+
+  takeCard(db, { id: standalone.id, actor: 'developer', root: '' })
+  startRun(db, { executorId: 'developer', cardIds: [inRun.id], actor: 'developer' })
+
+  assert.throws(
+    () => takeCard(db, { id: inRun.id, actor: 'developer', root: '' }),
+    /уже есть карточка в работе/,
+  )
+  assert.equal(getCard(db, inRun.id)!.status, 'booked')
+
+  finishCard(db, { id: standalone.id, actor: 'developer', summary: 'готово', root: '' })
+  const taken = takeCard(db, { id: inRun.id, actor: 'developer', root: '' })
+  assert.equal(taken.status, 'in_progress')
+})
