@@ -1,7 +1,7 @@
 <!-- board:begin -->
 ## board
 
-Доска карточек: `board` (если CLI в PATH); в плагине OpenCode — `BOARD_CLI`.
+Доска карточек: локальный `tools/board/bin/board.ts`; `BOARD_CLI` — только отладочный override.
 
 - Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.
 - Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.
