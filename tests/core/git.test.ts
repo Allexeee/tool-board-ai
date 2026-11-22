@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { getCard } from '../../src/core/cards.ts'
 import {
   ensureWorktree,
+  findLocalBoardCli,
+  isBoardSourceRepo,
   isAncestor,
   isRepo,
   mergeCommitFor,
@@ -255,4 +257,34 @@ test('mergeCommitFor РЅР°С…РѕРґРёС‚ merge-РєРѕРјРјРёС‚ СЃРІРѕРµР№ РІРµС‚РєРё РїС
   assert.notEqual(mergeA, mergeB)
   assert.equal(mergeCommitFor(root, branchA), mergeA)
   assert.equal(mergeCommitFor(root, branchB), mergeB)
+})
+
+test('findLocalBoardCli находит tools/board и не путает чужой bin', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+
+  mkdirSync(join(repo.root, 'tools', 'board', 'bin'), { recursive: true })
+  writeFileSync(join(repo.root, 'tools', 'board', 'bin', 'board.ts'), '')
+  assert.match(findLocalBoardCli(repo.root)!, /tools[\\/]board[\\/]bin[\\/]board\.ts$/)
+  assert.equal(isBoardSourceRepo(repo.root), false)
+
+  const other = makeRepo()
+  t.after(other.close)
+  mkdirSync(join(other.root, 'bin'), { recursive: true })
+  writeFileSync(join(other.root, 'bin', 'board.ts'), '')
+  assert.equal(findLocalBoardCli(other.root), null)
+})
+
+test('isBoardSourceRepo узнаёт репозиторий board', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+
+  mkdirSync(join(repo.root, 'bin'), { recursive: true })
+  mkdirSync(join(repo.root, 'src', 'core'), { recursive: true })
+  writeFileSync(join(repo.root, 'package.json'), JSON.stringify({ name: 'tool-board-ai' }))
+  writeFileSync(join(repo.root, 'bin', 'board.ts'), '')
+  writeFileSync(join(repo.root, 'src', 'core', 'now.ts'), '')
+
+  assert.equal(isBoardSourceRepo(repo.root), true)
+  assert.match(findLocalBoardCli(repo.root)!, /bin[\\/]board\.ts$/)
 })

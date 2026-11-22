@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
@@ -44,6 +44,30 @@ export function isRepo(dir: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Репозиторий самого board: имя пакета и собственные bin/ + src/core/now.ts.
+ * Нужен, чтобы `init` не добавлял репозиторий сам себе submodule.
+ */
+export function isBoardSourceRepo(root: string): boolean {
+  const pkg = join(root, 'package.json')
+  if (!existsSync(pkg) || !existsSync(join(root, 'bin', 'board.ts'))) return false
+  if (!existsSync(join(root, 'src', 'core', 'now.ts'))) return false
+  try {
+    const parsed = JSON.parse(readFileSync(pkg, 'utf8')) as { name?: unknown }
+    return parsed.name === 'tool-board-ai'
+  } catch {
+    return false
+  }
+}
+
+/** Локальный CLI проекта: tools/board, затем bin/board.ts у самого board. */
+export function findLocalBoardCli(root: string): string | null {
+  const vendored = join(root, 'tools', 'board', 'bin', 'board.ts')
+  if (existsSync(vendored)) return vendored
+  if (isBoardSourceRepo(root)) return join(root, 'bin', 'board.ts')
+  return null
 }
 
 /** Ветки фиксированы: `main` и `dev` (§7.1). */
