@@ -157,10 +157,10 @@ test('card add с оценками ставит запрос по приорит
 
   run(dir, ['card', 'edit', high.id, '--importance', '1', '--urgency', '1'])
   run(dir, ['card', 'edit', low.id, '--importance', '3', '--urgency', '3'])
+  run(dir, ['queue', 'reorder'])
 
-  const reordered = json(dir, ['queue', 'reorder']) as Array<{ id: string; position: number }>
-  const order = reordered
-    .filter((card) => card.id === high.id || card.id === low.id)
-    .map((card) => card.id)
-  assert.deepEqual(order, [low.id, high.id])
+  const lowAfter = json(dir, ['card', 'show', low.id]) as { position: number }
+  const highAfter = json(dir, ['card', 'show', high.id]) as { position: number }
+  assert.equal(lowAfter.position, 1)
+  assert.equal(highAfter.position, 2)
 })
