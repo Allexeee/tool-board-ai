@@ -380,8 +380,9 @@ export function blockCard(
     const note = input.note?.trim() || null
     const at = nowIso()
     db.prepare(
-      `update cards set status = 'blocked', holder = null, run_id = null, lease_until = null,
-       updated_at = ? where id = ?`,
+      `update cards set status = 'blocked', holder = null,
+       run_id = case when phase = 'request' then run_id else null end,
+       lease_until = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
 
     // Карточка остаётся в забеге с пометкой blocked (§8.3): `run next` её

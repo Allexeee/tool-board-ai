@@ -19,8 +19,9 @@ import {
   suggestVariantRuns,
   startRun,
 } from '../../src/core/runs.ts'
-import { finishCard } from '../../src/core/lifecycle.ts'
+import { blockCard, finishCard, resumeAfterAnswer } from '../../src/core/lifecycle.ts'
 import { submitVerdict } from '../../src/core/review.ts'
+import { ask, answer } from '../../src/core/discussion.ts'
 import type { Card, CardStatus } from '../../src/core/types.ts'
 import { makeBoard, seedCard, seedExecutor, seedRun } from '../helpers/board.ts'
 
@@ -245,7 +246,7 @@ test('startRun проверяет навык, статус, доступност
     /навык/,
   )
 
-  const request = seedCard(db, { phase: 'request', status: 'new', position: 2 })
+  const request = seedCard(db, { phase: 'request', status: 'done', position: 2 })
   assert.throws(
     () => startRun(db, { executorId: 'developer', cardIds: [request.id], actor: 'developer' }),
     /запрос/,
@@ -772,4 +773,49 @@ test('suggestVariantRuns не берёт waiting с внешней зависи�
 
   const runs = suggestVariantRuns(db, 'dev')
   assert.equal(runs.some((run) => run.cards.some((card) => card.id === waiting.id)), false)
+})
+
+test('startRun принимает запрос как planned и заполняет run_id', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'] })
+  const req = seedCard(db, { phase: 'request', status: 'new', tags: ['new'] })
+
+  const run = startRun(db, { executorId: 'dev', cardIds: [req.id], actor: 'dev' })
+  const card = getCard(db, req.id)!
+  assert.equal(card.status, 'new')
+  assert.equal(card.runId, run.id)
+  assert.equal(listRunCards(db, run.id)[0].status, 'planned')
+  assert.equal(nextCard(db, { executorId: 'dev' })?.id, req.id)
+})
+
+test('block и ответ возвращают planned-запрос в run next', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'] })
+  const req = seedCard(db, { phase: 'request', status: 'new' })
+  const run = startRun(db, { executorId: 'dev', cardIds: [req.id], actor: 'dev' })
+
+  const question = ask(db, { cardId: req.id, author: 'dev', text: '?' })
+  blockCard(db, { id: req.id, actor: 'dev', reason: 'needs_decision' })
+  assert.equal(listRunCards(db, run.id)[0].status, 'blocked')
+  assert.equal(nextCard(db, { executorId: 'dev' }), null)
+
+  answer(db, { cardId: req.id, questionId: question.id, actor: 'owner', text: 'ok' })
+  resumeAfterAnswer(db, req.id, 'owner')
+  assert.equal(nextCard(db, { executorId: 'dev' })?.id, req.id)
+})
+
+test('endRun возвращает planned в request и очищает run_id', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'] })
+  const req = seedCard(db, { phase: 'request', status: 'new' })
+  const run = startRun(db, { executorId: 'dev', cardIds: [req.id], actor: 'dev' })
+
+  endRun(db, { executorId: 'dev', actor: 'dev', review: false })
+  const card = getCard(db, req.id)!
+  assert.equal(card.status, 'new')
+  assert.equal(card.runId, null)
+  assert.equal(listRunCards(db, run.id)[0].status, 'dropped')
 })

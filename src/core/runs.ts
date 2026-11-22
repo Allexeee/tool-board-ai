@@ -4,6 +4,7 @@ import { getCard, listCards } from './cards.ts'
 import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { isSatisfied, listDeps } from './deps.ts'
+import { openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
 import { allocateId } from './ids.ts'
@@ -24,6 +25,7 @@ const OWNER = 'owner'
 
 /** Карточки, которые ещё держат место в забеге. */
 const ACTIVE_CARD_STATUSES: readonly RunCardStatus[] = [
+  'planned',
   'booked',
   'in_progress',
   'blocked',
@@ -146,6 +148,27 @@ function requireRunnableCard(db: DatabaseSync, executor: Executor, cardId: strin
       `карточка ${card.id} — owner-карточка: в забег не берётся, её закрывает владелец`,
     )
   }
+  if (card.phase === 'request') {
+    if (card.status !== 'new' && card.status !== 'shaping') {
+      throw new UserError(
+        3,
+        `запрос ${card.id} в статусе ${card.status}: в забег берётся new или shaping`,
+      )
+    }
+    if (card.holder !== null && card.holder !== executor.id) {
+      throw new UserError(3, `запрос ${card.id} разбирает другой исполнитель: ${card.holder}`)
+    }
+    if (card.runId !== null) {
+      throw new UserError(3, `запрос ${card.id} уже в забеге ${card.runId}`)
+    }
+    if (!canTake(executor, card)) {
+      throw new UserError(
+        3,
+        `навык запроса ${card.id} (${card.skill ?? '-'}) не подходит исполнителю ${executor.id}`,
+      )
+    }
+    return card
+  }
   if (card.phase !== 'task') {
     throw new UserError(3, `карточка ${card.id} — запрос: в забег берутся только задачи`)
   }
@@ -208,6 +231,36 @@ function bookCard(
     before: card,
     after: getCard(db, card.id),
     note: `забег ${run.id}`,
+  })
+}
+
+/** Запрос в забеге: planned, фаза/статус/держатель не меняются. */
+function planCard(
+  db: DatabaseSync,
+  run: Run,
+  card: Card,
+  position: number,
+  actor: string,
+): void {
+  const updatedAt = nowIso()
+  db.prepare('update cards set run_id = ?, updated_at = ? where id = ?').run(
+    run.id,
+    updatedAt,
+    card.id,
+  )
+
+  db.prepare(
+    `insert into run_cards (run_id, card_id, position, status) values (?, ?, ?, 'planned')
+     on conflict(run_id, card_id) do update set position = excluded.position, status = excluded.status`,
+  ).run(run.id, card.id, position)
+
+  appendEvent(db, {
+    type: 'card.planned',
+    actor,
+    subject: card.id,
+    before: card,
+    after: getCard(db, card.id),
+    note: `забег ${run.id}: запрос разбирается первым`,
   })
 }
 
@@ -281,6 +334,15 @@ function releaseRunCards(
   for (const row of listRunCards(db, run.id)) {
     const card = getCard(db, row.cardId)
     if (!card) continue
+
+    if (row.status === 'planned') {
+      db.prepare('update cards set run_id = null, updated_at = ? where id = ?').run(nowIso(), card.id)
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        run.id,
+        row.cardId,
+      )
+      continue
+    }
 
     if (row.status === 'blocked' || card.status === 'blocked') {
       detachBlockedCard(db, card, actor, `${reason}: заблокирована`)
@@ -517,7 +579,10 @@ export function startRun(
       run.note,
     )
 
-    cards.forEach((card, index) => bookCard(db, run, card, index + 1, actor))
+    cards.forEach((card, index) => {
+      if (card.phase === 'request') planCard(db, run, card, index + 1, actor)
+      else bookCard(db, run, card, index + 1, actor)
+    })
 
     appendEvent(db, {
       type: 'run.started',
@@ -566,7 +631,8 @@ export function addToRun(
 
     const position =
       active.reduce((max, row) => Math.max(max, row.position), 0) + 1
-    bookCard(db, run, card, position, actor)
+    if (card.phase === 'request') planCard(db, run, card, position, actor)
+    else bookCard(db, run, card, position, actor)
   })
 }
 
@@ -595,6 +661,25 @@ export function dropFromRun(
         `карточка ${card.id} в работе: сначала finish или block`,
       )
     }
+    if (row.status === 'planned') {
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        run.id,
+        card.id,
+      )
+      db.prepare('update cards set run_id = null, updated_at = ? where id = ?').run(
+        nowIso(),
+        card.id,
+      )
+      appendEvent(db, {
+        type: 'card.planned_dropped',
+        actor,
+        subject: card.id,
+        before: card,
+        after: getCard(db, card.id),
+        note: `снят с забега ${run.id}`,
+      })
+      return
+    }
     if (row.status !== 'booked' || card.status !== 'booked') {
       throw new UserError(3, `карточка ${card.id} не забронирована в ${run.id}`)
     }
@@ -619,6 +704,21 @@ export function nextCard(
   if (!run) return null
 
   const rows = listRunCards(db, run.id)
+
+  for (const row of rows) {
+    if (row.status !== 'planned' && row.status !== 'blocked') continue
+    const card = getCard(db, row.cardId)
+    if (!card || card.phase !== 'request' || card.runId !== run.id) continue
+    if (card.status === 'blocked' || openQuestions(db, card.id).length > 0) continue
+    if (row.status === 'blocked') {
+      db.prepare("update run_cards set status = 'planned' where run_id = ? and card_id = ?").run(
+        run.id,
+        card.id,
+      )
+    }
+    return card
+  }
+
   for (const row of rows) {
     if (row.status !== 'booked') continue
 

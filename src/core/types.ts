@@ -21,6 +21,7 @@ export type RunStatus = 'active' | 'ended' | 'cancelled' | 'lease_expired'
 export type RunReviewMode = 'none' | 'self' | 'subagent'
 
 export type RunCardStatus =
+  | 'planned'
   | 'booked'
   | 'in_progress'
   | 'blocked'
