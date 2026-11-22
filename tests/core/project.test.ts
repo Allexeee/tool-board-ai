@@ -55,7 +55,7 @@ test('makeBoard создаёт базу со всеми таблицами сх�
   const version = fixture.db.prepare("select value from meta where key = 'schemaVersion'").get() as
     | { value: string }
     | undefined
-  assert.equal(version?.value, '2')
+  assert.equal(version?.value, '3')
   assert.equal(fixture.db.prepare('pragma foreign_keys').get()?.foreign_keys, 1)
 })
 
