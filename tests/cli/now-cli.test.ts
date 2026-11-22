@@ -89,14 +89,15 @@ test('now 1 --json: только задачи указанного агента,
   seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
   seedCard(db, { phase: 'task', status: 'ready', position: 1, skill: 'dev' })
   seedCard(db, { phase: 'task', status: 'ready', position: 2, skill: 'marketing', group: 'IM' })
+  seedCard(db, { phase: 'request', status: 'new', skill: 'dev', title: 'Запрос dev' })
   db.close()
 
   const data = json(dir, ['now', '1', '--as', 'developer'])
   assert.equal(data.view, 1)
   assert.equal(data.executor, 'developer')
   assert.deepEqual(data.skills, ['dev'])
-  assert.equal(data.current.length, 1)
-  assert.equal(data.queue.length, 1)
+  assert.equal(data.cards.length, 3)
+  assert.ok(data.cards.some((card: { title: string }) => card.title === 'Запрос dev'))
   assert.ok(Array.isArray(data.probableRuns))
   assert.equal(typeof data.untagged, 'number')
   assert.equal(data.suggestions, undefined)
@@ -118,8 +119,8 @@ test('now 2 --json: по блоку на агента', (t) => {
   assert.equal(data.view, 2)
   assert.deepEqual(data.executors.map((item: { id: string }) => item.id), ['marketer'])
   assert.equal(
-    data.executors.some((item: { current: Array<{ id: string }> }) =>
-      item.current.some((card) => card.id === devCard.id),
+    data.executors.some((item: { cards: Array<{ id: string }> }) =>
+      item.cards.some((card) => card.id === devCard.id),
     ),
     false,
   )
