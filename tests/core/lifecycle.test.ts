@@ -778,3 +778,27 @@ test('после ответа на вопрос resume задачи возвра
   assert.equal(resumed.status, 'ready')
   assert.ok(resumed.position)
 })
+
+test('продвижение запроса правилом забега фиксирует approved_at', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const request = seedCard(db, { phase: 'request', status: 'new' })
+  startRun(db, { executorId: 'developer', cardIds: [request.id], actor: 'developer' })
+  editCard(db, { id: request.id, actor: 'owner', patch: { needsMerge: false } })
+
+  takeCard(db, { id: request.id, actor: 'developer', root: '' })
+  editCard(db, {
+    id: request.id,
+    actor: 'developer',
+    patch: { body: 'spec', acceptance: ['ok'], importance: 2, urgency: 2, scope: ['src/**'] },
+  })
+
+  const promoted = takeCard(db, { id: request.id, actor: 'developer', root: '' })
+  assert.equal(promoted.status, 'in_progress')
+  assert.ok(promoted.approvedAt)
+
+  blockCard(db, { id: request.id, actor: 'developer', reason: 'needs_decision', note: '?' })
+  deferCard(db, { id: request.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: request.id, actor: 'developer' })
+  assert.equal(resumed.status, 'ready')
+})
