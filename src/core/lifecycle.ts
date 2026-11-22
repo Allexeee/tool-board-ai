@@ -194,7 +194,7 @@ export function submitCard(
     const at = nowIso()
     db.prepare(
       `update cards set phase = 'task', status = 'approval', holder = null, lease_until = null,
-       updated_at = ? where id = ?`,
+       position = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
 
     const updated = getCard(db, card.id)!
@@ -275,7 +275,7 @@ export function rejectCard(
     const at = nowIso()
     db.prepare(
       `update cards set status = 'new', phase = 'request', holder = null, lease_until = null,
-       approved_at = null, spec_rev = spec_rev + 1, updated_at = ? where id = ?`,
+       approved_at = null, spec_rev = spec_rev + 1, position = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
 
     // Причина отказа остаётся в обсуждении, как требует §10.1.
@@ -413,7 +413,7 @@ export function blockCard(
     const note = input.note?.trim() || null
     const at = nowIso()
     db.prepare(
-      `update cards set status = 'blocked', holder = null,
+      `update cards set status = 'blocked', holder = null, position = null,
        run_id = case when phase = 'request' then run_id else null end,
        lease_until = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
@@ -658,10 +658,12 @@ export function resumeAfterAnswer(db: DatabaseSync, cardId: string, actor: strin
     const status = card.phase === 'request' ? 'new' : ready ? 'ready' : 'waiting'
     const at = nowIso()
 
-    db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(status, at, cardId)
+    db.prepare(
+      'update cards set status = ?, position = null, updated_at = ? where id = ?',
+    ).run(status, at, cardId)
+    insertIntoQueue(db, cardId)
 
     const updated = getCard(db, cardId)!
-    if (updated.phase === 'task' && updated.position === null) insertIntoQueue(db, cardId)
     appendEvent(db, {
       type: 'card.resumed',
       actor: actorName,
