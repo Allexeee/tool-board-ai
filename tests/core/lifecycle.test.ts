@@ -584,6 +584,48 @@ test('cancelCard с waiveDeps открывает waiting зависимого, �
   assert.equal(listRunCards(db, run.id).find((r) => r.cardId === bookedDep.id)!.status, 'dropped')
 })
 
+test('take без забега: карточка в работе, finish закрывает, следующий take работает', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const first = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const second = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+  editCard(db, { id: first.id, actor: 'owner', patch: { needsMerge: false } })
+  editCard(db, { id: second.id, actor: 'owner', patch: { needsMerge: false } })
+
+  const taken = takeCard(db, { id: first.id, actor: 'developer', root: '' })
+  assert.equal(taken.status, 'in_progress')
+  assert.equal(taken.holder, 'developer')
+  assert.equal(taken.runId, null)
+  assert.ok(taken.leaseUntil)
+
+  assert.throws(
+    () => takeCard(db, { id: second.id, actor: 'developer', root: '' }),
+    /уже есть карточка в работе/,
+  )
+
+  const finished = finishCard(db, { id: first.id, actor: 'developer', summary: 'готово', root: '' })
+  assert.equal(finished.status, 'done')
+  assert.equal(listRunCards(db, 'RUN-1').length, 0)
+
+  const next = takeCard(db, { id: second.id, actor: 'developer', root: '' })
+  assert.equal(next.status, 'in_progress')
+  assert.equal(next.runId, null)
+})
+
+test('take без забега не берёт карточку с открытой зависимостью', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const origin = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const dependent = seedCard(db, { phase: 'task', status: 'waiting', position: 2 })
+  editCard(db, { id: dependent.id, actor: 'owner', patch: { needsMerge: false } })
+  addDep(db, dependent.id, origin.id, 'owner', 'нужен сначала origin')
+
+  assert.throws(
+    () => takeCard(db, { id: dependent.id, actor: 'developer', root: '' }),
+    /не закрыта/,
+  )
+})
+
 test('cancelCard на карточке в in_progress помечает run_cards dropped и позволяет завершить забег', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })

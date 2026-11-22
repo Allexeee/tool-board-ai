@@ -21,7 +21,7 @@ import {
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
-import { getActiveRun, listRunCards, RUN_LEASE_MS } from './runs.ts'
+import { getActiveRun, listRunCards, requireStandaloneCard, RUN_LEASE_MS, type Run } from './runs.ts'
 import { assertSpecReview, type SpecReviewGate } from './spec-review.ts'
 import type { Card, CardStatus } from './types.ts'
 
@@ -691,6 +691,12 @@ export function takeCard(db: DatabaseSync, input: { id: string; actor: string; r
 
     if (card.phase === 'request') return takeRequest(db, card, actor, input.root)
 
+    // Одиночная карточка: без брони и забега, если она готова к работе.
+    if (card.status === 'ready' || card.status === 'waiting') {
+      const standalone = requireStandaloneCard(db, actor, card.id)
+      return startWork(db, standalone, actor, input.root, null)
+    }
+
     if (card.status !== 'booked') {
       throw new UserError(3, `карточка ${card.id} не забронирована: ${card.status}`)
     }
@@ -769,17 +775,31 @@ function startWork(
   card: Card,
   actor: string,
   root: string,
-  run: NonNullable<ReturnType<typeof getActiveRun>>,
+  run: Run | null,
 ): Card {
-  // Одна карточка в работе на забег: следующую берут после finish или block.
-  const otherInProgress = listRunCards(db, run.id).some(
-    (row) => row.status === 'in_progress' && row.cardId !== card.id,
-  )
-  if (otherInProgress) {
-    throw new UserError(
-      3,
-      `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
+  // Одна карточка в работе на держателя: worktree один, две ветки не живут.
+  if (run) {
+    const otherInProgress = listRunCards(db, run.id).some(
+      (row) => row.status === 'in_progress' && row.cardId !== card.id,
     )
+    if (otherInProgress) {
+      throw new UserError(
+        3,
+        `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
+      )
+    }
+  } else {
+    const other = db
+      .prepare(
+        "select id from cards where holder = ? and status = 'in_progress' and id != ?",
+      )
+      .get(actor, card.id) as { id: string } | undefined
+    if (other) {
+      throw new UserError(
+        3,
+        `у исполнителя ${actor} уже есть карточка в работе: ${other.id} — сначала finish или block`,
+      )
+    }
   }
 
   let branch: string | null = card.branch
@@ -790,14 +810,16 @@ function startWork(
   const at = nowIso()
   const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
   db.prepare(
-    `update cards set phase = 'task', status = 'in_progress', branch = ?, lease_until = ?,
+    `update cards set phase = 'task', status = 'in_progress', holder = ?, branch = ?, lease_until = ?,
      updated_at = ? where id = ?`,
-  ).run(branch, leaseUntil, at, card.id)
-  db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
-  db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
-    run.id,
-    card.id,
-  )
+  ).run(actor, branch, leaseUntil, at, card.id)
+  if (run) {
+    db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
+    db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
+      run.id,
+      card.id,
+    )
+  }
 
   const updated = getCard(db, card.id)!
   appendEvent(db, {
