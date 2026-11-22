@@ -407,6 +407,15 @@ export function editCard(
           params.push('ready')
           sets.push('review_required = 0')
           sets.push('position = null')
+          // Держатель, lease и забег снимаются: задачу владельца никто не держит.
+          sets.push('holder = null')
+          sets.push('lease_until = null')
+          sets.push('run_id = null')
+          if (card.runId) {
+            db.prepare(
+              "update run_cards set status = 'dropped' where run_id = ? and card_id = ?",
+            ).run(card.runId, card.id)
+          }
         }
       }
     }

@@ -163,6 +163,9 @@ export function submitCard(
   return tx(db, () => {
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
+    if (card.skill === OWNER) {
+      throw new UserError(3, `owner-карточку ${card.id} закрывает владелец, а не submit`)
+    }
     if (card.holder !== actor) {
       throw new UserError(
         3,
