@@ -15,6 +15,8 @@
 | Глобальный диспетчер | `board` в PATH, который передаёт команду локальному `tools/board`; без локального CLI — установка и диагностика. | `board --global --version` | owner | 2026-11-22 |
 | Upgrade | Осознанное переключение `tools/board` на другой тег/коммит. | `board upgrade v1.2.0` | owner | 2026-11-22 |
 | Superpowers opt-in | Superpowers не глобальный: проект подключает его в `.opencode/opencode.json`. | `plugins: [...]` | owner | 2026-11-22 |
+| Вариант забега | Категория забега по тегу карточки: `new`, `improve`, `review`. | `card add --tag new` | owner | 2026-11-22 |
+| Planned-запрос | Запрос в забеге до разбора; `take` сначала shape, потом promotion. | `run start --cards NOW-3` | owner | 2026-11-22 |
 
 ## Команды владельца
 

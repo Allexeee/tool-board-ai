@@ -168,3 +168,31 @@ test('два процесса не бронируют одну карточку 
   assert.equal([first, second].filter((result) => result.code === 0).length, 1)
   assert.equal([first, second].filter((result) => result.code !== 0).length, 1)
 })
+
+test('забег с запросом: разбор и promotion', (t) => {
+  const root = project(t)
+  const req = json(root, [
+    'card', 'add', '--group', 'NOW', '--title', 'Новое', '--skill', 'dev', '--tag', 'new',
+  ])
+  json(root, ['run', 'start', '--as', 'owner', '--cards', req.id])
+
+  const next = json(root, ['run', 'next', '--as', 'owner'])
+  assert.equal(next.phase, 'request')
+  assert.equal(next.id, req.id)
+
+  const shaped = json(root, ['take', req.id, '--as', 'owner'])
+  assert.equal(shaped.status, 'shaping')
+
+  run(root, [
+    'card', 'edit', req.id,
+    '--spec', 'spec',
+    '--acceptance', 'ok',
+    '--scope', 'src/**',
+    '--importance', '2',
+    '--urgency', '2',
+  ])
+
+  const promoted = json(root, ['take', req.id, '--as', 'owner'])
+  assert.equal(promoted.phase, 'task')
+  assert.equal(promoted.status, 'in_progress')
+})

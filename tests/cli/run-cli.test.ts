@@ -58,6 +58,7 @@ function project(t: { after: (fn: () => void) => void }) {
       status: 'ready',
       position,
       title: `Задача ${position}`,
+      tags: ['new'],
     }),
   )
   return { ...fixture, cards }
