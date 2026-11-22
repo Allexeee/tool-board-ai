@@ -183,12 +183,15 @@ export function reorderQueue(db: DatabaseSync): void {
     if (tasks.length > 0) renumber(db, tasks.map((card) => card.id))
 
     // Запросы пересобираются целиком: карточки без позиции тоже встают 1..N.
-    const requests = listCards(db, { phase: 'request', status: ['new', 'shaping'] }).sort(
-      (left, right) =>
-        score(right) - score(left) ||
-        left.createdAt.localeCompare(right.createdAt) ||
-        left.id.localeCompare(right.id),
-    )
+    // Owner-карточки не нумеруются никогда.
+    const requests = listCards(db, { phase: 'request', status: ['new', 'shaping'] })
+      .filter((card) => card.skill !== 'owner')
+      .sort(
+        (left, right) =>
+          score(right) - score(left) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.id.localeCompare(right.id),
+      )
     if (requests.length > 0) renumber(db, requests.map((card) => card.id))
   })
 }
