@@ -103,6 +103,8 @@ export function insertIntoQueue(db: DatabaseSync, cardId: string): void {
         `карточка ${cardId} в статусе ${card.status}: в очередь ставится ${statuses.join(' или ')}`,
       )
     }
+    // Owner-карточки не стоят ни в одной очереди: их закрывает владелец.
+    if (card.skill === 'owner') return
     if (card.position !== null) return
 
     const others = listQueue(db, {}, card.phase).filter((item) => item.id !== cardId)
