@@ -24,9 +24,9 @@ export default async function command(args: ParsedArgs) {
   }
 }
 
-/** `board now [0|1|2|3]`; без номера — вкладка 2 (задачи по агентам). */
+/** `board now [0|1|2|3]`; без номера — вкладка 0 (задачи владельца). */
 function parseView(raw: string | undefined): NowViewKind {
-  if (raw === undefined) return 2
+  if (raw === undefined) return 0
   if (raw === '0' || raw === '1' || raw === '2' || raw === '3') {
     return Number(raw) as NowViewKind
   }

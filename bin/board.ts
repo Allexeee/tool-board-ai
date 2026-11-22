@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs, boolFlag } from '../src/cli/args.ts'
 import { setJsonMode } from '../src/cli/output.ts'
 import { UserError } from '../src/cli/errors.ts'
+import { findLocalBoardCli, findProjectRootForCli } from '../src/core/git.ts'
 
 const VERSION = (JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -15,6 +17,8 @@ const HELP = `board — доска карточек для людей и аге�
   init [каталог] [--yes] [--refresh]
                           создать .board/board.db и docs/board/; --refresh
                           перезаписывает сгенерированные .opencode-файлы
+  upgrade <ref>|--latest [--allow-downgrade]
+                          переключить tools/board на другую версию
   setup                   мастер настроек: --show, --review-after-run,
                           --no-review-after-run
 
@@ -78,8 +82,46 @@ async function loadCommand(command: string) {
   }
 }
 
+const rawArgs = process.argv.slice(2)
+const globalFlag = rawArgs.includes('--global')
+const argv = rawArgs.filter((arg) => arg !== '--global')
+const allowGlobal = process.env.BOARD_ALLOW_GLOBAL === '1'
+const self = realpathSync(fileURLToPath(import.meta.url))
+const projectRoot = findProjectRootForCli(process.cwd())
+const local = projectRoot ? findLocalBoardCli(projectRoot) : null
+const installerOverride = argv[0] === 'init' && argv.includes('--board-version')
+
+if (
+  !globalFlag &&
+  !allowGlobal &&
+  !process.env.BOARD_DELEGATED &&
+  local &&
+  realpathSync(local) !== self &&
+  !installerOverride
+) {
+  const result = spawnSync(process.execPath, [local, ...argv], {
+    stdio: 'inherit',
+    env: { ...process.env, BOARD_DELEGATED: '1' },
+    windowsHide: true,
+  })
+  process.exit(result.status ?? 3)
+}
+
+if (!globalFlag && !allowGlobal && !process.env.BOARD_DELEGATED && !local) {
+  const command = argv[0]
+  const allowed =
+    command === undefined ||
+    ['init', 'doctor', 'help', 'version'].includes(command) ||
+    argv.includes('--version') ||
+    argv.includes('--help')
+  if (!allowed) {
+    process.stderr.write('board не установлен: выполните board init\n')
+    process.exit(2)
+  }
+}
+
 try {
-  const code = await main(process.argv.slice(2))
+  const code = await main(argv)
   process.exitCode = code
 } catch (error) {
   if (error instanceof UserError) {

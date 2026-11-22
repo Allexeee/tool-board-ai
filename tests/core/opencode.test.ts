@@ -7,6 +7,8 @@ import { writeOpenCodeFiles, writeReviewerAgent } from '../../src/core/opencode.
 import { initProject } from '../../src/core/project.ts'
 import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
+process.env.BOARD_ALLOW_GLOBAL = '1'
+
 const tmp = () => mkdtempSync(join(tmpdir(), 'board-oc-'))
 
 test('initProject создаёт скилл, плагин, команды и блок в AGENTS.md', () => {
@@ -43,6 +45,18 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   assert.match(plugin, /BOARD_CLI/)
   assert.match(plugin, /Plugin\.define/)
   assert.match(plugin, /error\.stdout\?\.trim\(\)\s*\|\|\s*error\.stderr\?\.trim\(\)\s*\|\|\s*error\.message/)
+})
+
+test('плагин ищет tools/board раньше BOARD_CLI и не зовёт глобальный board', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  const local = plugin.indexOf("'tools', 'board'")
+  const override = plugin.indexOf('process.env.BOARD_CLI')
+  assert.ok(local > 0)
+  assert.ok(local < override)
+  assert.doesNotMatch(plugin, /file: 'board'/)
+  assert.match(plugin, /board не установлен/)
 })
 
 test('команда ревью упоминает review list и review submit', () => {
@@ -165,4 +179,22 @@ test('существующий AGENTS.md сохраняется, блок board 
   assert.match(after, /хвост/)
   assert.match(after, /board/)
   assert.doesNotMatch(after, /старое/)
+})
+
+test('плагин поднимается из .worktrees в корень', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /basename\(dirname\(dir\)\) === '\.worktrees'/)
+  assert.match(plugin, /dirname\(dirname\(dir\)\)/)
+})
+
+test('card схема принимает verdict для spec-review', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  const start = plugin.indexOf("name: 'card'")
+  const end = plugin.indexOf("name: 'run'", start)
+  assert.ok(start > 0 && end > start)
+  assert.match(plugin.slice(start, end), /verdict: \{ type: 'string' \}/)
 })

@@ -85,6 +85,7 @@ export function addFinding(db: DatabaseSync, input: AddFindingInput): Card {
       body: text,
       skill: input.skill ?? origin.skill ?? 'dev',
       author: reviewer,
+      tags: ['review'],
     })
 
     db.prepare(

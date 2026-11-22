@@ -13,6 +13,7 @@ function run(dir: string, args: string[]) {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
     windowsHide: true,
   })
   return { code: result.status, out: result.stdout, err: result.stderr }
@@ -211,4 +212,19 @@ test('card list фильтрует и печатает карточки', (t) =>
   assert.match(human.out, /UI-2/)
   assert.match(human.out, /OPS-1/)
   assert.match(human.out, /new/)
+})
+
+test('card add и edit принимают теги', (t) => {
+  const dir = project(t)
+  const added = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 't', '--skill', 'dev',
+    '--tag', 'New', '--tag', 'backend',
+  ])
+  assert.deepEqual(added.tags, ['new', 'backend'])
+
+  const edited = json(dir, ['card', 'edit', 'UI-1', '--tag', 'review'])
+  assert.deepEqual(edited.tags, ['review'])
+
+  const cleared = json(dir, ['card', 'edit', 'UI-1', '--clear-tags'])
+  assert.deepEqual(cleared.tags, [])
 })

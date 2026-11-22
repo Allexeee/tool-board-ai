@@ -55,7 +55,7 @@ test('makeBoard создаёт базу со всеми таблицами сх�
   const version = fixture.db.prepare("select value from meta where key = 'schemaVersion'").get() as
     | { value: string }
     | undefined
-  assert.equal(version?.value, '2')
+  assert.equal(version?.value, '3')
   assert.equal(fixture.db.prepare('pragma foreign_keys').get()?.foreign_keys, 1)
 })
 
@@ -153,4 +153,17 @@ test('initProject сохраняет чужой хук без блока toolbox
   const text = readFileSync(hook, 'utf8')
   assert.match(text, /echo custom/)
   assert.doesNotMatch(text, /toolbox-al/)
+})
+
+test('initProject в не-git каталоге без BOARD_ALLOW_GLOBAL — ошибка', (t) => {
+  const root = tempDir()
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const previous = process.env.BOARD_ALLOW_GLOBAL
+  delete process.env.BOARD_ALLOW_GLOBAL
+  try {
+    assert.throws(() => initProject(root), /нужен git/)
+  } finally {
+    if (previous === undefined) delete process.env.BOARD_ALLOW_GLOBAL
+    else process.env.BOARD_ALLOW_GLOBAL = previous
+  }
 })

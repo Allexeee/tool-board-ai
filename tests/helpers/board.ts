@@ -18,6 +18,10 @@ import type {
   RunStatus,
 } from '../../src/core/types.ts'
 
+// CLI-тесты запускают исходный board в проектах без submodule: это отладочный
+// путь диспетчера, не трогающий логику установки submodule.
+process.env.BOARD_ALLOW_GLOBAL = '1'
+
 export interface BoardFixture {
   root: string
   db: DatabaseSync
@@ -87,6 +91,7 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
     acceptance: input.acceptance,
     skill: input.skill ?? 'dev',
     author: input.author ?? 'owner',
+    tags: input.tags,
   })
 
   const sets: string[] = []

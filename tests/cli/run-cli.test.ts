@@ -18,6 +18,7 @@ function run(dir: string, args: string[]): Result {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
     windowsHide: true,
   })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
@@ -27,7 +28,8 @@ function spawnBoard(dir: string, args: string[]): Promise<Result> {
   return new Promise((resolvePromise) => {
     const child = spawn(process.execPath, [bin, ...args], {
       cwd: dir,
-      windowsHide: true,
+      env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
+    windowsHide: true,
     })
     let out = ''
     let err = ''
@@ -56,6 +58,7 @@ function project(t: { after: (fn: () => void) => void }) {
       status: 'ready',
       position,
       title: `Задача ${position}`,
+      tags: ['new'],
     }),
   )
   return { ...fixture, cards }
@@ -354,4 +357,19 @@ test('два процесса не бронируют одну карточку 
     listCards(fixture.db, { status: 'booked' }).filter((item) => item.id === card.id).length,
     1,
   )
+})
+
+test('run start --suggest выбирает вариант по номеру', (t) => {
+  const { root, db } = project(t)
+  db.prepare('update cards set tags = ?').run('["improve"]')
+
+  const first = run(root, ['run', 'start', '--as', 'developer', '--suggest', '1'])
+  assert.equal(first.code, 1)
+  assert.match(first.err, /НОВОЕ/)
+
+  const second = json(root, ['run', 'start', '--as', 'developer', '--suggest', '2']) as { id: string }
+  assert.equal(second.id, 'RUN-1')
+  const held = listCards(db, { holder: 'developer' })
+  assert.equal(held.length, 3)
+  assert.ok(held.every((card) => card.tags.includes('improve')))
 })

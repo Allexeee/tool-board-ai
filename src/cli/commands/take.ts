@@ -18,7 +18,8 @@ export default async function command(args: ParsedArgs) {
     }
 
     const card = takeCard(db, { id, actor, root: project.root })
-    ok(card, `${card.id} в работе: ${card.title}${card.branch ? ` · ветка ${card.branch}` : ''}`)
+    const state = card.phase === 'request' ? 'в разборе' : 'в работе'
+    ok(card, `${card.id} ${state}: ${card.title}${card.branch ? ` · ветка ${card.branch}` : ''}`)
     return 0
   } finally {
     db.close()

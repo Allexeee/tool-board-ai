@@ -9,7 +9,7 @@
   reclaimExpired,
   releaseRun,
   startRun,
-  suggestRuns,
+  suggestVariantRuns,
 } from '../../core/runs.ts'
 import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
@@ -20,6 +20,7 @@ import {
   resolveRunReviewMode,
 } from '../../core/review-policy.ts'
 import { readSettings } from '../../core/settings.ts'
+import { RUN_VARIANTS } from '../../core/tags.ts'
 import type { Run, RunReviewMode } from '../../core/types.ts'
 import {
   boolFlag,
@@ -73,8 +74,12 @@ export default async function command(args: ParsedArgs) {
     let cardIds: string[]
     if (suggest !== undefined) {
       if (suggest < 1) throw new UserError(3, '--suggest — целое число от 1')
-      const [suggestion] = suggestRuns(db, executorId, suggest)
-      if (!suggestion) fail(1, 'подходящих карточек нет: забег не начат')
+      const variant = RUN_VARIANTS[suggest - 1]
+      if (!variant) throw new UserError(3, '--suggest — 1 (new), 2 (improve) или 3 (review)')
+      const suggestion = suggestVariantRuns(db, executorId).find(
+        (run) => run.tag === variant.tag,
+      )
+      if (!suggestion) fail(1, `вариант ${variant.label} пуст: подходящих карточек нет`)
       cardIds = suggestion.cards.map((card) => card.id)
     } else {
       cardIds = cardFlags

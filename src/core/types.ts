@@ -21,6 +21,7 @@ export type RunStatus = 'active' | 'ended' | 'cancelled' | 'lease_expired'
 export type RunReviewMode = 'none' | 'self' | 'subagent'
 
 export type RunCardStatus =
+  | 'planned'
   | 'booked'
   | 'in_progress'
   | 'blocked'
@@ -91,6 +92,7 @@ export interface Card {
   needsMerge: boolean
   reviewRequired: boolean
   scope: string[]
+  tags: string[]
   severity: Severity | null
   originCardId: string | null
   summary: string | null
@@ -121,4 +123,6 @@ export interface RunSuggestion {
   executorId: string
   cards: Card[]
   group: string | null
+  tag?: string | null
+  label?: string | null
 }

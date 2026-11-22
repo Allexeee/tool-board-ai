@@ -380,8 +380,9 @@ export function blockCard(
     const note = input.note?.trim() || null
     const at = nowIso()
     db.prepare(
-      `update cards set status = 'blocked', holder = null, run_id = null, lease_until = null,
-       updated_at = ? where id = ?`,
+      `update cards set status = 'blocked', holder = null,
+       run_id = case when phase = 'request' then run_id else null end,
+       lease_until = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
 
     // Карточка остаётся в забеге с пометкой blocked (§8.3): `run next` её
@@ -540,6 +541,7 @@ export function resumeAfterAnswer(db: DatabaseSync, cardId: string, actor: strin
     db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(status, at, cardId)
 
     const updated = getCard(db, cardId)!
+    if (updated.phase === 'task' && updated.position === null) insertIntoQueue(db, cardId)
     appendEvent(db, {
       type: 'card.resumed',
       actor: actorName,
@@ -564,6 +566,7 @@ export interface ShapeFileNewCard {
   needs_merge?: boolean
   review_required?: boolean
   scope?: string[]
+  tags?: string[]
 }
 
 export interface ShapeFile {
@@ -577,6 +580,7 @@ export interface ShapeFile {
   needs_merge?: boolean
   review_required?: boolean
   scope?: string[]
+  tags?: string[]
   refs?: Array<{ kind: string; value: string; title?: string }>
   deps?: string[]
   new_cards?: ShapeFileNewCard[]
@@ -624,6 +628,7 @@ export function applyShapeFile(
     if (file.needs_merge !== undefined) patch.needsMerge = file.needs_merge
     if (file.review_required !== undefined) patch.reviewRequired = file.review_required
     if (file.scope !== undefined) patch.scope = file.scope
+    if (file.tags !== undefined) patch.tags = file.tags
     if (Object.keys(patch).length > 0) editCard(db, { id: card.id, actor, patch })
     for (const ref of file.refs ?? []) {
       addRef(db, {
@@ -650,6 +655,7 @@ export function applyShapeFile(
         acceptance: item.acceptance,
         skill: item.skill,
         author: actor,
+        tags: item.tags,
       })
       const createdPatch: CardPatch = {}
       if (item.needs_merge !== undefined) createdPatch.needsMerge = item.needs_merge
@@ -683,6 +689,8 @@ export function takeCard(db: DatabaseSync, input: { id: string; actor: string; r
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
 
+    if (card.phase === 'request') return takeRequest(db, card, actor, input.root)
+
     if (card.status !== 'booked') {
       throw new UserError(3, `карточка ${card.id} не забронирована: ${card.status}`)
     }
@@ -701,43 +709,105 @@ export function takeCard(db: DatabaseSync, input: { id: string; actor: string; r
       throw new UserError(3, `у исполнителя ${actor} нет активного забега с карточкой ${card.id}`)
     }
 
-    // Одна карточка в работе на забег: следующую берут после finish или block.
-    const otherInProgress = listRunCards(db, run.id).some(
-      (row) => row.status === 'in_progress' && row.cardId !== card.id,
-    )
-    if (otherInProgress) {
-      throw new UserError(
-        3,
-        `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
-      )
-    }
-
-    let branch: string | null = card.branch
-    if (card.needsMerge) {
-      branch = startCardBranch(input.root, actor, card).branch
-    }
-
-    const at = nowIso()
-    const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
-    db.prepare(
-      `update cards set status = 'in_progress', branch = ?, lease_until = ?, updated_at = ? where id = ?`,
-    ).run(branch, leaseUntil, at, card.id)
-    db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
-    db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
-      run.id,
-      card.id,
-    )
-
-    const updated = getCard(db, card.id)!
-    appendEvent(db, {
-      type: 'card.taken',
-      actor,
-      subject: card.id,
-      before: card,
-      after: updated,
-    })
-    return updated
+    return startWork(db, card, actor, input.root, run)
   })
+}
+
+/**
+ * Запрос в забеге: первый take разбирает, второй — продвигает в работу.
+ * Approve владельца не требуется: spec показывается, забег можно остановить.
+ */
+function takeRequest(
+  db: DatabaseSync,
+  card: Card,
+  actor: string,
+  root: string,
+): Card {
+  const run = getActiveRun(db, actor)
+  if (!run || run.id !== card.runId) {
+    throw new UserError(3, `у исполнителя ${actor} нет активного забега с запросом ${card.id}`)
+  }
+  const row = listRunCards(db, run.id).find((item) => item.cardId === card.id)
+  if (!row || (row.status !== 'planned' && row.status !== 'blocked')) {
+    throw new UserError(3, `запрос ${card.id} не в забеге ${run.id}`)
+  }
+  if (card.status === 'blocked' || openQuestions(db, card.id).length > 0) {
+    throw new UserError(3, `запрос ${card.id} ждёт ответа владельца`)
+  }
+
+  if (card.status === 'new') {
+    return shapeCard(db, { id: card.id, actor })
+  }
+  if (card.status !== 'shaping' || card.holder !== actor) {
+    throw new UserError(3, `запрос ${card.id} не в разборе у ${actor}: ${card.status}`)
+  }
+  if (card.body.trim() === '') throw new UserError(3, `у запроса ${card.id} нет spec`)
+  if (card.acceptance.trim() === '') {
+    throw new UserError(3, `у запроса ${card.id} нет критериев приёмки`)
+  }
+  if (!card.skill) throw new UserError(3, `у запроса ${card.id} нет навыка`)
+  assertScore(card.importance, 'важность')
+  assertScore(card.urgency, 'срочность')
+  if (card.needsMerge && card.scope.length === 0) {
+    throw new UserError(3, `для needs_merge=true нужен непустой scope`)
+  }
+
+  const promoted = startWork(db, card, actor, root, run)
+  appendEvent(db, {
+    type: 'card.promoted',
+    actor,
+    subject: card.id,
+    before: card,
+    after: promoted,
+    note: `забег ${run.id}: approve пропущен по правилу запроса в забеге`,
+  })
+  return promoted
+}
+
+function startWork(
+  db: DatabaseSync,
+  card: Card,
+  actor: string,
+  root: string,
+  run: NonNullable<ReturnType<typeof getActiveRun>>,
+): Card {
+  // Одна карточка в работе на забег: следующую берут после finish или block.
+  const otherInProgress = listRunCards(db, run.id).some(
+    (row) => row.status === 'in_progress' && row.cardId !== card.id,
+  )
+  if (otherInProgress) {
+    throw new UserError(
+      3,
+      `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
+    )
+  }
+
+  let branch: string | null = card.branch
+  if (card.needsMerge) {
+    branch = startCardBranch(root, actor, card).branch
+  }
+
+  const at = nowIso()
+  const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
+  db.prepare(
+    `update cards set phase = 'task', status = 'in_progress', branch = ?, lease_until = ?,
+     updated_at = ? where id = ?`,
+  ).run(branch, leaseUntil, at, card.id)
+  db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
+  db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
+    run.id,
+    card.id,
+  )
+
+  const updated = getCard(db, card.id)!
+  appendEvent(db, {
+    type: 'card.taken',
+    actor,
+    subject: card.id,
+    before: card,
+    after: updated,
+  })
+  return updated
 }
 
 export interface FinishInput {

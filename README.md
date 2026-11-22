@@ -6,7 +6,9 @@
 
 ## Установка
 
-CLI ставится один раз; в каждый проект его класть не нужно.
+Глобально нужен только установщик board. В каждом git-проекте `board init`
+добавляет свою версию в `tools/board` (git submodule), и дальше проект
+работает только с ней.
 
 ```powershell
 # скопируйте/клонируйте этот репозиторий (ветку с доской) в удобное место
@@ -14,20 +16,34 @@ git clone https://github.com/Allexeee/tool-board-ai.git "$env:USERPROFILE\tools\
 $env:Path += ";$env:USERPROFILE\tools\tool-board-ai"
 ```
 
-В корне лежит `board.cmd`; он запускает `node bin\board.ts`. Проверка:
-`board --version`.
+В корне лежит `board.cmd`; он запускает `node bin\board.ts`. Проверка
+глобального установщика: `board --version`.
 
-Скилл `board` и команды `/review`, `/spec-review`, `/setup` вызывают `board`,
-поэтому CLI должен быть в `PATH` (хотя бы в окружении, из которого стартует
-OpenCode). Если не хотите
-менять `PATH` глобально, запускайте CLI как `node <путь>\bin\board.ts ...`;
-`BOARD_CLI` перекрывает путь только для инструментов плагина:
+В проекте с `tools/board` глобальный `board` — тонкий диспетчер: он передаёт
+команду локальному `tools/board/bin/board.ts`, поэтому `board --version`
+показывает версию проекта, а не установщика. Без локального CLI работают
+только `init`, `doctor`, `--version`, `help`; операционные команды просят
+`board init`.
 
-```powershell
-[Environment]::SetEnvironmentVariable('BOARD_CLI', "$env:USERPROFILE\tools\tool-board-ai\bin\board.ts", 'User')
+`BOARD_CLI` — только отладочный override, когда локального CLI нет. Локальный
+`tools/board` всегда важнее.
+
+## Своя версия board
+
+```bash
+board init --board-version v1.2.0   # добавить submodule или переключить его
+board upgrade v1.3.0                # переключить и перегенерировать .opencode
+board upgrade --latest              # последний тег источника
+board init --refresh                # перегенерировать из текущей версии
+board --global --version            # обойти локальный CLI (ремонт, отладка)
 ```
 
-`npm install` из git не работает: Node не обрабатывает TypeScript внутри `node_modules`. Запуск идёт из обычного каталога.
+`board init` без `--board-version` ставит последний тег источника. Указатель
+submodule коммитится вместе с `.gitmodules` и `.opencode`. CI-клону нужен
+`git submodule update --init` (или `--recurse-submodules`).
+
+Даунгрейд на более старую версию требует `--allow-downgrade`: схема базы
+мигрирует только вперёд, поэтому сначала сделайте бэкап `.board/board.db`.
 
 ## Установка в существующий проект
 
@@ -38,8 +54,8 @@ OpenCode). Если не хотите
 
 ```bash
 git checkout -b dev          # если ветки dev ещё нет
-board init                   # или: node <путь>\bin\board.ts init
-git add -A
+board init                   # добавит tools/board (submodule) и .opencode
+git add -A                   # .gitmodules, tools/board, .opencode
 git commit -m "chore: board init"
 board executor add developer --kind agent --skills dev
 board doctor
@@ -161,16 +177,29 @@ board release
 ## Доска
 
 ```bash
-board now      # вкладка 2: задачи по всем агентам
-board now 0    # владельцу: утвердить, owner-задачи, вопросы
-board now 1    # мои задачи для --as: на руках и очередь по навыкам
-board now 2    # задачи по всем агентам
+board now      # вкладка 0: задачи для меня
+board now 0    # владельцу: утверждения, owner-задачи ready/waiting, вопросы
+board now 1    # задачи текущего --as: на руках, очередь, вероятные забеги
+board now 2    # задачи других агентов
 board now 3    # открытые запросы и общая очередь
 ```
 
-`now 1` и `now 2` показывают карточки агента на руках (`booked`, `in_progress`, `blocked`, `review`) и доступную очередь (`ready`, `waiting`) по его навыкам — секции «НА РУКАХ» и «ОЧЕРЕДЬ». `now 2` группирует задачи по агентам и не выделяет текущего `--as`. `now 3` показывает только открытые запросы и общую очередь; отменённые и закрытые запросы не попадают. Цвета статусов и имён агентов включаются только в живом терминале: в `--json`, пайпе и при `NO_COLOR` ANSI нет.
+`now 0` — по умолчанию: утверждения, owner-задачи в `ready`/`waiting` и открытые вопросы; имя исполнителя в строках не печатается. `now 1` показывает задачи текущего `--as` на руках и в очереди, а также три вероятных забега по тегам: «НОВОЕ», «УЛУЧШЕНИЕ», «ПОСЛЕ РЕВЬЮ». Запрос в забеге помечен `?`; каждая карточка — отдельная строка. `now 2` показывает только других агентов, без текущего и без забегов. `now 3` — открытые запросы и общая очередь; отменённые и закрытые не попадают.
+
+Теги: `card add|edit --tag new|improve|review`; `--tag` заменяет список, `--clear-tags` очищает. Находки ревью получают `review` автоматически. Карточка без вариантного тега в вероятные забеги не попадает — `now 1` показывает счётчик «БЕЗ ТЕГА».
+
+Запрос может входить в забег: `run start --cards` принимает его как `planned`, `run next` возвращает первым, `take` сначала переводит в разбор, а повторный `take` после spec — в работу с веткой и lease. Approve владельца для такого запроса не требуется; spec показывается, забег можно остановить. Цвета статусов, имён агентов и маркера `?` включаются только в живом терминале: в `--json`, пайпе и при `NO_COLOR` ANSI нет.
 
 Фильтры `now 3`: `--group UI`, `--skill dev`, `--status ready,waiting`, `--mine`, `--phase request`, `--limit`, `--all`; в `now 1/2` — `--group` и `--skill`. Все команды принимают `--json`.
+
+## Superpowers
+
+Superpowers — локальная настройка пользователя, а не часть проекта. Проект не
+коммитит `.opencode/opencode.json` и не задаёт путь к пакету; каждая машина
+решает сама, включать ли его.
+
+Остальные глобальные скиллы (`frontend-design`, `ui-ux-pro-max`, `unity-2022`)
+продолжают работать.
 
 ## Решения и терминология
 
@@ -195,7 +224,8 @@ board command add "RUN" "начать забег по очереди" --as owner
 
 | Команда | Что делает |
 |---|---|
-| `init [каталог] [--yes] [--refresh]` | скелет проекта, мастер настроек и обновление `.opencode` |
+| `init [каталог] [--yes] [--refresh] [--board-version <ref>] [--board-source <url>]` | скелет проекта, submodule `tools/board`, мастер настроек и обновление `.opencode` |
+| `upgrade <ref>\|--latest [--allow-downgrade]` | переключить `tools/board` и перегенерировать `.opencode` |
 | `setup [--show\|--spec-review\|--large-spec\|--run-review\|--reviewer-model]` | настройки доски |
 | `executor add\|list\|edit\|remove` | исполнители и навыки |
 | `card add\|list\|show\|edit` | карточки |

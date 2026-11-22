@@ -4,7 +4,7 @@
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
@@ -12,16 +12,35 @@ const run = promisify(execFile)
 // Внутри OpenCode process.execPath — сам opencode, а не node.
 const nodeBin = /node(\.exe)?$/i.test(process.execPath) ? process.execPath : 'node'
 
+function projectRoot(ctx) {
+  const canonical = ctx.location && ctx.location.project && ctx.location.project.canonical
+  if (canonical) return canonical
+  let dir = ctx.location.directory
+  for (;;) {
+    if (existsSync(join(dir, '.board'))) return dir
+    if (existsSync(join(dir, '.git'))) {
+      return basename(dirname(dir)) === '.worktrees' ? dirname(dirname(dir)) : dir
+    }
+    const parent = join(dir, '..')
+    if (parent === dir) return dir
+    dir = parent
+  }
+}
+
 function resolveCli(ctx) {
-  const override = process.env.BOARD_CLI
-  const local = join(ctx.location.directory, 'bin', 'board.ts')
-  if (override) return { file: nodeBin, args: [override] }
-  if (existsSync(local)) return { file: nodeBin, args: [local] }
-  return { file: 'board', args: [] }
+  const root = projectRoot(ctx)
+  const local = [
+    join(root, 'tools', 'board', 'bin', 'board.ts'),
+    join(root, 'bin', 'board.ts'),
+  ].find((file) => existsSync(file))
+  if (local) return { file: nodeBin, args: [local] }
+  if (process.env.BOARD_CLI) return { file: nodeBin, args: [process.env.BOARD_CLI] }
+  return { file: null, args: [], error: 'board не установлен: выполните board init' }
 }
 
 async function call(ctx, args, context) {
-  const { file, args: prefix } = resolveCli(ctx)
+  const { file, args: prefix, error } = resolveCli(ctx)
+  if (!file) return { content: error, isError: true }
   let env = process.env
   try {
     const session = await ctx.session.get({ sessionID: context.sessionID })
@@ -42,7 +61,7 @@ async function call(ctx, args, context) {
     return { content: stdout.trim() || '{}' }
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return { content: 'CLI board не найден. Укажите BOARD_CLI или положите bin/board.ts', isError: true }
+      return { content: 'CLI board не найден: выполните board init', isError: true }
     }
     return {
       content: error.stdout?.trim() || error.stderr?.trim() || error.message,
@@ -271,6 +290,7 @@ export default Plugin.define({
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
           mode: { type: 'string' },
+          verdict: { type: 'string' },
           plan: { type: 'string' },
           phase: { type: 'string' },
           status: { type: 'string' },

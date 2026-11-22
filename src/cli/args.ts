@@ -16,20 +16,20 @@ const KNOWN_FLAGS = new Set([
   'json', 'help', 'version', 'as', 'group', 'title', 'body', 'skill', 'skills',
   'phase', 'status', 'holder', 'importance', 'urgency', 'needs-merge', 'no-needs-merge',
   'review', 'no-review', 'scope', 'from', 'kind', 'value', 'reason', 'note',
-  'spec', 'acceptance', 'mode', 'plan',
+  'spec', 'acceptance', 'mode', 'plan', 'tag', 'clear-tags',
   'summary', 'waive-dependents', 'done', 'reopen', 'severity', 'text', 'verdict',
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
-  'large-spec', 'run-review',
+  'large-spec', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
 ])
 
 const BOOLEAN_FLAGS = new Set([
   'json', 'help', 'version', 'needs-merge', 'no-needs-merge', 'review', 'no-review',
   'waive-dependents', 'done', 'reopen', 'top', 'bottom', 'mine', 'all', 'block',
   'force', 'fresh', 'no-merge', 'yes', 'show', 'refresh', 'review-after-run',
-  'no-review-after-run',
+  'no-review-after-run', 'allow-downgrade', 'clear-tags',
 ])
 
 export type FlagValue = string | boolean | string[]

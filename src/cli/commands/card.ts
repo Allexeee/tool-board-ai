@@ -73,6 +73,7 @@ export default async function command(args: ParsedArgs) {
       title,
       body: stringFlag(args, 'spec') ?? stringFlag(args, 'body'),
       acceptance: stringsFlag(args, 'acceptance'),
+      tags: stringsFlag(args, 'tag'),
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
     })
@@ -159,6 +160,8 @@ export default async function command(args: ParsedArgs) {
     if (reviewRequired !== undefined) patch.reviewRequired = reviewRequired
 
     if (args.flags['scope'] !== undefined) patch.scope = stringsFlag(args, 'scope')
+    if (args.flags.tag !== undefined) patch.tags = stringsFlag(args, 'tag')
+    if (args.flags['clear-tags'] !== undefined) patch.tags = []
 
     const note = stringFlag(args, 'note')
     if (note !== undefined) patch.note = note
@@ -624,7 +627,8 @@ function formatCard(
     `статус: ${card.status} · фаза: ${card.phase} · навык: ${value(card.skill)}`,
     `важность: ${value(card.importance)} · срочность: ${value(card.urgency)}`,
     `мерж: ${card.needsMerge ? 'да' : 'нет'} · ревью: ${card.reviewRequired ? 'да' : 'нет'}`,
-    `scope: ${card.scope.length > 0 ? card.scope.join(', ') : '—'}`,
+    `scope: ${card.scope.length > 0 ? card.scope.join(', ') : '-'}`,
+    `tags: ${card.tags.length > 0 ? card.tags.join(', ') : '-'}`,
   ]
   if (card.note !== null && card.note !== '') lines.push(`заметка: ${card.note}`)
   if (card.body !== '') lines.push('', card.body)
