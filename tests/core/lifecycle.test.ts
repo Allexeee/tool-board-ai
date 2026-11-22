@@ -848,7 +848,7 @@ test('запрос из shape-файла, resume и amend получают по�
   assert.ok(amended.position)
 })
 
-test('block, submit и reject очищают позицию, resumeAfterAnswer ставит запрос в очередь', (t) => {
+test('block и submit очищают position, reject возвращает новую, resumeAfterAnswer ставит в очередь', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
 
