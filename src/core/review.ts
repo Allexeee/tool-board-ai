@@ -101,6 +101,7 @@ export function addFinding(db: DatabaseSync, input: AddFindingInput): Card {
     )
 
     const updated = getCard(db, finding.id)!
+    insertIntoQueue(db, finding.id)
     appendEvent(db, {
       type: 'review.finding',
       actor: reviewer,

@@ -125,8 +125,14 @@ test('queue move отказывает без цели, с двумя целям�
   assert.equal(missing.code, 3)
   assert.match(missing.err, /не найдена/)
 
-  json(dir, ['card', 'add', '--group', 'UI', '--title', 'Запрос', '--skill', 'dev'])
-  const notQueued = run(dir, ['queue', 'move', 'UI-4', '--top'])
+  const added = json(dir, ['card', 'add', '--group', 'UI', '--title', 'Запрос', '--skill', 'dev']) as {
+    id: string
+  }
+  const movedRequest = run(dir, ['queue', 'move', added.id, '--top'])
+  assert.equal(movedRequest.code, 0, movedRequest.err)
+
+  json(dir, ['card', 'defer', added.id, '--as', 'owner'])
+  const notQueued = run(dir, ['queue', 'move', added.id, '--top'])
   assert.equal(notQueued.code, 3)
   assert.match(notQueued.err, /не в очереди/)
 
