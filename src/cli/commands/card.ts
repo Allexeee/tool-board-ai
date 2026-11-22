@@ -71,6 +71,16 @@ export default async function command(args: ParsedArgs) {
     const skill = stringFlag(args, 'skill')
     if (!skill) throw new UserError(3, 'нужен --skill dev')
 
+    // Оценки валидируются до создания: ошибка ввода не должна оставлять карточку.
+    const importance = numberFlag(args, 'importance')
+    if (importance !== undefined && (importance < 0 || importance > 3)) {
+      throw new UserError(3, 'важность — целое число от 0 до 3')
+    }
+    const urgency = numberFlag(args, 'urgency')
+    if (urgency !== undefined && (urgency < 0 || urgency > 3)) {
+      throw new UserError(3, 'срочность — целое число от 0 до 3')
+    }
+
     const card = createCard(db, {
       group,
       title,
@@ -81,9 +91,7 @@ export default async function command(args: ParsedArgs) {
       author: stringFlag(args, 'as') ?? 'owner',
     })
     const score: CardPatch = {}
-    const importance = numberFlag(args, 'importance')
     if (importance !== undefined) score.importance = importance
-    const urgency = numberFlag(args, 'urgency')
     if (urgency !== undefined) score.urgency = urgency
     if (Object.keys(score).length > 0) {
       editCard(db, { id: card.id, actor: stringFlag(args, 'as') ?? 'owner', patch: score })

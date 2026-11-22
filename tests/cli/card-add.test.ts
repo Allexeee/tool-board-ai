@@ -228,3 +228,21 @@ test('card add и edit принимают теги', (t) => {
   const cleared = json(dir, ['card', 'edit', 'UI-1', '--clear-tags'])
   assert.deepEqual(cleared.tags, [])
 })
+
+test('card add с невалидной оценкой не создаёт карточку', (t) => {
+  const dir = project(t)
+
+  const bad = run(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--importance', '4',
+  ])
+  assert.equal(bad.code, 3)
+  assert.match(bad.err, /0 до 3/)
+
+  const negative = run(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--urgency', '-1',
+  ])
+  assert.equal(negative.code, 3)
+
+  const list = json(dir, ['card', 'list'])
+  assert.equal(list.length, 0)
+})
