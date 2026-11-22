@@ -819,3 +819,19 @@ test('endRun возвращает planned в request и очищает run_id', 
   assert.equal(card.runId, null)
   assert.equal(listRunCards(db, run.id)[0].status, 'dropped')
 })
+
+test('отвеченный planned-запрос встаёт в голову очереди', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'] })
+  const first = seedCard(db, { phase: 'request', status: 'new' })
+  const second = seedCard(db, { phase: 'request', status: 'new' })
+  const run = startRun(db, { executorId: 'dev', cardIds: [first.id, second.id], actor: 'dev' })
+
+  blockCard(db, { id: second.id, actor: 'dev', reason: 'needs_decision' })
+  assert.equal(nextCard(db, { executorId: 'dev' })?.id, first.id)
+
+  resumeAfterAnswer(db, second.id, 'owner')
+  assert.equal(nextCard(db, { executorId: 'dev' })?.id, second.id)
+  assert.equal(listRunCards(db, run.id)[0].cardId, second.id)
+})

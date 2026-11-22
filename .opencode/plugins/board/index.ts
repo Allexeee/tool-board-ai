@@ -4,7 +4,7 @@
 import { Plugin } from '@opencode/plugin'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
@@ -17,7 +17,10 @@ function projectRoot(ctx) {
   if (canonical) return canonical
   let dir = ctx.location.directory
   for (;;) {
-    if (existsSync(join(dir, '.board')) || existsSync(join(dir, '.git'))) return dir
+    if (existsSync(join(dir, '.board'))) return dir
+    if (existsSync(join(dir, '.git'))) {
+      return basename(dirname(dir)) === '.worktrees' ? dirname(dirname(dir)) : dir
+    }
     const parent = join(dir, '..')
     if (parent === dir) return dir
     dir = parent

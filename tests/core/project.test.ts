@@ -154,3 +154,16 @@ test('initProject сохраняет чужой хук без блока toolbox
   assert.match(text, /echo custom/)
   assert.doesNotMatch(text, /toolbox-al/)
 })
+
+test('initProject в не-git каталоге без BOARD_ALLOW_GLOBAL — ошибка', (t) => {
+  const root = tempDir()
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const previous = process.env.BOARD_ALLOW_GLOBAL
+  delete process.env.BOARD_ALLOW_GLOBAL
+  try {
+    assert.throws(() => initProject(root), /нужен git/)
+  } finally {
+    if (previous === undefined) delete process.env.BOARD_ALLOW_GLOBAL
+    else process.env.BOARD_ALLOW_GLOBAL = previous
+  }
+})

@@ -1,5 +1,4 @@
-import { findProject } from '../../core/project.ts'
-import { initProject } from '../../core/project.ts'
+import { findProject, runLocalInit } from '../../core/project.ts'
 import {
   boardSubmoduleSource,
   checkoutBoardRef,
@@ -23,8 +22,14 @@ export default async function command(args: ParsedArgs) {
   const ref = explicit ?? (latest ? latestBoardTag(source!) : null)
   if (!ref) throw new UserError(3, 'использование: board upgrade <ref>|--latest [--allow-downgrade]')
 
-  checkoutBoardRef(project.root, ref, { allowDowngrade: boolFlag(args, 'allow-downgrade') })
-  const result = initProject(project.root, { refresh: true })
+  const allowDowngrade = boolFlag(args, 'allow-downgrade')
+  if (allowDowngrade) {
+    process.stderr.write(
+      'внимание: даунгрейд может не открыть более новую схему .board/board.db; сделайте бэкап базы\n',
+    )
+  }
+  checkoutBoardRef(project.root, ref, { allowDowngrade })
+  const result = runLocalInit(project.root)
 
   ok(
     {
