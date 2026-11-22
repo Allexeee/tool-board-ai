@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Каждый проект работает со своей версией board из git submodule `tools/board`, а superpowers включается только в проектах, где он нужен.
+**Goal:** Каждый проект работает со своей версией board из git submodule `tools/board`; superpowers — локальная настройка машины, а не часть проекта.
 
-**Architecture:** `tools/board` — submodule на тег/коммит; глобальный `board` — тонкий диспетчер, который делегирует локальному CLI. `board init` ставит submodule и генерирует `.opencode` из его версии; `board upgrade` переключает ref. Superpowers убирается из глобального `opencode.json` и добавляется в `.opencode/opencode.json` нужных проектов.
+**Architecture:** `tools/board` - submodule на тег/коммит; глобальный `board` - тонкий диспетчер, который делегирует локальному CLI. `board init` ставит submodule и генерирует `.opencode` из его версии; `board upgrade` переключает ref. Superpowers убирается из глобального `opencode.json`; `.opencode/opencode.json` — локальная настройка машины и в git не коммитится.
 
 **Tech Stack:** TypeScript, Node 24+, `node:sqlite`, git submodule, OpenCode V2 plugin/skill config.
 
@@ -395,52 +395,36 @@ git commit -m "feat: plugin resolves project-local board"
 
 ---
 
-### Task 7: Superpowers по проектам
+### Task 7: Superpowers — локальная настройка машины
 
 **Files:**
-- Create: `.opencode/opencode.json`
 - Modify: `C:\Users\aleks\.config\opencode\opencode.json` (вне репозитория)
 - Modify: `README.md`, `docs/board/terminology.md`
-- Test: `tests/core/opencode.test.ts` (файл проекта)
+- Не коммитить: `.opencode/opencode.json`
 
 **Interfaces:**
 - Глобальный `opencode.json`: удалить запись superpowers из `plugins`, сохранить остальное.
-- `.opencode/opencode.json`:
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["C:\\Users\\aleks\\.config\\opencode\\node_modules\\superpowers"]
-}
-```
+- `.opencode/opencode.json` — локальный файл машины; в git не попадает.
 
-- [ ] **Step 1: Тест файла проекта**
-
-```ts
-test('проект подключает superpowers локально', () => {
-  const config = JSON.parse(readFileSync(join(root, '.opencode', 'opencode.json'), 'utf8'))
-  assert.ok(config.plugins.some((entry: string) => entry.includes('superpowers')))
-})
-```
-
-- [ ] **Step 2: Создать файл и удалить глобальную запись**
+- [ ] **Step 1: Удалить глобальную запись**
 
 Node-скрипт: прочитать глобальный JSON, отфильтровать `plugins` без `superpowers`, записать обратно с отступом 2. Если `plugins` пуст — удалить ключ.
 
-- [ ] **Step 3: Обновить README/terminology**
+- [ ] **Step 2: Обновить README/terminology**
 
-Описать: superpowers не глобальный; проект добавляет его в `.opencode/opencode.json`; brainstorming доступен только там; в проекте с superpowers можно запретить `brainstorming` через `permissions`.
+Описать: superpowers — локальная настройка пользователя; проект не коммитит `.opencode/opencode.json` и не задаёт путь к пакету.
 
-- [ ] **Step 4: Проверка**
+- [ ] **Step 3: Проверка**
 
-Run: `node --test tests/core/opencode.test.ts`
+Run: `node --test`
 Expected: PASS.
-Вручную: список скиллов в проекте без записи не содержит superpowers; в этом проекте — содержит после reload.
+Вручную: `.opencode/opencode.json` отсутствует в `git ls-files`.
 
-- [ ] **Step 5: Коммит**
+- [ ] **Step 4: Коммит**
 
 ```bash
-git add .opencode/opencode.json README.md docs/board/terminology.md tests/core/opencode.test.ts
-git commit -m "feat: superpowers opt-in per project"
+git add README.md docs/board/terminology.md
+git commit -m "docs: superpowers is a local machine setting"
 ```
 
 ---

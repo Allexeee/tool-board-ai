@@ -181,13 +181,6 @@ test('существующий AGENTS.md сохраняется, блок board 
   assert.doesNotMatch(after, /старое/)
 })
 
-test('проект подключает superpowers локально', () => {
-  const config = JSON.parse(
-    readFileSync(join(process.cwd(), '.opencode', 'opencode.json'), 'utf8'),
-  ) as { plugins?: string[] }
-  assert.ok(config.plugins?.some((entry) => entry.includes('superpowers')))
-})
-
 test('плагин поднимается из .worktrees в корень', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
