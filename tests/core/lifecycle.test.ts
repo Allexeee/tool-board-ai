@@ -248,7 +248,7 @@ test('approve — только владелец и только из approval', 
   assert.throws(() => approveCard(db, { id: fresh.id, actor: 'owner' }), /approval/)
 })
 
-test('owner-карточка после approval становится ready без очереди', (t) => {
+test('owner-карточка после смены навыка сразу ready без очереди и approve', (t) => {
   const { db } = board(t)
   const card = createCard(db, { group: 'UI', title: 'x', skill: 'dev', author: 'owner' })
   shapeCard(db, { id: card.id, actor: 'developer' })
@@ -264,14 +264,15 @@ test('owner-карточка после approval становится ready бе
       urgency: 2,
     },
   })
-  submitCard(db, { id: card.id, actor: 'developer' })
-  approveCard(db, { id: card.id, actor: 'owner' })
 
   const approved = getCard(db, card.id)!
   assert.equal(approved.status, 'ready')
   assert.equal(approved.needsMerge, false)
   assert.equal(approved.reviewRequired, false)
   assert.equal(approved.position, null)
+  assert.equal(approved.holder, null)
+  assert.equal(approved.leaseUntil, null)
+  assert.throws(() => submitCard(db, { id: card.id, actor: 'developer' }), /владелец/)
 })
 
 test('reject возвращает в new, сохраняя содержимое, причина в журнале', (t) => {
@@ -890,4 +891,30 @@ test('два отклонённых запроса получают разные
   assert.notEqual(positions[0], null)
   assert.notEqual(positions[1], null)
   assert.notEqual(positions[0], positions[1])
+})
+
+test('owner-конверсия снимает держателя, lease и забег; submit owner отказывает', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  const host = seedCard(db, { phase: 'request', status: 'new' })
+  shapeCard(db, { id: host.id, actor: 'developer' })
+  applyShapeFile(db, {
+    id: host.id,
+    actor: 'developer',
+    file: { skill: 'owner', needs_merge: false },
+  })
+  const converted = getCard(db, host.id)!
+  assert.equal(converted.holder, null)
+  assert.equal(converted.leaseUntil, null)
+  assert.equal(converted.runId, null)
+
+  const inRun = seedCard(db, { phase: 'request', status: 'new' })
+  const run = startRun(db, { executorId: 'developer', cardIds: [inRun.id], actor: 'developer' })
+  editCard(db, { id: inRun.id, actor: 'owner', patch: { skill: 'owner', needsMerge: false } })
+  assert.equal(getCard(db, inRun.id)!.runId, null)
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === inRun.id)!.status, 'dropped')
+
+  const owner = seedCard(db, { skill: 'owner' })
+  assert.throws(() => submitCard(db, { id: owner.id, actor: 'developer' }), /владелец/)
 })
