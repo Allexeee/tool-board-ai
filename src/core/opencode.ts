@@ -358,6 +358,15 @@ function termArgs(input) {
 export default Plugin.define({
   id: 'board',
   async setup(ctx) {
+    // Брейншторм — часть работы по доске; строка в системном промпте не зависит
+    // от того, загрузился ли навык, и от содержимого AGENTS.md.
+    await ctx.session.hook('context', (event) => {
+      event.system.push({
+        type: 'text',
+        text: 'Перед любой работой по доске используй brainstorming; в этом проекте его spec пишется в карточку. Разговор без глагола работы карточек не создаёт.',
+      })
+    })
+
     await ctx.tool.transform((editor) => {
       editor.namespace({ name: 'board', description: 'Доска карточек board' })
 
