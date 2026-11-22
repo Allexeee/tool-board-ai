@@ -162,22 +162,22 @@ test('init --json создаёт v2-настройки и просит запу�
   assert.equal(again.setupRequired, false)
 })
 
-test('init --refresh обновляет старый плагин и скилл', (t) => {
+test('init --refresh обновляет старый плагин и навык', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'board-init-refresh-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
 
   assert.equal(run(root, ['init', '--json']).code, 0)
   const plugin = join(root, '.opencode', 'plugins', 'board', 'index.ts')
-  const skill = join(root, '.opencode', 'skills', 'board', 'SKILL.md')
+  const skill = join(root, '.opencode', 'skills', 'board-spec', 'SKILL.md')
   writeFileSync(plugin, '// старый плагин\n', 'utf8')
-  writeFileSync(skill, '# старый скилл\n', 'utf8')
+  writeFileSync(skill, '# старый навык\n', 'utf8')
 
   const result = run(root, ['init', '--refresh', '--json'])
   assert.equal(result.code, 0, result.err)
   const data = JSON.parse(result.out) as { updated: string[] }
 
   assert.ok(data.updated.some((path) => path.includes('plugins/board/index.ts')))
-  assert.ok(data.updated.some((path) => path.includes('skills/board/SKILL.md')))
+  assert.ok(data.updated.some((path) => path.includes('skills/board-spec/SKILL.md')))
   assert.match(readFileSync(plugin, 'utf8'), /board_setup/)
-  assert.match(readFileSync(skill, 'utf8'), /## Настройки/)
+  assert.match(readFileSync(skill, 'utf8'), /# board-spec/)
 })

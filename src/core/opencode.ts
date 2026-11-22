@@ -8,10 +8,11 @@ import {
 import type { BoardSettings } from './settings.ts'
 
 /**
- * Файлы OpenCode, которые `board init` кладёт в проект: тонкий плагин, скилл и
- * команду ревью, плюс блок в `AGENTS.md`. Логики здесь нет: плагин зовёт CLI,
- * скилл объясняет порядок, команда ревью порождает субагента. Шаблоны живут
- * здесь строками, чтобы пакет `files` («bin», «src») содержал всё необходимое.
+ * Файлы OpenCode, которые `board init` кладёт в проект: тонкий плагин, четыре
+ * навыка и команды ревью, плюс блок в `AGENTS.md`. Логики здесь нет: плагин
+ * зовёт CLI, навыки объясняют порядок, команда ревью порождает субагента.
+ * Шаблоны живут здесь строками, чтобы пакет `files` («bin», «src») содержал всё
+ * необходимое.
  */
 
 export const AGENTS_BEGIN = '<!-- board:begin -->'
@@ -34,97 +35,129 @@ export const AGENTS_BLOCK = [
   '- Ревью идёт одним циклом: findings становятся карточками; critical блокирует release, important/other — backlog.',
   '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
   '- После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.',
-  '- Коммит и мерж делает `finish`; агент в git не пишет. `main` меняется только `release` владельцем.',
+  '- Коммит делаешь сам в ветке карточки; мерж в `dev` делает `finish`. `main` меняется только `release` владельцем.',
   AGENTS_END,
 ].join('\n')
 
-export const SKILL_SOURCE = `---
-name: board
-description: Доска карточек: смотреть now, разбирать spec, брать забег, закрывать, ревьюить
+export const SKILL_SPEC_SOURCE = `---
+name: board-spec
+description: Доска: разобрать запрос в spec и утвердить — критерии приёмки, вопросы, reviewRequired
 ---
 
-# board
+# board-spec
 
-Доска карточек для владельца и агентов. Источник истины — база \`.board/board.db\`; язык проекта — \`docs/board/terminology.md\`.
+Доска карточек: источник истины — \`.board/board.db\`; термины и команды владельца — \`docs/board/terminology.md\`. Они авторитетны: если фразы нет в списке — спроси владельца и предложи её добавить.
 
 ## Разговор и брейншторм
 
-Разговор ведёт brainstorming (superpowers), а не этот навык. В board-проекте brainstorming не пишет \`docs/superpowers/**\`: spec и критерии приёмки идут в карточку (\`card shape\`), решения — в body карточки или \`board decision\`, утверждение дизайна — \`card approve\`. Второго гейта (отдельного design doc) нет.
+Разговор ведёт brainstorming, а не этот навык. В board-проекте brainstorming не пишет \`docs/superpowers/**\`: spec и критерии приёмки идут в карточку (\`card shape\`), решения — в body карточки или \`board decision\`, утверждение дизайна — \`card approve\`. Второго гейта (отдельного design doc) нет.
 
-Термины и команды владельца — в \`docs/board/terminology.md\`; они авторитетны. Если фразы нет в списке — спроси владельца и предложи её добавить.
+Доска реагирует только на глагол работы: «разбери / добавь / оформи» — карточка, «работай / Ран» — навык board-work. Без глагола работы карточки не создаются: на «порассуждать» доска молчит.
 
-## Смотреть доску
-
-\`board now\` (инструмент \`board_now\`): \`now 0\` — владельцу (по умолчанию), \`now 1\` — текущий агент, очередь и вероятные забеги, \`now 2\` — другие агенты, \`now 3\` — запросы и очередь. Варианты забега задаются тегами карточки: \`new\`, \`improve\`, \`review\`.
-
-## Карточка: spec и plan
+## Разбор
 
 1. Запрос → разбор: \`board card shape <ID> --as <исполнитель> [--from card.json]\`.
-2. Вопросы по разбору решай в чате. \`ask\` — если владельца нет; \`block\` — если без ответа нельзя продолжать. Угадывать нельзя.
-3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки** (\`--acceptance\` или \`acceptance\` в JSON). План (\`steps\`) при shape не пишется.
-4. Spec review: \`/spec-review\`. Режим смотри в \`board card show <ID> --json\` → \`specReview.mode\`:
-   - \`none\` — проверка не нужна;
-   - \`self\` — проверь сам по чек-листу;
-   - \`subagent\` — запусти \`board-reviewer\`.
-5. Если spec неполный, сначала дополни его из контекста проекта, затем задай вопрос владельцу. Результат запиши: \`board card spec-review <ID> --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."\`.
-6. \`board card submit <ID> --as <исполнитель>\`; владелец делает \`card approve\` или \`card reject\`.
-7. После approve менять spec/acceptance/scope нельзя. Нужно изменение — \`board card amend <ID> --as <исполнитель> --reason "..."\`, затем снова review и approve.
+2. Вопросы по разбору решай в чате. \`ask\` — асинхронный вопрос, если владельца нет; \`block\` — только если без ответа нельзя продолжать. Угадывать нельзя.
+3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. План (\`steps\`) при shape не пишется.
+4. Spec review: \`/spec-review\`. Режим — \`board card show <ID> --json\` → \`specReview.mode\`: \`none\` — не нужна, \`self\` — сам, \`subagent\` — \`board-reviewer\`. Результат: \`board card spec-review <ID> --mode self|subagent --verdict done|reopen --note "..."\`.
+5. \`board card submit <ID> --as <исполнитель>\`; владелец делает \`card approve\` или \`card reject\`.
+6. После approve spec/acceptance/scope не меняются. Нужно изменение — \`board card amend <ID> --reason "..."\`, затем review и approve снова.
 
-## Исполнение
+## Просто или не просто
 
-Всегда Native: агент исполняет карточку сам. Субагенты не используются для реализации, builder-check и написания spec/plan. TDD и проверки — по шагам. План живёт в steps карточки (\`board card step add\`); отдельного plan-файла нет.
-
-## Забег и выполнение
-
-1. \`board run start --as <исполнитель> --cards <ID>,...\` (или \`--suggest 1\` — вариант new).
-2. \`board take <ID> --as <исполнитель>\` — карточка в работе. Если это запрос в забеге, первый \`take\` переводит его в разбор, второй после spec — в работу; approve владельца не требуется.
-3. Перед кодом напиши **plan**: \`board card step add <ID> "шаг + проверка"\`; scope уже зафиксирован в spec при разборе.
-4. Если plan требует нового поведения или scope — остановись, \`block\`/\`ask\` владельцу; после approve \`card edit\` не меняет scope, нужен \`card amend\`.
-5. \`board finish <ID> --as <исполнитель> --summary "..."\` — сдать (review или done).
-6. \`board run next --as <исполнитель>\` — следующая карточка.
-7. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег. Если \`reviewMode\` не \`none\`, запусти \`/review\`.
-
-## Если не можешь
-
-- \`ask\` — асинхронный вопрос: владельца нет, ответ нужен другому агенту или должен остаться в истории; \`board ask <ID> "вопрос" --as <исполнитель> [--block]\`. Вопросы по разбору решаются в чате.
-- \`block\` — только если без ответа нельзя продолжать: \`board block <ID> --as <исполнитель> --reason needs_decision --note "..."\`.
-
-## Ревью
-
-- \`/spec-review\` — полнота spec до approve. Может быть self или субагентом.
-- \`/review\` — run review: соответствие plan и код; пакет — \`board review list --json\`. Субагент \`board-reviewer\` работает на default-варианте модели, не в Max.
-- Findings: \`board review finding <ID> --severity critical|important|other --text "..."\`.
-- Вердикт: \`board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer <id>\`.
-- \`plan failed\` требует \`reopen\`. \`done\` с findings разрешён: findings становятся карточками.
-- Один цикл: findings не переоткрывают исходную карточку; \`critical\` блокирует release, \`important\`/\`other\` идут в backlog. Второй reopen — только владелец.
-- Finding-карточки после approve могут собраться в отдельный fix run.
-
-## Настройки
-
-После установки плагина, если \`board setup --show --json\` вернул \`setupAt: null\`, спроси владельца и запусти \`/setup\`.
-
-\`board setup --show --json\` — текущие настройки. Режимы:
-
-- \`board setup --spec-review auto|none|self|subagent\`;
-- \`board setup --large-spec 6000\`;
-- \`board setup --run-review none|self|subagent|auto\`;
-- \`board setup --reviewer-model provider/model\` (без \`#variant\`).
-
-Если владелец не хочет менять настройку — ничего не выполняй.
+- **Просто**: нового поведения нет, одна область, критерий проверяется глазами → \`reviewRequired=false\`, отдельный забег не нужен.
+- **Не просто**: новое поведение или решение → \`reviewRequired=true\`, карточка идёт в забег.
+- Уточнение владельца «тут перекрась» относится к текущей карточке: шаг в плане или \`card amend\`. Отдельная мелкая карточка добавляется в текущий забег владельцем или берётся без забега.
 
 ## Решения и термины
 
 - \`board decision add [<ID>] "..." --kind decision|assumption --as <исполнитель>\`.
 - \`board term add "термин" "значение" --as <исполнитель>\`.
 - Команды владельца (\`board command list\`) читай, не редактируй: их пишет только owner.
+`
+
+export const SKILL_WORK_SOURCE = `---
+name: board-work
+description: Доска: исполнить карточку — take, план в steps, TDD, finish, отчёт
+---
+
+# board-work
+
+## Исполнение
+
+Всегда Native: агент исполняет карточку сам. Субагенты не используются для реализации, builder-check и написания spec/plan. TDD и проверки — по шагам; план живёт в steps карточки, отдельного plan-файла нет.
+
+## Работа
+
+1. \`board take <ID> --as <исполнитель>\` — карточка в работе. Для запроса первый \`take\` переводит его в разбор, второй — в работу.
+2. Перед кодом напиши **plan**: \`board card step add <ID> "шаг + проверка"\`; scope зафиксирован в spec.
+3. Если plan требует нового поведения или scope — остановись: \`amend\` или вопрос владельцу.
+4. \`board finish <ID> --as <исполнитель> --summary "..."\` — сдать (review или done).
+5. \`board run next --as <исполнитель>\` — следующая карточка забега.
+
+## Отчёт
+
+Одно сообщение на событие, не на команду; spec не пересказывать, сроки не обещать, о каждом вызове инструмента не отчитываться.
+
+- разбор закончен — «Разобрал X: …» и «Вопросов нет» либо список вопросов;
+- второй \`take\` — «Приступаю к X: шаги 1..N»;
+- \`finish\` — «Сдал X: что сделано, тесты, коммит»;
+- \`block\` или \`drop\` — «Снял X: причина, создал Y».
+
+## Ревью
+
+- \`/spec-review\` — полнота spec до approve; self или субагент по настройке.
+- \`/review\` — run review: соответствие plan и код; пакет — \`board review list --json\`. Субагент \`board-reviewer\` работает на default-варианте модели.
+- Findings: \`board review finding <ID> --severity critical|important|other --text "..."\`.
+- Вердикт: \`board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer <id>\`.
+- Один цикл: findings не переоткрывают исходную карточку; \`critical\` блокирует release, \`important\`/\`other\` идут в backlog. Второй reopen — только владелец. Свою карточку не ревьюй: для кода вердикт даёт свежий субагент.
 
 ## Правила
 
-- Работай в ветке карточки; коммит и мерж делает \`board finish\`. В \`main\` не пиши — его меняет \`release\` владельца.
+- Работай в ветке карточки: коммит делаешь сам, мерж в \`dev\` делает \`board finish\`. В \`main\` не пиши — его меняет \`release\` владельца.
 - Причина обязательна у block/cancel/reject/reopen; \`finish\` требует \`--summary\`.
-- Ревью своей карточки не давай: для кода вердикт — свежий субагент. Spec review может быть self по настройке.
 - \`card reopen\` — только владелец; агент не обходит ею ревью и лимит переоткрытий.
-- Один цикл ревью: не переоткрывай карточку из-за стилистических улучшений.
+`
+
+export const SKILL_RUN_SOURCE = `---
+name: board-run
+description: Доска: забег — «Ран», состав, порядок карточек, run next/end
+---
+
+# board-run
+
+## Забег
+
+1. \`board run start --as <исполнитель> --cards <ID>,...\` (или \`--suggest 1|2|3\` — вариант new/improve/review). На старте не больше 3 карточек.
+2. \`board run next --as <исполнитель>\` — следующая карточка забега.
+3. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег; если \`reviewMode\` не \`none\`, запусти \`/review\`.
+4. \`board run add <ID>\`, \`board run drop <ID>\` — состав забега.
+
+## Рост забега
+
+Размер забега ограничен только на старте. Дальше он растёт:
+
+- владелец может добавить карточку в активный забег в любой момент — \`run add\`;
+- агент сам добавляет только части только что разобранной карточки;
+- части встают в хвост; когда они закрыты, родитель возвращается в хвост того же забега;
+- отложить часть — значит отложить родителя: сказать это владельцу вслух.
+
+## Отчёт
+
+- \`run start\` — «Беру в работу (n)» и по 1–2 предложения на карточку;
+- \`run end\` — «Забег закрыт: сделано n, вынесено m».
+`
+
+export const SKILL_NOW_SOURCE = `---
+name: board-now
+description: Доска: посмотреть состояние — now 0/1/2/3, очередь, забеги
+---
+
+# board-now
+
+\`board now\` (инструмент \`board_now\`): \`now 0\` — владельцу (по умолчанию), \`now 1\` — текущий агент, \`now 2\` — другие агенты, \`now 3\` — запросы и очередь. Варианты забега задаются тегами карточки: \`new\`, \`improve\`, \`review\`.
+
+Показывает статусы, держателей и вероятные забеги; ничего не меняет.
 `
 
 export const PLUGIN_SOURCE = `// Инструменты: board_now, board_setup, board_card, board_run, board_take,
@@ -719,12 +752,26 @@ export function writeOpenCodeFiles(
   const updated: string[] = []
 
   const files: Array<[string, string]> = [
-    ['.opencode/skills/board/SKILL.md', SKILL_SOURCE],
+    ['.opencode/skills/board-spec/SKILL.md', SKILL_SPEC_SOURCE],
+    ['.opencode/skills/board-work/SKILL.md', SKILL_WORK_SOURCE],
+    ['.opencode/skills/board-run/SKILL.md', SKILL_RUN_SOURCE],
+    ['.opencode/skills/board-now/SKILL.md', SKILL_NOW_SOURCE],
     ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
     ['.opencode/command/review.md', COMMAND_SOURCE],
     ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
     ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
   ]
+
+  // Старый единый навык: удаляем, иначе у агента два описания доски.
+  const legacySkill = join(root, '.opencode', 'skills', 'board', 'SKILL.md')
+  if (existsSync(legacySkill)) {
+    rmSync(legacySkill)
+    try {
+      rmSync(dirname(legacySkill))
+    } catch {
+      // в каталоге остались чужие файлы — не трогаем
+    }
+  }
   for (const [relative, content] of files) {
     const path = join(root, relative)
     const exists = existsSync(path)
