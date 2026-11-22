@@ -550,7 +550,7 @@ export function startRun(
     if (cardIds.length > executor.runSize) {
       throw new UserError(
         3,
-        `в забеге не больше ${executor.runSize} карточек, а передано ${cardIds.length}`,
+        `на старте не больше ${executor.runSize} карточек, а передано ${cardIds.length}`,
       )
     }
 
@@ -643,13 +643,8 @@ export function addToRun(
 
     const card = requireRunnableCard(db, executor, input.cardId)
 
+    // Размер забега ограничен только на старте: дальше он растёт свободно.
     const active = rows.filter((row) => ACTIVE_CARD_STATUSES.includes(row.status))
-    if (active.length >= executor.runSize) {
-      throw new UserError(
-        3,
-        `в забеге ${run.id} уже ${active.length} карточек: не больше ${executor.runSize}`,
-      )
-    }
 
     requireDeps(db, card, new Set(active.map((row) => row.cardId)), run.id)
 
