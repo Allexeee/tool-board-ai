@@ -876,15 +876,24 @@ function takeRequest(
   }
 
   const promoted = startWork(db, card, actor, root, run)
+  // Правило забега — авторизация вместо approve: фиксируем её, чтобы resume
+  // вернул карточку в работу, а не в approval.
+  if (promoted.approvedAt === null) {
+    db.prepare('update cards set approved_at = ? where id = ? and approved_at is null').run(
+      nowIso(),
+      card.id,
+    )
+  }
+  const authorized = getCard(db, card.id)!
   appendEvent(db, {
     type: 'card.promoted',
     actor,
     subject: card.id,
     before: card,
-    after: promoted,
+    after: authorized,
     note: `забег ${run.id}: approve пропущен по правилу запроса в забеге`,
   })
-  return promoted
+  return authorized
 }
 
 function startWork(
