@@ -91,7 +91,7 @@ test('полный цикл карточки через CLI: init → review →
   assert.equal(run(root, ['run', 'end', '--as', 'developer']).code, 0)
 
   // Карточка в dev и на ревью: dev опережает main на 1.
-  const inReview = json(root, ['now'])
+  const inReview = json(root, ['now', '3'])
   assert.equal(inReview.header.devAhead, 1)
   assert.ok(inReview.queue.some((item: { id: string; status: string }) => item.id === 'UI-1' && item.status === 'review'))
 
@@ -101,7 +101,7 @@ test('полный цикл карточки через CLI: init → review →
   assert.equal(released.code, 0, released.err)
 
   // После релиза dev больше не опережает main.
-  const after = json(root, ['now'])
+  const after = json(root, ['now', '3'])
   assert.equal(after.header.devAhead, 0)
 })
 

@@ -8,6 +8,7 @@ import { openDb } from '../../src/core/db.ts'
 import { seedCard, seedExecutor } from '../helpers/board.ts'
 
 const bin = resolve('bin/board.ts')
+const ANSI = /\u001b\[[0-9;]*m/
 
 function run(dir: string, args: string[]) {
   const result = spawnSync(process.execPath, [bin, ...args], {
@@ -37,31 +38,34 @@ function open(dir: string) {
   return openDb(join(dir, '.board', 'board.db'))
 }
 
-test('now --json: вкладка 3 по умолчанию, заголовок и секции', (t) => {
+test('now --json: по умолчанию вкладка 2 с задачами агентов', (t) => {
   const dir = project(t)
   const db = open(dir)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
   seedCard(db, { phase: 'task', status: 'ready', position: 1 })
-  seedCard(db)
   db.close()
 
   const data = json(dir, ['now'])
-  assert.equal(data.view, 3)
+  assert.equal(data.view, 2)
   assert.equal(typeof data.header.doneToday, 'number')
   assert.equal(typeof data.header.devAhead, 'number')
-  assert.equal(data.queue.length, 1)
-  assert.equal(data.requests.length, 1)
+  assert.deepEqual(data.executors.map((item: { id: string }) => item.id), ['developer'])
+  assert.equal(data.executors[0].current.length, 1)
+  assert.equal(data.executors[0].queue.length, 1)
 })
 
-test('now печатает заголовок вкладки и очередь', (t) => {
+test('now печатает вкладку 2 по умолчанию', (t) => {
   const dir = project(t)
   const db = open(dir)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
   seedCard(db, { phase: 'task', status: 'ready', position: 1 })
   db.close()
 
   const out = run(dir, ['now'])
   assert.equal(out.code, 0, out.err)
-  assert.match(out.out, /\[3\] ОТКРЫТЫЕ КАРТОЧКИ/)
-  assert.match(out.out, /СДЕЛАНО СЕГОДНЯ/)
+  assert.match(out.out, /\[2\] ЗАДАЧИ ПО АГЕНТАМ/)
+  assert.match(out.out, /developer/)
   assert.match(out.out, /ОЧЕРЕДЬ \(1\)/)
 })
 
@@ -77,6 +81,42 @@ test('now 0 --json: утвердить, задачи владельца и во�
   assert.equal(data.approvals.length, 1)
   assert.equal(data.ownerCards.length, 1)
   assert.ok(Array.isArray(data.questions))
+})
+
+test('now 1 --json: только задачи указанного агента, без забегов', (t) => {
+  const dir = project(t)
+  const db = open(dir)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedExecutor(db, { id: 'marketer', skills: ['marketing'] })
+  seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
+  seedCard(db, { phase: 'task', status: 'ready', position: 1, skill: 'dev' })
+  seedCard(db, { phase: 'task', status: 'ready', position: 2, skill: 'marketing', group: 'IM' })
+  db.close()
+
+  const data = json(dir, ['now', '1', '--as', 'developer'])
+  assert.equal(data.view, 1)
+  assert.equal(data.executor, 'developer')
+  assert.deepEqual(data.skills, ['dev'])
+  assert.equal(data.current.length, 1)
+  assert.equal(data.queue.length, 1)
+  assert.equal(data.suggestions, undefined)
+  assert.equal(data.runs, undefined)
+  assert.equal(data.currentRun, undefined)
+})
+
+test('now 2 --json: по блоку на агента', (t) => {
+  const dir = project(t)
+  const db = open(dir)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedExecutor(db, { id: 'marketer', skills: ['marketing'] })
+  seedCard(db, { phase: 'task', status: 'ready', position: 1, skill: 'dev' })
+  seedCard(db, { phase: 'task', status: 'ready', position: 2, skill: 'marketing', group: 'IM' })
+  db.close()
+
+  const data = json(dir, ['now', '2', '--as', 'developer'])
+  assert.equal(data.view, 2)
+  assert.deepEqual(data.executors.map((item: { id: string }) => item.id), ['developer', 'marketer'])
+  assert.equal('executor' in data, false)
 })
 
 test('now 3: фильтры --group, --status, --skill и --mine через CLI', (t) => {
@@ -101,22 +141,15 @@ test('now 3: фильтры --group, --status, --skill и --mine через CLI'
   assert.deepEqual(mine.queue.map((card: { id: string }) => card.id), ['OPS-1'])
 })
 
-test('now 1 и now 2 --json: предложения и забеги', (t) => {
+test('now 3: отменённые запросы не показываются', (t) => {
   const dir = project(t)
   const db = open(dir)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  seedExecutor(db, { id: 'marketer', skills: ['marketing'] })
-  seedCard(db, { phase: 'task', status: 'ready', position: 1 })
-  seedCard(db, { phase: 'task', status: 'ready', position: 2, skill: 'marketing', group: 'IM' })
+  seedCard(db, { phase: 'request', status: 'new', title: 'Открытый' })
+  seedCard(db, { phase: 'request', status: 'cancelled', title: 'Отменённый' })
   db.close()
 
-  const one = json(dir, ['now', '1'])
-  assert.equal(one.view, 1)
-  assert.ok(Array.isArray(one.suggestions))
-
-  const two = json(dir, ['now', '2'])
-  assert.equal(two.view, 2)
-  assert.ok(Array.isArray(two.runs))
+  const data = json(dir, ['now', '3'])
+  assert.deepEqual(data.requests.map((card: { title: string }) => card.title), ['Открытый'])
 })
 
 test('now с неизвестной вкладкой — код 3', (t) => {
@@ -153,4 +186,20 @@ test('now 3: --phase, --limit и --all через CLI', (t) => {
   const bad = run(dir, ['now', '3', '--phase', 'wat'])
   assert.equal(bad.code, 3)
   assert.match(bad.err, /--phase/)
+})
+
+test('now не печатает ANSI в пайпе и в --json', (t) => {
+  const dir = project(t)
+  const db = open(dir)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
+  db.close()
+
+  const pipe = run(dir, ['now', '2'])
+  assert.equal(pipe.code, 0, pipe.err)
+  assert.doesNotMatch(pipe.out, ANSI)
+
+  const asJson = run(dir, ['now', '2', '--json'])
+  assert.equal(asJson.code, 0, asJson.err)
+  assert.doesNotMatch(asJson.out, ANSI)
 })
