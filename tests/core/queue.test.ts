@@ -247,3 +247,12 @@ test('очередь запросов: вставка по оценке, move и
   db.prepare("update cards set status = 'deferred', position = null where id = ?").run(deferred.id)
   assert.equal(listQueue(db, {}, 'request').some((card) => card.id === deferred.id), false)
 })
+
+test('owner-карточка не ставится в очередь запросов', (t) => {
+  const { db } = board(t)
+  const owner = task(db, { phase: 'request', status: 'new', skill: 'owner' })
+
+  insertIntoQueue(db, owner.id)
+  assert.equal(getCard(db, owner.id)!.position, null)
+  assert.equal(listQueue(db, {}, 'request').length, 0)
+})
