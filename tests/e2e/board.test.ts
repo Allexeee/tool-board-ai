@@ -18,6 +18,7 @@ function run(dir: string, args: string[]): Result {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
     windowsHide: true,
   })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
@@ -36,6 +37,7 @@ function git(cwd: string, args: string[]): string {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
     windowsHide: true,
   }).trim()
 }
@@ -149,7 +151,8 @@ test('два процесса не бронируют одну карточку 
     new Promise((resolvePromise) => {
       const child = spawn(process.execPath, [bin, 'run', 'start', '--as', actor, '--cards', card.id, '--json'], {
         cwd: root,
-        windowsHide: true,
+        env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
+    windowsHide: true,
       })
       let out = ''
       let err = ''

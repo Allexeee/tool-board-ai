@@ -85,6 +85,7 @@ async function loadCommand(command: string) {
 const rawArgs = process.argv.slice(2)
 const globalFlag = rawArgs.includes('--global')
 const argv = rawArgs.filter((arg) => arg !== '--global')
+const allowGlobal = process.env.BOARD_ALLOW_GLOBAL === '1'
 const self = realpathSync(fileURLToPath(import.meta.url))
 const projectRoot = findProjectRootForCli(process.cwd())
 const local = projectRoot ? findLocalBoardCli(projectRoot) : null
@@ -92,6 +93,7 @@ const installerOverride = argv[0] === 'init' && argv.includes('--board-version')
 
 if (
   !globalFlag &&
+  !allowGlobal &&
   !process.env.BOARD_DELEGATED &&
   local &&
   realpathSync(local) !== self &&
@@ -105,7 +107,7 @@ if (
   process.exit(result.status ?? 3)
 }
 
-if (!globalFlag && !process.env.BOARD_DELEGATED && !local) {
+if (!globalFlag && !allowGlobal && !process.env.BOARD_DELEGATED && !local) {
   const command = argv[0]
   const allowed =
     command === undefined ||

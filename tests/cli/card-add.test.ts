@@ -13,6 +13,7 @@ function run(dir: string, args: string[]) {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
     windowsHide: true,
   })
   return { code: result.status, out: result.stdout, err: result.stderr }
