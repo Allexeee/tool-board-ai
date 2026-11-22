@@ -4,7 +4,7 @@ import { nowData, renderNow, type NowFilters, type NowViewKind } from '../../cor
 import type { CardPhase, CardStatus } from '../../core/types.ts'
 import { boolFlag, numberFlag, stringFlag, stringsFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
-import { ok } from '../output.ts'
+import { colorEnabled, ok } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
@@ -17,16 +17,16 @@ export default async function command(args: ParsedArgs) {
     const filters = parseFilters(args)
 
     const data = nowData(db, { view, executorId, filters, root: project.root })
-    ok(data, renderNow(data))
+    ok(data, renderNow(data, { color: colorEnabled() }))
     return 0
   } finally {
     db.close()
   }
 }
 
-/** `board now [0|1|2|3]`; без номера — вкладка 3. */
+/** `board now [0|1|2|3]`; без номера — вкладка 2 (задачи по агентам). */
 function parseView(raw: string | undefined): NowViewKind {
-  if (raw === undefined) return 3
+  if (raw === undefined) return 2
   if (raw === '0' || raw === '1' || raw === '2' || raw === '3') {
     return Number(raw) as NowViewKind
   }

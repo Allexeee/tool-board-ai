@@ -1,14 +1,15 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
+import { paint, type ColorName } from '../cli/output.ts'
 import { listCards } from './cards.ts'
 import { todayStartIso } from './clock.ts'
 import { openQuestions, type Discussion } from './discussion.ts'
-import { listExecutors } from './executors.ts'
+import { getExecutor, listExecutors } from './executors.ts'
 import { listQueue } from './queue.ts'
-import { getActiveRun, listRunCards, listRuns, reclaimExpired, suggestRuns } from './runs.ts'
-import type { Card, CardPhase, CardStatus, Run, RunCard, RunSuggestion } from './types.ts'
+import { reclaimExpired } from './runs.ts'
+import type { Card, CardPhase, CardStatus } from './types.ts'
 
-/** Вкладка доски `now` (§11): 0 — владельцу, 1 — мои забеги, 2 — все забеги, 3 — открытые карточки. */
+/** Вкладка доски `now` (§11): 0 — владельцу, 1 — мои задачи, 2 — все агенты, 3 — запросы и очередь. */
 export type NowViewKind = 0 | 1 | 2 | 3
 
 export interface NowHeader {
@@ -27,23 +28,26 @@ export interface NowFilters {
   all?: boolean
 }
 
-export interface NowRun {
-  run: Run
-  cards: RunCard[]
+/** Задачи одного агента: что на руках и что доступно по его навыкам. */
+export interface NowAgentTasks {
+  id: string
+  skills: string[]
+  current: Card[]
+  queue: Card[]
 }
 
 export interface NowView {
   view: NowViewKind
   header: NowHeader
   executor?: string
+  skills?: string[]
+  current?: Card[]
+  queue?: Card[]
+  executors?: NowAgentTasks[]
   approvals?: Card[]
   ownerCards?: Card[]
   questions?: Discussion[]
-  currentRun?: NowRun | null
-  suggestions?: RunSuggestion[]
-  runs?: Run[]
   requests?: Card[]
-  queue?: Card[]
   moreQueue?: number
   moreRequests?: number
 }
@@ -56,9 +60,30 @@ export interface NowOptions {
   root?: string
 }
 
+export interface NowRenderOptions {
+  /** Цвет — украшение: включается только когда CLI уже решил, что терминал живой. */
+  color?: boolean
+}
+
 const OWNER = 'owner'
 const REQUEST_LIMIT = 10
 const QUEUE_LIMIT = 15
+
+/** Карточки, которые агент уже держит. */
+const CURRENT_STATUSES: readonly CardStatus[] = ['booked', 'in_progress', 'blocked', 'review']
+
+/** Незанятые задачи, которые стоят в очереди. */
+const OPEN_QUEUE_STATUSES: readonly CardStatus[] = ['ready', 'waiting']
+
+/** Запросы, которые ещё открыты: отменённые и закрытые не показываем. */
+const OPEN_REQUEST_STATUSES: readonly CardStatus[] = ['new', 'shaping', 'blocked']
+
+const CURRENT_ORDER: Record<string, number> = {
+  in_progress: 0,
+  review: 1,
+  blocked: 2,
+  booked: 3,
+}
 
 /**
  * Снимок доски §11. Перед чтением снимает истёкшие lease (§8.5), чтобы очереди
@@ -77,8 +102,8 @@ export function nowData(db: DatabaseSync, options: NowOptions): NowView {
   const filters = options.filters ?? {}
 
   if (view === 0) return { view, header, ...ownerView(db) }
-  if (view === 1) return { view, header, ...myRuns(db, executorId) }
-  if (view === 2) return { view, header, ...allRuns(db, executorId) }
+  if (view === 1) return { view, header, ...agentView(db, executorId, filters) }
+  if (view === 2) return { view, header, ...allAgentsView(db, filters) }
   return { view, header, ...openCards(db, executorId, filters) }
 }
 
@@ -116,48 +141,78 @@ function ownerView(db: DatabaseSync): Pick<NowView, 'approvals' | 'ownerCards' |
   return { approvals, ownerCards, questions }
 }
 
-/**
- * Вкладка «мои забеги» §11.3: текущий активный забег, затем вероятные следующие.
- * Владельцу текущего забега не показываем: у него нет своих забегов, только
- * по одному предложению на агента.
- */
-function myRuns(db: DatabaseSync, executorId: string): Pick<NowView, 'executor' | 'currentRun' | 'suggestions'> {
+/** Вкладка «мои задачи» §11.3: карточки на руках и очередь по навыкам агента. */
+function agentView(
+  db: DatabaseSync,
+  executorId: string,
+  filters: NowFilters,
+): Pick<NowView, 'executor' | 'skills' | 'current' | 'queue'> {
+  const executor = getExecutor(db, executorId)
+  const skills = executor?.skills ?? []
   if (executorId === OWNER) {
-    const suggestions: RunSuggestion[] = []
-    for (const agent of listExecutors(db)) {
-      if (agent.id === OWNER) continue
-      const [suggestion] = suggestRuns(db, agent.id, 1)
-      if (suggestion) suggestions.push(suggestion)
-      if (suggestions.length >= 3) break
-    }
-    return { executor: executorId, currentRun: null, suggestions }
+    return { executor: executorId, skills, current: [], queue: [] }
   }
-
-  const active = getActiveRun(db, executorId)
-  const currentRun: NowRun | null = active
-    ? { run: active, cards: listRunCards(db, active.id) }
-    : null
-
-  return {
-    executor: executorId,
-    currentRun,
-    suggestions: suggestRuns(db, executorId, 3),
-  }
+  return { executor: executorId, skills, ...tasksFor(db, executorId, skills, filters) }
 }
 
-/** Вкладка «все забеги» §11.4: активные и завершённые + по предложению на чужого. */
-function allRuns(db: DatabaseSync, executorId: string): Pick<NowView, 'runs' | 'suggestions'> {
-  const runs = listRuns(db).filter((run) => run.status === 'active' || run.status === 'ended')
-  const suggestions: RunSuggestion[] = []
+/** Вкладка «задачи по агентам» §11.4: по блоку на каждого не-owner исполнителя. */
+function allAgentsView(db: DatabaseSync, filters: NowFilters): Pick<NowView, 'executors'> {
+  const executors: NowAgentTasks[] = []
   for (const executor of listExecutors(db)) {
-    if (executor.id === OWNER || executor.id === executorId) continue
-    const [suggestion] = suggestRuns(db, executor.id, 1)
-    if (suggestion) suggestions.push(suggestion)
+    if (executor.id === OWNER) continue
+    const tasks = tasksFor(db, executor.id, executor.skills, filters)
+    if (tasks.current.length === 0 && tasks.queue.length === 0) continue
+    executors.push({ id: executor.id, skills: executor.skills, ...tasks })
   }
-  return { runs, suggestions }
+  return { executors }
 }
 
-/** Вкладка открытых карточек §11.1: запросы и очередь с лимитами и счётчиками «ещё». */
+/** Карточки на руках и доступная очередь: общий отбор для now 1 и now 2. */
+function tasksFor(
+  db: DatabaseSync,
+  holder: string,
+  skills: string[],
+  filters: NowFilters,
+): Pick<NowAgentTasks, 'current' | 'queue'> {
+  const current = listCards(db, {
+    phase: 'task',
+    status: [...CURRENT_STATUSES],
+    holder,
+    group: filters.group,
+    skill: filters.skill,
+  }).sort(byCurrentOrder)
+
+  const queue = listCards(db, {
+    phase: 'task',
+    status: [...OPEN_QUEUE_STATUSES],
+    group: filters.group,
+    skill: filters.skill,
+  })
+    .filter(
+      (card) =>
+        card.holder === null &&
+        card.position !== null &&
+        card.skill !== null &&
+        skills.includes(card.skill),
+    )
+    .sort(byPosition)
+
+  return { current, queue }
+}
+
+function byCurrentOrder(left: Card, right: Card): number {
+  return (
+    (CURRENT_ORDER[left.status] ?? 9) - (CURRENT_ORDER[right.status] ?? 9) ||
+    (left.position ?? 0) - (right.position ?? 0) ||
+    left.id.localeCompare(right.id)
+  )
+}
+
+function byPosition(left: Card, right: Card): number {
+  return (left.position ?? 0) - (right.position ?? 0) || left.id.localeCompare(right.id)
+}
+
+/** Вкладка запросов и очереди §11.5: только открытые запросы с лимитами и счётчиками. */
 function openCards(
   db: DatabaseSync,
   executorId: string,
@@ -172,13 +227,17 @@ function openCards(
 
   if (showRequests) {
     const limit = all ? Infinity : (filters.limit ?? REQUEST_LIMIT)
-    const requests = listCards(db, {
-      phase: 'request',
-      status: filters.status,
-      group: filters.group,
-      skill: filters.skill,
-      holder,
-    })
+    const requested = filters.status === undefined ? [...OPEN_REQUEST_STATUSES] : asStatuses(filters.status)
+    const statuses = requested.filter((status) => OPEN_REQUEST_STATUSES.includes(status))
+    const requests = statuses.length === 0
+      ? []
+      : listCards(db, {
+          phase: 'request',
+          status: statuses,
+          group: filters.group,
+          skill: filters.skill,
+          holder,
+        })
     result.requests = requests.slice(0, limit)
     result.moreRequests = requests.length > limit ? requests.length - limit : 0
   }
@@ -198,11 +257,15 @@ function openCards(
   return result
 }
 
+function asStatuses(value: CardStatus | CardStatus[]): CardStatus[] {
+  return Array.isArray(value) ? value : [value]
+}
+
 const VIEW_TITLES: Record<NowViewKind, string> = {
   0: 'ВЛАДЕЛЬЦУ',
-  1: 'МОИ ЗАБЕГИ',
-  2: 'ЗАБЕГИ',
-  3: 'ОТКРЫТЫЕ КАРТОЧКИ',
+  1: 'МОИ ЗАДАЧИ',
+  2: 'ЗАДАЧИ ПО АГЕНТАМ',
+  3: 'ЗАПРОСЫ И ОЧЕРЕДЬ',
 }
 
 const STATUS_WORDS: Record<CardStatus, string> = {
@@ -219,47 +282,99 @@ const STATUS_WORDS: Record<CardStatus, string> = {
   cancelled: 'отменена',
 }
 
-const RUN_STATUS_WORDS: Record<Run['status'], string> = {
-  active: 'в работе',
-  ended: 'завершён',
-  cancelled: 'отменён',
-  lease_expired: 'lease истёк',
+/** Цвет статуса: спокойные — серые, живые — цветные, проблема — жёлтая. */
+const STATUS_COLORS: Partial<Record<CardStatus, ColorName>> = {
+  new: 'gray',
+  shaping: 'gray',
+  waiting: 'gray',
+  ready: 'green',
+  booked: 'cyan',
+  in_progress: 'cyan',
+  review: 'magenta',
+  blocked: 'yellow',
+  approval: 'yellow',
+  done: 'green',
+  cancelled: 'gray',
 }
 
-const RUN_CARD_STATUS_WORDS: Record<RunCard['status'], string> = {
-  booked: 'забронирована',
-  in_progress: 'в работе',
-  done: 'done',
-  review: 'review',
-  blocked: 'blocked',
-  dropped: 'снята',
+const AGENT_COLORS: readonly ColorName[] = ['cyan', 'magenta', 'green', 'yellow']
+
+type Painter = (text: string, color: ColorName) => string
+
+const noPaint: Painter = (text) => text
+
+function makePainter(color: boolean): Painter {
+  if (!color) return noPaint
+  return (text, name) => paint(text, name, { isTTY: true, env: {} })
+}
+
+function agentColor(id: string): ColorName {
+  let hash = 0
+  for (const char of id) hash = (hash * 31 + char.codePointAt(0)!) >>> 0
+  return AGENT_COLORS[hash % AGENT_COLORS.length]
 }
 
 /** Текстовый набросок доски §11. Цвет не обязателен; вывод читается в пайпе. */
-export function renderNow(data: NowView): string {
-  const lines: string[] = [titleLine(data)]
-  if (data.view === 3) renderOpen(lines, data)
-  else if (data.view === 0) renderOwner(lines, data)
-  else if (data.view === 1) renderMyRuns(lines, data)
-  else renderAllRuns(lines, data)
+export function renderNow(data: NowView, options: NowRenderOptions = {}): string {
+  const painter = makePainter(options.color === true)
+  const lines: string[] = [titleLine(data, painter)]
+  if (data.view === 3) renderOpen(lines, data, painter)
+  else if (data.view === 0) renderOwner(lines, data, painter)
+  else if (data.view === 1) renderAgentTasks(lines, data, painter)
+  else renderAllTasks(lines, data, painter)
   return lines.join('\n')
 }
 
-function titleLine(data: NowView): string {
+function titleLine(data: NowView, painter: Painter): string {
   if (data.view === 1) {
-    const executors = [...new Set((data.suggestions ?? []).map((run) => run.executorId))]
-    const executor =
-      data.executor && data.executor !== OWNER
-        ? data.executor
-        : executors.length === 1
-          ? executors[0]
-          : undefined
-    return executor ? `[1] МОИ ЗАБЕГИ — ${executor}` : '[1] МОИ ЗАБЕГИ'
+    const executor = data.executor && data.executor !== OWNER ? data.executor : undefined
+    return executor
+      ? `[1] МОИ ЗАДАЧИ — ${painter(executor, agentColor(executor))}`
+      : '[1] МОИ ЗАДАЧИ'
   }
   return `[${data.view}] ${VIEW_TITLES[data.view]}`
 }
 
-function renderOpen(lines: string[], data: NowView): void {
+function renderAgentTasks(lines: string[], data: NowView, painter: Painter): void {
+  renderTaskSections(lines, data.current ?? [], data.queue ?? [], painter)
+}
+
+function renderAllTasks(lines: string[], data: NowView, painter: Painter): void {
+  const executors = data.executors ?? []
+  if (executors.length === 0) {
+    lines.push('задач нет')
+    return
+  }
+  for (const executor of executors) {
+    lines.push('', painter(executor.id, agentColor(executor.id)))
+    renderTaskSections(lines, executor.current, executor.queue, painter)
+  }
+}
+
+function renderTaskSections(
+  lines: string[],
+  current: Card[],
+  queue: Card[],
+  painter: Painter,
+): void {
+  if (current.length > 0) {
+    lines.push(`НА РУКАХ (${current.length})`)
+    for (const card of current) lines.push(cardLine(card, painter, false))
+  }
+  if (queue.length > 0) {
+    lines.push(`ОЧЕРЕДЬ (${queue.length})`)
+    for (const card of queue) lines.push(cardLine(card, painter, true))
+  }
+  if (current.length === 0 && queue.length === 0) lines.push('задач нет')
+}
+
+function cardLine(card: Card, painter: Painter, withPosition: boolean): string {
+  const status = painter(STATUS_WORDS[card.status], STATUS_COLORS[card.status] ?? 'gray')
+  const prefix = withPosition ? `  ${String(card.position ?? 0).padStart(2)}  ` : '  '
+  return `${prefix}${card.id.padEnd(7)} ${card.title}  ${status}`
+}
+
+function renderOpen(lines: string[], data: NowView, painter: Painter): void {
   const { header } = data
   lines.push(`СДЕЛАНО СЕГОДНЯ: ${header.doneToday} · dev опережает main на ${header.devAhead}`)
   lines.push('ПОСЛЕДНИЕ 5 DONE')
@@ -270,8 +385,8 @@ function renderOpen(lines: string[], data: NowView): void {
   if (data.requests && data.requests.length > 0) {
     lines.push(`ЗАПРОСЫ (${data.requests.length})`)
     for (const card of data.requests) {
-      const holder = card.holder ? ` ${card.holder}` : ''
-      lines.push(`  ${card.id.padEnd(7)} ${card.title}  ${STATUS_WORDS[card.status]}${holder}`)
+      const holder = card.holder ? ` ${painter(card.holder, agentColor(card.holder))}` : ''
+      lines.push(`  ${card.id.padEnd(7)} ${card.title}  ${statusWord(card, painter)}${holder}`)
     }
     if (data.moreRequests) lines.push('  ...')
   }
@@ -279,17 +394,17 @@ function renderOpen(lines: string[], data: NowView): void {
   if (data.queue && data.queue.length > 0) {
     lines.push(`ОЧЕРЕДЬ (${data.queue.length})`)
     for (const card of data.queue) {
-      const holder = card.holder ? ` ${card.holder}` : ''
+      const holder = card.holder ? ` ${painter(card.holder, agentColor(card.holder))}` : ''
       lines.push(
         `  ${String(card.position).padStart(2)}  ${card.id.padEnd(7)} ${card.title}  ` +
-          `${STATUS_WORDS[card.status]}${holder}`,
+          `${statusWord(card, painter)}${holder}`,
       )
     }
     if (data.moreQueue) lines.push('  ...')
   }
 }
 
-function renderOwner(lines: string[], data: NowView): void {
+function renderOwner(lines: string[], data: NowView, painter: Painter): void {
   if (data.approvals && data.approvals.length > 0) {
     lines.push(`УТВЕРДИТЬ (${data.approvals.length})`)
     for (const card of data.approvals) {
@@ -308,43 +423,14 @@ function renderOwner(lines: string[], data: NowView): void {
   if (data.questions && data.questions.length > 0) {
     lines.push(`ВОПРОСЫ (${data.questions.length})`)
     for (const question of data.questions) {
-      lines.push(`  ${question.cardId.padEnd(7)} ${question.text}  спрашивает ${question.author}`)
+      lines.push(
+        `  ${question.cardId.padEnd(7)} ${question.text}  спрашивает ` +
+          painter(question.author, agentColor(question.author)),
+      )
     }
   }
 }
 
-function renderMyRuns(lines: string[], data: NowView): void {
-  const current = data.currentRun
-  if (current) {
-    const cards = current.cards
-      .map((card) => `${card.cardId} (${RUN_CARD_STATUS_WORDS[card.status]})`)
-      .join(', ')
-    lines.push(
-      `ТЕКУЩИЙ ЗАБЕГ  ${current.run.id}  ${cards || '—'}  ${RUN_STATUS_WORDS[current.run.status]}`,
-    )
-  }
-
-  const suggestions = data.suggestions ?? []
-  if (suggestions.length > 0 && current) lines.push('СЛЕДУЮЩИЕ')
-  const multi = new Set(suggestions.map((run) => run.executorId)).size > 1
-  suggestions.forEach((run, index) => {
-    const who = multi ? `  ${run.executorId}` : ''
-    const cards = run.cards.map((card) => card.id).join(', ')
-    lines.push(`ЗАБЕГ ${index + 1}  ${cards}  (${run.group ?? '—'})${who}`)
-  })
-
-  if (!current && suggestions.length === 0) lines.push('забегов нет')
-}
-
-function renderAllRuns(lines: string[], data: NowView): void {
-  for (const run of data.runs ?? []) {
-    lines.push(`${run.id}  ${run.executorId}  ${RUN_STATUS_WORDS[run.status]}`)
-  }
-  const suggestions = data.suggestions ?? []
-  if (suggestions.length > 0) {
-    lines.push('СЛЕДУЮЩИЕ')
-    for (const run of suggestions) {
-      lines.push(`  ${run.executorId}  ${run.cards.map((card) => card.id).join(', ')}`)
-    }
-  }
+function statusWord(card: Card, painter: Painter): string {
+  return painter(STATUS_WORDS[card.status], STATUS_COLORS[card.status] ?? 'gray')
 }

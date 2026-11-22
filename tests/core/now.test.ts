@@ -4,7 +4,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { nowIso } from '../../src/core/clock.ts'
 import { ask } from '../../src/core/discussion.ts'
 import { nowData, renderNow } from '../../src/core/now.ts'
-import { makeBoard, seedCard, seedExecutor, seedRun } from '../helpers/board.ts'
+import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 
 type Board = ReturnType<typeof makeBoard>
 
@@ -34,6 +34,9 @@ function readyCard(
     urgency: 3,
   })
 }
+
+const ANSI = /\u001b\[[0-9;]*m/g
+const stripAnsi = (text: string): string => text.replace(ANSI, '')
 
 test('now 3: заголовок — сделано сегодня, dev опережает main, последние 5', (t) => {
   const { db, root } = board(t)
@@ -103,17 +106,22 @@ test('now 3: очередь — 15 строк и счётчик «ещё»', (t)
   assert.equal(data.queue![14].position, 15)
 })
 
-test('now 3: запросы — до 10 по времени создания и счётчик «ещё»', (t) => {
+test('now 3: запросы — только открытые, до 10 по времени создания и счётчик «ещё»', (t) => {
   const { db, root } = board(t)
 
   for (let i = 0; i < 12; i++) {
     seedCard(db, { phase: 'request', status: 'new', title: `Запрос ${i}` })
   }
+  seedCard(db, { phase: 'request', status: 'cancelled', title: 'Отменённый' })
+  seedCard(db, { phase: 'request', status: 'done', title: 'Закрытый' })
 
   const data = nowData(db, { view: 3, executorId: 'owner', root })
   assert.equal(data.requests!.length, 10)
   assert.equal(data.moreRequests, 2)
   assert.ok(data.requests!.every((card) => card.phase === 'request'))
+  assert.ok(
+    data.requests!.every((card) => card.status !== 'cancelled' && card.status !== 'done'),
+  )
   // порядок — по created_at
   assert.equal(data.requests![0].title, 'Запрос 0')
   assert.equal(data.requests![9].title, 'Запрос 9')
@@ -157,94 +165,144 @@ test('now 0: утвердить, задачи владельца и открыт
   assert.ok(data.questions!.every((question) => question.status === 'open'))
 })
 
-test('now 1: агенту — три предложения забега; владельцу — по одному на агента', (t) => {
+test('now 1: задачи агента на руках и очередь по его навыкам', (t) => {
   const { db, root } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedExecutor(db, { id: 'developer', skills: ['dev', 'backend'] })
   seedExecutor(db, { id: 'marketer', skills: ['marketing'] })
 
-  readyCard(db, { position: 1 })
-  readyCard(db, { position: 2, skill: 'marketing', group: 'IM' })
-  readyCard(db, { position: 3 })
-
-  const agent = nowData(db, { view: 1, executorId: 'developer', root })
-  assert.ok(agent.suggestions!.length <= 3)
-  assert.ok(agent.suggestions!.every((run) => run.executorId === 'developer'))
-
-  const owner = nowData(db, { view: 1, executorId: 'owner', root })
-  assert.equal(owner.suggestions!.length, 2)
-  assert.deepEqual(
-    owner.suggestions!.map((run) => run.executorId).sort(),
-    ['developer', 'marketer'],
-  )
-})
-
-test('now 1: показывает текущий активный забег, затем следующие', (t) => {
-  const { db, root } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-
-  const current = readyCard(db, { position: 1 })
-  const next = readyCard(db, { position: 2 })
-  const run = seedRun(db, { executorId: 'developer', cardIds: [current.id] })
+  const inWork = seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
+  const review = seedCard(db, { phase: 'task', status: 'review', holder: 'developer' })
+  const ownQueue = readyCard(db, { position: 1 })
+  const backendQueue = readyCard(db, { position: 2, skill: 'backend', group: 'API' })
+  const waiting = seedCard(db, {
+    phase: 'task',
+    status: 'waiting',
+    position: 3,
+    skill: 'dev',
+  })
+  const foreignQueue = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    position: 4,
+    skill: 'marketing',
+    group: 'IM',
+  })
+  const foreignHeld = seedCard(db, {
+    phase: 'task',
+    status: 'in_progress',
+    holder: 'marketer',
+    skill: 'dev',
+  })
+  const heldQueue = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    position: 5,
+    skill: 'dev',
+    holder: 'marketer',
+  })
 
   const data = nowData(db, { view: 1, executorId: 'developer', root })
+
+  assert.equal(data.view, 1)
   assert.equal(data.executor, 'developer')
-  assert.equal(data.currentRun?.run.id, run.id)
-  assert.deepEqual(data.currentRun?.cards.map((card) => card.cardId), [current.id])
-  assert.ok(data.suggestions!.every((suggestion) => !suggestion.cards.some((card) => card.id === current.id)))
-  assert.ok(data.suggestions!.some((suggestion) => suggestion.cards.some((card) => card.id === next.id)))
-
-  const text = renderNow(data)
-  assert.match(text, /ТЕКУЩИЙ ЗАБЕГ/)
-  assert.match(text, new RegExp(run.id))
-  assert.match(text, /СЛЕДУЮЩИЕ/)
-})
-
-test('now 1: владельцу не больше трёх забегов', (t) => {
-  const { db, root } = board(t)
-  for (const [id, skill] of [
-    ['developer', 'dev'],
-    ['marketer', 'marketing'],
-    ['writer', 'writing'],
-    ['designer', 'design'],
-  ] as const) {
-    seedExecutor(db, { id, skills: [skill] })
-    readyCard(db, { position: 1, skill, group: 'UI' })
+  assert.deepEqual(data.skills, ['dev', 'backend'])
+  assert.deepEqual(data.current!.map((card) => card.id), [inWork.id, review.id])
+  assert.deepEqual(data.queue!.map((card) => card.id), [ownQueue.id, backendQueue.id, waiting.id])
+  for (const card of [foreignQueue, foreignHeld, heldQueue]) {
+    assert.ok(!data.current!.some((item) => item.id === card.id))
+    assert.ok(!data.queue!.some((item) => item.id === card.id))
   }
-
-  const data = nowData(db, { view: 1, executorId: 'owner', root })
-  assert.equal(data.suggestions!.length, 3)
+  assert.equal('suggestions' in data, false)
+  assert.equal('runs' in data, false)
+  assert.equal('currentRun' in data, false)
 })
 
-test('now 2: активные и завершённые забеги + по предложению на чужого исполнителя', (t) => {
+test('now 1: у агента без задач пустые списки, у владельца — тоже', (t) => {
+  const { db, root } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  const agent = nowData(db, { view: 1, executorId: 'developer', root })
+  assert.deepEqual(agent.current, [])
+  assert.deepEqual(agent.queue, [])
+
+  const owner = nowData(db, { view: 1, executorId: 'owner', root })
+  assert.deepEqual(owner.current, [])
+  assert.deepEqual(owner.queue, [])
+})
+
+test('now 2: задачи по всем агентам без выделения текущего', (t) => {
   const { db, root } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
   seedExecutor(db, { id: 'marketer', skills: ['marketing'] })
+  seedExecutor(db, { id: 'writer', skills: ['writing'] })
 
-  const active = seedRun(db, { executorId: 'developer' })
-  seedRun(db, { executorId: 'marketer', status: 'ended' })
-  readyCard(db, { position: 1 })
-  readyCard(db, { position: 2, skill: 'marketing', group: 'IM' })
-
-  const data = nowData(db, { view: 2, executorId: 'owner', root })
-
-  assert.ok(data.runs!.some((run) => run.id === active.id))
-  assert.equal(data.runs!.length, 2)
-  assert.deepEqual(
-    data.suggestions!.map((run) => run.executorId).sort(),
-    ['developer', 'marketer'],
-  )
-})
-
-test('now 2: текущий исполнитель исключается из предложений', (t) => {
-  const { db, root } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  seedExecutor(db, { id: 'marketer', skills: ['marketing'] })
-
-  readyCard(db, { position: 1 })
-  readyCard(db, { position: 2, skill: 'marketing', group: 'IM' })
+  const devHeld = seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
+  const devQueue = readyCard(db, { position: 1 })
+  const marketerQueue = readyCard(db, { position: 2, skill: 'marketing', group: 'IM' })
 
   const data = nowData(db, { view: 2, executorId: 'developer', root })
-  assert.deepEqual(data.suggestions!.map((run) => run.executorId), ['marketer'])
+
+  assert.equal(data.view, 2)
+  assert.equal('executor' in data, false)
+  assert.equal('suggestions' in data, false)
+  assert.deepEqual(data.executors!.map((item) => item.id), ['developer', 'marketer'])
+  const developer = data.executors![0]
+  const marketer = data.executors![1]
+  assert.deepEqual(developer.current.map((card) => card.id), [devHeld.id])
+  assert.deepEqual(developer.queue.map((card) => card.id), [devQueue.id])
+  assert.deepEqual(marketer.current, [])
+  assert.deepEqual(marketer.queue.map((card) => card.id), [marketerQueue.id])
+})
+
+test('now 1/2: текст с секциями НА РУКАХ и ОЧЕРЕДЬ, без фич и фиксов', (t) => {
+  const { db, root } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
+  readyCard(db, { position: 1 })
+
+  const one = nowData(db, { view: 1, executorId: 'developer', root })
+  const text = renderNow(one)
+  assert.match(text, /\[1\] МОИ ЗАДАЧИ — developer/)
+  assert.match(text, /НА РУКАХ \(1\)/)
+  assert.match(text, /ОЧЕРЕДЬ \(1\)/)
+  assert.doesNotMatch(text, /ФИЧИ|ФИКСЫ/)
+
+  const two = nowData(db, { view: 2, executorId: 'owner', root })
+  const all = renderNow(two)
+  assert.match(all, /\[2\] ЗАДАЧИ ПО АГЕНТАМ/)
+  assert.match(all, /developer/)
+  assert.doesNotMatch(all, /МОИ ЗАДАЧИ|ФИЧИ|ФИКСЫ/)
+})
+
+test('now 3: текст с открытыми запросами и очередью', (t) => {
+  const { db, root } = board(t)
+  seedCard(db, { phase: 'request', status: 'new', title: 'Запрос' })
+  readyCard(db, { position: 1 })
+
+  const data = nowData(db, { view: 3, executorId: 'owner', root })
+  const text = renderNow(data)
+  assert.match(text, /\[3\] ЗАПРОСЫ И ОЧЕРЕДЬ/)
+  assert.match(text, /ЗАПРОСЫ \(1\)/)
+  assert.match(text, /ОЧЕРЕДЬ \(1\)/)
+  assert.match(text, /СДЕЛАНО СЕГОДНЯ/)
+})
+
+test('now: без цвета по умолчанию, цвета только при color=true', (t) => {
+  const { db, root } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedCard(db, { phase: 'task', status: 'review', holder: 'developer' })
+  readyCard(db, { position: 1 })
+
+  const data = nowData(db, { view: 1, executorId: 'developer', root })
+
+  const plain = renderNow(data)
+  assert.equal(ANSI.test(plain), false)
+  assert.equal(stripAnsi(plain), plain)
+
+  const colored = renderNow(data, { color: true })
+  assert.match(colored, /\u001b\[[0-9;]*m/)
+  assert.equal(stripAnsi(colored), plain)
 })
 
 test('now: неизвестная вкладка — ошибка', (t) => {
