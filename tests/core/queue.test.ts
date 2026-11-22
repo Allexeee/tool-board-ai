@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { DatabaseSync } from 'node:sqlite'
-import { getCard } from '../../src/core/cards.ts'
+import { editCard, getCard } from '../../src/core/cards.ts'
 import {
   insertIntoQueue,
   listQueue,
@@ -254,5 +254,16 @@ test('owner-карточка не ставится в очередь запро�
 
   insertIntoQueue(db, owner.id)
   assert.equal(getCard(db, owner.id)!.position, null)
+  assert.equal(listQueue(db, {}, 'request').length, 0)
+})
+
+test('смена навыка на owner убирает позицию из очереди', (t) => {
+  const { db } = board(t)
+  const card = task(db, { phase: 'request', status: 'new', importance: 2, urgency: 2 })
+  insertIntoQueue(db, card.id)
+  assert.ok(getCard(db, card.id)!.position)
+
+  editCard(db, { id: card.id, actor: 'owner', patch: { skill: 'owner', needsMerge: false } })
+  assert.equal(getCard(db, card.id)!.position, null)
   assert.equal(listQueue(db, {}, 'request').length, 0)
 })

@@ -398,6 +398,8 @@ export function editCard(
         }
         sets.push('skill = ?')
         params.push(skill)
+        // Owner-карточки не стоят ни в одной очереди: позиция сбрасывается.
+        if (skill === OWNER_SKILL) sets.push('position = null')
       }
     }
     if (patch.importance !== undefined) {
