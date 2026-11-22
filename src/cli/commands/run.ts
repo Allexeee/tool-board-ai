@@ -6,6 +6,7 @@
   listRunCards,
   listRuns,
   nextCard,
+  noteRun,
   reclaimExpired,
   releaseRun,
   startRun,
@@ -35,7 +36,8 @@ import { fail, ok } from '../output.ts'
 const USAGE =
   'использование: board run start --as developer --cards UI-1,UI-2 | --suggest 1; ' +
   'run add|drop UI-1 --as developer; run next --as developer; ' +
-  'run end --as developer [--review|--no-review]; run release RUN-1 --reason "..."; run list'
+  'run end --as developer [--review|--no-review]; run release RUN-1 --reason "..."; ' +
+  'run note RUN-1 --text "итоги прохода" --as reviewer; run list'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
@@ -212,6 +214,20 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const note = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: board run note RUN-1 --text "..." --as <ревьюер>')
+    const text = stringFlag(args, 'text')
+    if (!text) throw new UserError(3, 'нужен текст итогов: --text «...»')
+    const updated = noteRun(db, {
+      runId: id,
+      text,
+      actor: stringFlag(args, 'as') ?? 'owner',
+    })
+    ok(updated, `${updated.id} · итоги записаны`)
+    return 0
+  }
+
   try {
     if (args.sub === 'start') return start(args)
     if (args.sub === 'add') return add(args)
@@ -219,6 +235,7 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'next') return next(args)
     if (args.sub === 'end') return end(args)
     if (args.sub === 'release') return release(args)
+    if (args.sub === 'note') return note(args)
     if (args.sub === 'list') return list()
     throw new UserError(3, USAGE)
   } finally {

@@ -373,3 +373,21 @@ test('run start --suggest выбирает вариант по номеру', (t
   assert.equal(held.length, 3)
   assert.ok(held.every((card) => card.tags.includes('improve')))
 })
+
+test('run note пишет итоги прохода и run list их отдаёт', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  seedExecutor(fixture.db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(fixture.db, { phase: 'task', status: 'ready', position: 1 })
+
+  const started = run(fixture.root, ['run', 'start', '--as', 'developer', '--cards', card.id])
+  assert.equal(started.code, 0, started.err)
+
+  const noted = run(fixture.root, [
+    'run', 'note', 'RUN-1', '--text', 'ИТОГИ: 3 находки', '--as', 'reviewer',
+  ])
+  assert.equal(noted.code, 0, noted.err)
+
+  const list = json(fixture.root, ['run', 'list']) as Array<{ id: string; note: string | null }>
+  assert.equal(list.find((item) => item.id === 'RUN-1')!.note, 'ИТОГИ: 3 находки')
+})
