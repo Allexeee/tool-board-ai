@@ -25,6 +25,7 @@ import {
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { insertIntoQueue } from '../../src/core/queue.ts'
+import { nowData } from '../../src/core/now.ts'
 
 type Board = ReturnType<typeof makeBoard>
 
@@ -917,4 +918,18 @@ test('owner-конверсия снимает держателя, lease и за�
 
   const owner = seedCard(db, { skill: 'owner' })
   assert.throws(() => submitCard(db, { id: owner.id, actor: 'developer' }), /владелец/)
+})
+
+test('take сохраняет position: карточка в работе видна в now 3', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+
+  startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  takeCard(db, { id: card.id, actor: 'developer', root: '' })
+
+  assert.equal(getCard(db, card.id)!.position, 1)
+  const view = nowData(db, { view: 3, executorId: 'developer' })
+  assert.ok(view.queue?.some((item) => item.id === card.id))
 })
