@@ -329,9 +329,10 @@ test('навык owner несовместим с needs_merge=true', (t) => {
   })
   assert.equal(edited.skill, 'owner')
   assert.equal(edited.needsMerge, false)
-  // до approval это ещё запрос: owner-правила включаются после утверждения
-  assert.equal(edited.phase, 'request')
-  assert.equal(edited.status, 'new')
+  // owner-карточка — сразу задача владельца, как при создании через createCard
+  assert.equal(edited.phase, 'task')
+  assert.equal(edited.status, 'ready')
+  assert.equal(edited.position, null)
 })
 
 test('listCards фильтрует по фазе, статусу, навыку, держателю и группе', (t) => {

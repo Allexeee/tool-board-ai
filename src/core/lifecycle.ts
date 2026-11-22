@@ -6,6 +6,7 @@ import { tx } from './db.ts'
 import { addDep, isSatisfied, listDeps, refreshReadiness } from './deps.ts'
 import { comment, openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
+import { getExecutor } from './executors.ts'
 import {
   currentBranch,
   ensureWorktree,
@@ -21,7 +22,7 @@ import {
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
-import { getActiveRun, listRunCards, RUN_LEASE_MS } from './runs.ts'
+import { getActiveRun, listRunCards, requireStandaloneCard, RUN_LEASE_MS, type Run } from './runs.ts'
 import { assertSpecReview, type SpecReviewGate } from './spec-review.ts'
 import type { Card, CardStatus } from './types.ts'
 
@@ -41,10 +42,39 @@ const REOPENABLE: readonly CardStatus[] = ['review', 'done']
 /** Amend меняет уже утверждённый spec; в работе и ревью сначала block/reopen. */
 const AMENDABLE: readonly CardStatus[] = ['approval', 'ready', 'waiting', 'blocked']
 
+/** Отложить можно всё, что не в работе; работающую карточку сначала block. */
+const DEFERRABLE: readonly CardStatus[] = [
+  'new',
+  'shaping',
+  'approval',
+  'ready',
+  'waiting',
+  'booked',
+  'blocked',
+]
+
 function requireCard(db: DatabaseSync, id: string): Card {
   const card = getCard(db, id)
   if (!card) throw new UserError(3, `карточка ${id} не найдена`)
   return card
+}
+
+/**
+ * Владелец может отложить и вернуть любую карточку. Агент — только карточку
+ * своего навыка, которую не держит другой исполнитель.
+ */
+function assertCanDefer(db: DatabaseSync, card: Card, actor: string): void {
+  if (actor === 'owner') return
+  const executor = getExecutor(db, actor)
+  if (!executor || card.skill === null || !executor.skills.includes(card.skill)) {
+    throw new UserError(
+      3,
+      `навык карточки ${card.id} (${card.skill ?? '—'}) не подходит исполнителю ${actor}`,
+    )
+  }
+  if (card.holder !== null && card.holder !== actor) {
+    throw new UserError(3, `карточку ${card.id} держит другой исполнитель: ${card.holder}`)
+  }
 }
 
 function requireActor(raw: string | undefined): string {
@@ -133,6 +163,9 @@ export function submitCard(
   return tx(db, () => {
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
+    if (card.skill === OWNER) {
+      throw new UserError(3, `owner-карточку ${card.id} закрывает владелец, а не submit`)
+    }
     if (card.holder !== actor) {
       throw new UserError(
         3,
@@ -164,7 +197,7 @@ export function submitCard(
     const at = nowIso()
     db.prepare(
       `update cards set phase = 'task', status = 'approval', holder = null, lease_until = null,
-       updated_at = ? where id = ?`,
+       position = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
 
     const updated = getCard(db, card.id)!
@@ -209,7 +242,8 @@ export function approveCard(
       ).run(at, at, card.id)
     } else {
       db.prepare(
-        `update cards set status = 'waiting', approved_at = ?, updated_at = ? where id = ?`,
+        `update cards set status = 'waiting', approved_at = ?, position = null, updated_at = ?
+         where id = ?`,
       ).run(at, at, card.id)
       insertIntoQueue(db, card.id)
       refreshReadiness(db)
@@ -244,8 +278,9 @@ export function rejectCard(
     const at = nowIso()
     db.prepare(
       `update cards set status = 'new', phase = 'request', holder = null, lease_until = null,
-       approved_at = null, spec_rev = spec_rev + 1, updated_at = ? where id = ?`,
+       approved_at = null, spec_rev = spec_rev + 1, position = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
+    insertIntoQueue(db, card.id)
 
     // Причина отказа остаётся в обсуждении, как требует §10.1.
     comment(db, { cardId: card.id, author: actor, text: reason })
@@ -296,6 +331,8 @@ export function amendCard(
        approved_at = null, spec_rev = spec_rev + 1, position = null, shaped_at = ?,
        updated_at = ? where id = ?`,
     ).run(actor, leaseUntil, at, at, card.id)
+    // Возвращённый в разбор запрос снова стоит в очереди запросов.
+    insertIntoQueue(db, card.id)
 
     comment(db, {
       cardId: card.id,
@@ -380,7 +417,7 @@ export function blockCard(
     const note = input.note?.trim() || null
     const at = nowIso()
     db.prepare(
-      `update cards set status = 'blocked', holder = null,
+      `update cards set status = 'blocked', holder = null, position = null,
        run_id = case when phase = 'request' then run_id else null end,
        lease_until = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
@@ -402,6 +439,93 @@ export function blockCard(
       before: card,
       after: updated,
       note: note ? `${reason} — ${note}` : reason,
+    })
+    return updated
+  })
+}
+
+/**
+ * Отложить карточку: `deferred` — состояние, а не приоритет. Снимает с забега,
+ * очищает держателя, бронь и позицию в очереди; из now 1/2 и `--suggest` пропадает.
+ * Работающую карточку сначала блокируют или сдают.
+ */
+export function deferCard(
+  db: DatabaseSync,
+  input: { id: string; actor: string; note?: string },
+): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+    if (!DEFERRABLE.includes(card.status)) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} в статусе ${card.status} нельзя отложить: сначала finish или block`,
+      )
+    }
+    assertCanDefer(db, card, actor)
+
+    if (card.runId) {
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        card.runId,
+        card.id,
+      )
+    }
+
+    db.prepare(
+      `update cards set status = 'deferred', holder = null, run_id = null, lease_until = null,
+       position = null, updated_at = ? where id = ?`,
+    ).run(nowIso(), card.id)
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.deferred',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+      note: input.note?.trim() || null,
+    })
+    return updated
+  })
+}
+
+/**
+ * Вернуть отложенную карточку туда, где она была по смыслу: запрос — в `new`,
+ * неутверждённая задача — в `approval` (гейт сохраняется), задача с открытым
+ * вопросом — в `blocked`, иначе `ready`/`waiting` по зависимостям и в очередь.
+ */
+export function resumeCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+    if (card.status !== 'deferred') {
+      throw new UserError(3, `карточка ${card.id} не отложена: ${card.status}`)
+    }
+    assertCanDefer(db, card, actor)
+
+    const at = nowIso()
+    let next: CardStatus
+    if (card.phase === 'request') {
+      next = 'new'
+    } else if (card.approvedAt === null) {
+      next = 'approval'
+    } else if (openQuestions(db, card.id).length > 0) {
+      next = 'blocked'
+    } else {
+      const ready = listDeps(db, card.id).every((dep) => isSatisfied(db, dep))
+      next = ready ? 'ready' : 'waiting'
+    }
+
+    db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(next, at, card.id)
+    if (next === 'new' || next === 'ready' || next === 'waiting') insertIntoQueue(db, card.id)
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.resumed',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
     })
     return updated
   })
@@ -538,10 +662,12 @@ export function resumeAfterAnswer(db: DatabaseSync, cardId: string, actor: strin
     const status = card.phase === 'request' ? 'new' : ready ? 'ready' : 'waiting'
     const at = nowIso()
 
-    db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(status, at, cardId)
+    db.prepare(
+      'update cards set status = ?, position = null, updated_at = ? where id = ?',
+    ).run(status, at, cardId)
+    insertIntoQueue(db, cardId)
 
     const updated = getCard(db, cardId)!
-    if (updated.phase === 'task' && updated.position === null) insertIntoQueue(db, cardId)
     appendEvent(db, {
       type: 'card.resumed',
       actor: actorName,
@@ -664,6 +790,7 @@ export function applyShapeFile(
       if (Object.keys(createdPatch).length > 0) {
         editCard(db, { id: created.id, actor, patch: createdPatch })
       }
+      insertIntoQueue(db, created.id)
       newIds.set(key, created.id)
       newCards.push(getCard(db, created.id)!)
     }
@@ -690,6 +817,12 @@ export function takeCard(db: DatabaseSync, input: { id: string; actor: string; r
     const actor = requireActor(input.actor)
 
     if (card.phase === 'request') return takeRequest(db, card, actor, input.root)
+
+    // Одиночная карточка: без брони и забега, если она готова к работе.
+    if (card.status === 'ready' || card.status === 'waiting') {
+      const standalone = requireStandaloneCard(db, actor, card.id)
+      return startWork(db, standalone, actor, input.root, null)
+    }
 
     if (card.status !== 'booked') {
       throw new UserError(3, `карточка ${card.id} не забронирована: ${card.status}`)
@@ -753,15 +886,23 @@ function takeRequest(
   }
 
   const promoted = startWork(db, card, actor, root, run)
+  // Правило забега — авторизация вместо approve: фиксируем её, чтобы resume
+  // вернул карточку в работу, а не в approval.
+  if (promoted.approvedAt === null || promoted.position !== null) {
+    db.prepare(
+      'update cards set approved_at = coalesce(approved_at, ?), position = null where id = ?',
+    ).run(nowIso(), card.id)
+  }
+  const authorized = getCard(db, card.id)!
   appendEvent(db, {
     type: 'card.promoted',
     actor,
     subject: card.id,
     before: card,
-    after: promoted,
+    after: authorized,
     note: `забег ${run.id}: approve пропущен по правилу запроса в забеге`,
   })
-  return promoted
+  return authorized
 }
 
 function startWork(
@@ -769,16 +910,27 @@ function startWork(
   card: Card,
   actor: string,
   root: string,
-  run: NonNullable<ReturnType<typeof getActiveRun>>,
+  run: Run | null,
 ): Card {
-  // Одна карточка в работе на забег: следующую берут после finish или block.
-  const otherInProgress = listRunCards(db, run.id).some(
-    (row) => row.status === 'in_progress' && row.cardId !== card.id,
-  )
-  if (otherInProgress) {
+  // Одна карточка в работе на держателя: worktree один, две ветки не живут.
+  if (run) {
+    const otherInProgress = listRunCards(db, run.id).some(
+      (row) => row.status === 'in_progress' && row.cardId !== card.id,
+    )
+    if (otherInProgress) {
+      throw new UserError(
+        3,
+        `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
+      )
+    }
+  }
+  const busy = db
+    .prepare("select id from cards where holder = ? and status = 'in_progress' and id != ?")
+    .get(actor, card.id) as { id: string } | undefined
+  if (busy) {
     throw new UserError(
       3,
-      `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
+      `у исполнителя ${actor} уже есть карточка в работе: ${busy.id} — сначала finish или block`,
     )
   }
 
@@ -790,14 +942,16 @@ function startWork(
   const at = nowIso()
   const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
   db.prepare(
-    `update cards set phase = 'task', status = 'in_progress', branch = ?, lease_until = ?,
+    `update cards set phase = 'task', status = 'in_progress', holder = ?, branch = ?, lease_until = ?,
      updated_at = ? where id = ?`,
-  ).run(branch, leaseUntil, at, card.id)
-  db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
-  db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
-    run.id,
-    card.id,
-  )
+  ).run(actor, branch, leaseUntil, at, card.id)
+  if (run) {
+    db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
+    db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
+      run.id,
+      card.id,
+    )
+  }
 
   const updated = getCard(db, card.id)!
   appendEvent(db, {

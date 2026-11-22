@@ -1,6 +1,6 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeOpenCodeFiles, writeReviewerAgent } from '../../src/core/opencode.ts'
@@ -11,9 +11,12 @@ process.env.BOARD_ALLOW_GLOBAL = '1'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'board-oc-'))
 
-test('initProject создаёт скилл, плагин, команды и блок в AGENTS.md', () => {
+test('initProject создаёт четыре навыка, плагин, команды и блок в AGENTS.md', () => {
   const { created, root } = initProject(tmp())
-  assert.ok(existsSync(join(root, '.opencode', 'skills', 'board', 'SKILL.md')))
+  for (const name of ['board-spec', 'board-work', 'board-run', 'board-now']) {
+    assert.ok(existsSync(join(root, '.opencode', 'skills', name, 'SKILL.md')), name)
+  }
+  assert.equal(existsSync(join(root, '.opencode', 'skills', 'board', 'SKILL.md')), false)
   assert.ok(existsSync(join(root, '.opencode', 'plugins', 'board', 'index.ts')))
   assert.ok(existsSync(join(root, '.opencode', 'command', 'review.md')))
   assert.ok(existsSync(join(root, '.opencode', 'command', 'setup.md')))
@@ -21,14 +24,24 @@ test('initProject создаёт скилл, плагин, команды и б�
   assert.ok(created.some((p) => p.includes('SKILL.md')))
 })
 
-test('скилл ссылается на terminology.md и на порядок работы', () => {
+test('навыки ссылаются на terminology.md и на порядок работы', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
-  const skill = readFileSync(join(root, '.opencode', 'skills', 'board', 'SKILL.md'), 'utf8')
-  assert.match(skill, /terminology\.md/)
-  assert.match(skill, /board now/)
-  assert.match(skill, /card shape/)
-  assert.match(skill, /review list/)
+  const read = (name: string) =>
+    readFileSync(join(root, '.opencode', 'skills', name, 'SKILL.md'), 'utf8')
+  assert.match(read('board-spec'), /terminology\.md/)
+  assert.match(read('board-spec'), /card shape/)
+  assert.match(read('board-now'), /board now/)
+  assert.match(read('board-work'), /review list/)
+})
+
+test('плагин добавляет brainstorming в системный промпт', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /ctx\.session\.hook\('context'/)
+  assert.match(plugin, /Перед любой работой по доске используй brainstorming/)
+  assert.match(plugin, /Разговор без глагола работы карточек не создаёт/)
 })
 
 test('плагин объявляет board_now и board_setup и зовёт CLI', () => {
@@ -187,6 +200,81 @@ test('плагин поднимается из .worktrees в корень', () =
   const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
   assert.match(plugin, /basename\(dirname\(dir\)\) === '\.worktrees'/)
   assert.match(plugin, /dirname\(dirname\(dir\)\)/)
+})
+
+test('четыре навыка: разные description и свои правила', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const read = (name: string) =>
+    readFileSync(join(root, '.opencode', 'skills', name, 'SKILL.md'), 'utf8')
+
+  const descriptions = ['board-spec', 'board-work', 'board-run', 'board-now'].map((name) => {
+    const line = read(name).split('\n').find((item) => item.startsWith('description:'))
+    assert.ok(line, name)
+    return line
+  })
+  assert.equal(new Set(descriptions).size, 4)
+
+  assert.match(read('board-spec'), /без глагола работы/i)
+  assert.match(read('board-spec'), /reviewRequired/)
+  assert.match(read('board-run'), /не больше 3/)
+  assert.match(read('board-run'), /только части только что разобранной/)
+  assert.match(read('board-work'), /Разобрал/)
+  assert.match(read('board-work'), /Приступаю/)
+})
+
+test('отчёт: шесть моментов и запрет отчёта по вызовам инструментов', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const read = (name: string) =>
+    readFileSync(join(root, '.opencode', 'skills', name, 'SKILL.md'), 'utf8')
+
+  const report = `${read('board-work')}\n${read('board-run')}`
+  assert.match(report, /Беру в работу/)
+  assert.match(report, /Разобрал/)
+  assert.match(report, /Приступаю/)
+  assert.match(report, /Сдал/)
+  assert.match(report, /Снял/)
+  assert.match(report, /Забег закрыт/)
+
+  for (const name of ['board-work', 'board-run']) {
+    assert.match(read(name), /о каждом вызове инструмента не отчитываться/)
+  }
+})
+
+test('refresh удаляет старый единый навык board', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const legacy = join(root, '.opencode', 'skills', 'board', 'SKILL.md')
+  mkdirSync(join(root, '.opencode', 'skills', 'board'), { recursive: true })
+  writeFileSync(legacy, '---\nname: board\n---\n', 'utf8')
+
+  writeOpenCodeFiles(root, { refresh: true })
+
+  assert.equal(existsSync(legacy), false)
+})
+
+test('разговор у brainstorming, исполнение Native: навыки и AGENTS без правил разговора', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = ['board-spec', 'board-work', 'board-run', 'board-now']
+    .map((name) => readFileSync(join(root, '.opencode', 'skills', name, 'SKILL.md'), 'utf8'))
+    .join('\n')
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+
+  for (const text of [skill, agents]) {
+    assert.match(text, /brainstorming/i)
+    assert.match(text, /docs\/superpowers/)
+    assert.match(text, /Native/)
+    assert.doesNotMatch(text, /subagent-driven|subagent driven/i)
+  }
+
+  assert.match(skill, /spec и критерии приёмки идут в карточку/)
+  assert.match(skill, /отдельного plan-файла нет/)
+  assert.match(skill, /асинхронный вопрос/)
+  assert.match(skill, /только если без ответа нельзя продолжать/)
+  assert.match(agents, /асинхронный вопрос/)
+  assert.match(agents, /без субагентов-исполнителей/)
 })
 
 test('card схема принимает verdict для spec-review', () => {

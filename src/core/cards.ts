@@ -50,6 +50,7 @@ const STATUSES: readonly CardStatus[] = [
   'booked',
   'in_progress',
   'blocked',
+  'deferred',
   'review',
   'done',
   'cancelled',
@@ -397,6 +398,25 @@ export function editCard(
         }
         sets.push('skill = ?')
         params.push(skill)
+        // Owner-карточки не стоят ни в одной очереди: позиция сбрасывается.
+        if (skill === OWNER_SKILL) {
+          // Owner-карточка — сразу задача владельца: без мержа, ревью и очереди.
+          sets.push('phase = ?')
+          params.push('task')
+          sets.push('status = ?')
+          params.push('ready')
+          sets.push('review_required = 0')
+          sets.push('position = null')
+          // Держатель, lease и забег снимаются: задачу владельца никто не держит.
+          sets.push('holder = null')
+          sets.push('lease_until = null')
+          sets.push('run_id = null')
+          if (card.runId) {
+            db.prepare(
+              "update run_cards set status = 'dropped' where run_id = ? and card_id = ?",
+            ).run(card.runId, card.id)
+          }
+        }
       }
     }
     if (patch.importance !== undefined) {

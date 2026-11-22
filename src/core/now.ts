@@ -63,6 +63,7 @@ export interface NowView {
   requests?: Card[]
   moreQueue?: number
   moreRequests?: number
+  deferredCount?: number
 }
 
 export interface NowOptions {
@@ -147,7 +148,9 @@ function computeHeader(db: DatabaseSync): NowHeader {
 }
 
 /** Вкладка владельцу §11.2: на утверждении, owner-карточки в ready, открытые вопросы. */
-function ownerView(db: DatabaseSync): Pick<NowView, 'approvals' | 'ownerCards' | 'questions'> {
+function ownerView(
+  db: DatabaseSync,
+): Pick<NowView, 'approvals' | 'ownerCards' | 'questions' | 'deferredCount'> {
   const approvals = listCards(db, { status: 'approval' })
   const ownerCards = listCards(db, { skill: 'owner', status: ['ready', 'waiting'] }).sort(
     (left, right) =>
@@ -156,7 +159,8 @@ function ownerView(db: DatabaseSync): Pick<NowView, 'approvals' | 'ownerCards' |
       left.id.localeCompare(right.id),
   )
   const questions = openQuestions(db)
-  return { approvals, ownerCards, questions }
+  const deferredCount = listCards(db, { status: 'deferred' }).length
+  return { approvals, ownerCards, questions, deferredCount }
 }
 
 /** Вкладка «мои задачи» §11.3: карточки на руках и очередь по навыкам агента. */
@@ -293,7 +297,13 @@ function openCards(
           group: filters.group,
           skill: filters.skill,
           holder,
-        })
+        }).sort(
+          (left, right) =>
+            (left.position ?? Number.MAX_SAFE_INTEGER) -
+              (right.position ?? Number.MAX_SAFE_INTEGER) ||
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.id.localeCompare(right.id),
+        )
     result.requests = requests.slice(0, limit)
     result.moreRequests = requests.length > limit ? requests.length - limit : 0
   }
@@ -333,6 +343,7 @@ const STATUS_WORDS: Record<CardStatus, string> = {
   booked: 'забронирована',
   in_progress: 'в работе',
   blocked: 'заблокирована',
+  deferred: 'отложена',
   review: 'на ревью',
   done: 'сделано',
   cancelled: 'отменена',
@@ -348,6 +359,7 @@ const STATUS_COLORS: Partial<Record<CardStatus, ColorName>> = {
   in_progress: 'cyan',
   review: 'magenta',
   blocked: 'yellow',
+  deferred: 'gray',
   approval: 'yellow',
   done: 'green',
   cancelled: 'gray',
@@ -489,6 +501,9 @@ function renderOwner(lines: string[], data: NowView, painter: Painter): void {
           painter(question.author, agentColor(question.author)),
       )
     }
+  }
+  if (data.deferredCount && data.deferredCount > 0) {
+    lines.push(`ОТЛОЖЕНО (${data.deferredCount})`)
   }
 }
 

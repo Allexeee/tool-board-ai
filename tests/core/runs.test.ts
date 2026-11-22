@@ -1,7 +1,7 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { DatabaseSync } from 'node:sqlite'
-import { getCard, listCards } from '../../src/core/cards.ts'
+import { editCard, getCard, listCards } from '../../src/core/cards.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { listEvents } from '../../src/core/events.ts'
 import {
@@ -19,7 +19,7 @@ import {
   suggestVariantRuns,
   startRun,
 } from '../../src/core/runs.ts'
-import { blockCard, finishCard, resumeAfterAnswer } from '../../src/core/lifecycle.ts'
+import { blockCard, finishCard, resumeAfterAnswer, takeCard } from '../../src/core/lifecycle.ts'
 import { submitVerdict } from '../../src/core/review.ts'
 import { ask, answer } from '../../src/core/discussion.ts'
 import type { Card, CardStatus } from '../../src/core/types.ts'
@@ -377,21 +377,18 @@ test('addToRun добавляет карточку, dropFromRun возвраща
   )
 })
 
-test('addToRun не превышает run_size и проверяет зависимость', (t) => {
+test('addToRun не ограничен стартовым размером и проверяет зависимость', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'], runSize: 2 })
   const first = task(db, { position: 1 })
   const second = task(db, { position: 2 })
   const third = task(db, { position: 3 })
-  const waiting = task(db, { position: 4, status: 'waiting' })
-  addDep(db, waiting.id, third.id)
 
-  startRun(db, { executorId: 'developer', cardIds: [first.id], actor: 'developer' })
+  const run = startRun(db, { executorId: 'developer', cardIds: [first.id], actor: 'developer' })
   addToRun(db, { executorId: 'developer', cardId: second.id, actor: 'developer' })
-  assert.throws(
-    () => addToRun(db, { executorId: 'developer', cardId: third.id, actor: 'developer' }),
-    /не больше 2/,
-  )
+  // Сверх стартового размера: забег растёт после старта.
+  addToRun(db, { executorId: 'developer', cardId: third.id, actor: 'developer' })
+  assert.equal(listRunCards(db, run.id).length, 3)
 
   const { db: other } = board(t)
   seedExecutor(other, { id: 'developer', skills: ['dev'] })
@@ -850,4 +847,102 @@ test('planned-запрос с открытым вопросом пропуска
 
   ask(db, { cardId: first.id, author: 'dev', text: '?' })
   assert.equal(nextCard(db, { executorId: 'dev' })?.id, second.id)
+})
+
+test('истёкший lease одиночной карточки без забега возвращает её в очередь', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+
+  takeCard(db, { id: card.id, actor: 'developer', root: '' })
+  db.prepare('update cards set lease_until = ? where id = ?').run('2020-01-01T00:00:00.000Z', card.id)
+
+  const count = reclaimExpired(db, new Date('2020-01-02T00:00:00.000Z'))
+  assert.equal(count, 1)
+
+  const after = getCard(db, card.id)!
+  assert.equal(after.status, 'ready')
+  assert.equal(after.holder, null)
+  assert.equal(after.leaseUntil, null)
+  assert.ok(listEvents(db, card.id).some((event) => event.type === 'card.lease_expired'))
+})
+
+test('забег растёт после старта: на старте не больше 3, add без лимита', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const cards = [1, 2, 3, 4, 5].map((position) => task(db, { position }))
+
+  assert.throws(
+    () =>
+      startRun(db, {
+        executorId: 'developer',
+        cardIds: cards.map((card) => card.id),
+        actor: 'developer',
+      }),
+    /на старте не больше 3/,
+  )
+
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: cards.slice(0, 3).map((card) => card.id),
+    actor: 'developer',
+  })
+  addToRun(db, { executorId: 'developer', cardId: cards[3].id, actor: 'developer' })
+  addToRun(db, { executorId: 'developer', cardId: cards[4].id, actor: 'developer' })
+
+  const rows = listRunCards(db, run.id)
+  assert.equal(rows.length, 5)
+  assert.deepEqual(
+    rows.map((row) => row.cardId),
+    cards.map((card) => card.id),
+  )
+  assert.equal(nextCard(db, { executorId: 'developer' })?.id, cards[0].id)
+})
+
+test('blocked-карточку снимают с забега и возвращают после approve', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = task(db, { position: 1 })
+  const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+
+  blockCard(db, { id: card.id, actor: 'developer', reason: 'needs_decision' })
+  dropFromRun(db, { executorId: 'developer', cardId: card.id, actor: 'developer' })
+
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === card.id)!.status, 'dropped')
+  assert.equal(getCard(db, card.id)!.status, 'blocked')
+  assert.equal(getCard(db, card.id)!.runId, null)
+
+  // approve возвращает карточку в ready — её можно вернуть в тот же забег
+  db.prepare("update cards set status = 'ready', updated_at = ? where id = ?").run(
+    new Date().toISOString(),
+    card.id,
+  )
+  addToRun(db, { executorId: 'developer', cardId: card.id, actor: 'developer' })
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === card.id)!.status, 'booked')
+
+  // карточку в работе снимать по-прежнему нельзя
+  const { db: other } = board(t)
+  seedExecutor(other, { id: 'developer', skills: ['dev'] })
+  const busy = task(other, { position: 1 })
+  editCard(other, { id: busy.id, actor: 'owner', patch: { needsMerge: false } })
+  startRun(other, { executorId: 'developer', cardIds: [busy.id], actor: 'developer' })
+  takeCard(other, { id: busy.id, actor: 'developer', root: '' })
+  assert.throws(
+    () => dropFromRun(other, { executorId: 'developer', cardId: busy.id, actor: 'developer' }),
+    /в работе/,
+  )
+})
+
+test('suggestVariantRuns берёт запросы по позиции', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const later = seedCard(db, { phase: 'request', status: 'new', title: 'B', tags: ['new'] })
+  const next = seedCard(db, { phase: 'request', status: 'new', title: 'A', tags: ['new'] })
+  db.prepare('update cards set position = 1 where id = ?').run(next.id)
+
+  const suggestion = suggestVariantRuns(db, 'developer').find((run) => run.tag === 'new')
+  assert.ok(suggestion)
+  assert.equal(suggestion!.cards[0].id, next.id)
+  assert.equal(suggestion!.cards.some((card) => card.id === later.id), true)
 })

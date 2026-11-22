@@ -7,20 +7,25 @@ import { listEvents } from '../../src/core/events.ts'
 import { nowIso } from '../../src/core/clock.ts'
 import {
   amendCard,
+  applyShapeFile,
   approveCard,
   blockCard,
   cancelCard,
+  deferCard,
   finishCard,
   ownerDone,
   rejectCard,
   reopenCard,
   resumeAfterAnswer,
+  resumeCard,
   shapeCard,
   submitCard,
   takeCard,
 } from '../../src/core/lifecycle.ts'
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
+import { insertIntoQueue } from '../../src/core/queue.ts'
+import { nowData } from '../../src/core/now.ts'
 
 type Board = ReturnType<typeof makeBoard>
 
@@ -186,7 +191,7 @@ test('amend возвращает утверждённый spec в shaping и т�
   assert.equal(amended.phase, 'request')
   assert.equal(amended.holder, 'developer')
   assert.equal(amended.approvedAt, null)
-  assert.equal(amended.position, null)
+  assert.ok(amended.position)
   assert.equal(amended.specRev, before.specRev + 1)
   assert.throws(() => approveCard(db, { id: card.id, actor: 'owner' }), /approval/)
 
@@ -244,7 +249,7 @@ test('approve — только владелец и только из approval', 
   assert.throws(() => approveCard(db, { id: fresh.id, actor: 'owner' }), /approval/)
 })
 
-test('owner-карточка после approval становится ready без очереди', (t) => {
+test('owner-карточка после смены навыка сразу ready без очереди и approve', (t) => {
   const { db } = board(t)
   const card = createCard(db, { group: 'UI', title: 'x', skill: 'dev', author: 'owner' })
   shapeCard(db, { id: card.id, actor: 'developer' })
@@ -260,14 +265,15 @@ test('owner-карточка после approval становится ready бе
       urgency: 2,
     },
   })
-  submitCard(db, { id: card.id, actor: 'developer' })
-  approveCard(db, { id: card.id, actor: 'owner' })
 
   const approved = getCard(db, card.id)!
   assert.equal(approved.status, 'ready')
   assert.equal(approved.needsMerge, false)
   assert.equal(approved.reviewRequired, false)
   assert.equal(approved.position, null)
+  assert.equal(approved.holder, null)
+  assert.equal(approved.leaseUntil, null)
+  assert.throws(() => submitCard(db, { id: card.id, actor: 'developer' }), /владелец/)
 })
 
 test('reject возвращает в new, сохраняя содержимое, причина в журнале', (t) => {
@@ -584,6 +590,48 @@ test('cancelCard с waiveDeps открывает waiting зависимого, �
   assert.equal(listRunCards(db, run.id).find((r) => r.cardId === bookedDep.id)!.status, 'dropped')
 })
 
+test('take без забега: карточка в работе, finish закрывает, следующий take работает', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const first = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const second = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+  editCard(db, { id: first.id, actor: 'owner', patch: { needsMerge: false } })
+  editCard(db, { id: second.id, actor: 'owner', patch: { needsMerge: false } })
+
+  const taken = takeCard(db, { id: first.id, actor: 'developer', root: '' })
+  assert.equal(taken.status, 'in_progress')
+  assert.equal(taken.holder, 'developer')
+  assert.equal(taken.runId, null)
+  assert.ok(taken.leaseUntil)
+
+  assert.throws(
+    () => takeCard(db, { id: second.id, actor: 'developer', root: '' }),
+    /уже есть карточка в работе/,
+  )
+
+  const finished = finishCard(db, { id: first.id, actor: 'developer', summary: 'готово', root: '' })
+  assert.equal(finished.status, 'done')
+  assert.equal(listRunCards(db, 'RUN-1').length, 0)
+
+  const next = takeCard(db, { id: second.id, actor: 'developer', root: '' })
+  assert.equal(next.status, 'in_progress')
+  assert.equal(next.runId, null)
+})
+
+test('take без забега не берёт карточку с открытой зависимостью', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const origin = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const dependent = seedCard(db, { phase: 'task', status: 'waiting', position: 2 })
+  editCard(db, { id: dependent.id, actor: 'owner', patch: { needsMerge: false } })
+  addDep(db, dependent.id, origin.id, 'owner', 'нужен сначала origin')
+
+  assert.throws(
+    () => takeCard(db, { id: dependent.id, actor: 'developer', root: '' }),
+    /не закрыта/,
+  )
+})
+
 test('cancelCard на карточке в in_progress помечает run_cards dropped и позволяет завершить забег', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
@@ -600,4 +648,288 @@ test('cancelCard на карточке в in_progress помечает run_cards
 
   const ended = endRun(db, { executorId: 'developer', actor: 'developer' })
   assert.equal(ended.status, 'ended')
+})
+
+test('defer откладывает запрос и задачу, resume возвращает в очередь', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  const request = seedCard(db, { phase: 'request', status: 'new' })
+  const task = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  db.prepare('update cards set approved_at = ? where id = ?').run(nowIso(), task.id)
+
+  const deferredRequest = deferCard(db, { id: request.id, actor: 'developer' })
+  assert.equal(deferredRequest.status, 'deferred')
+  assert.equal(deferredRequest.holder, null)
+
+  const deferredTask = deferCard(db, { id: task.id, actor: 'developer' })
+  assert.equal(deferredTask.status, 'deferred')
+  assert.equal(deferredTask.position, null)
+
+  assert.equal(resumeCard(db, { id: request.id, actor: 'developer' }).status, 'new')
+  const resumed = resumeCard(db, { id: task.id, actor: 'developer' })
+  assert.equal(resumed.status, 'ready')
+  assert.ok(resumed.position)
+
+  assert.throws(
+    () => resumeCard(db, { id: task.id, actor: 'developer' }),
+    /не отложена/,
+  )
+})
+
+test('defer снимает забронированную карточку с забега', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+  const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+
+  const deferred = deferCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(deferred.status, 'deferred')
+  assert.equal(deferred.runId, null)
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === card.id)!.status, 'dropped')
+
+  // работающую карточку отложить нельзя
+  const working = seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
+  assert.throws(
+    () => deferCard(db, { id: working.id, actor: 'developer' }),
+    /нельзя отложить/,
+  )
+})
+
+test('defer/resume не обходят approve', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'approval' })
+
+  deferCard(db, { id: card.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumed.status, 'approval')
+  assert.equal(resumed.approvedAt, null)
+  assert.throws(
+    () => takeCard(db, { id: card.id, actor: 'developer', root: '' }),
+    /не забронирована/,
+  )
+})
+
+test('resume задачи с открытым вопросом возвращает blocked', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'blocked' })
+  db.prepare('update cards set approved_at = ? where id = ?').run(nowIso(), card.id)
+  ask(db, { cardId: card.id, author: 'developer', text: 'какой вариант?' })
+
+  deferCard(db, { id: card.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumed.status, 'blocked')
+  assert.throws(
+    () => takeCard(db, { id: card.id, actor: 'developer', root: '' }),
+    /не забронирована|ждёт ответа/,
+  )
+})
+
+test('defer/resume проверяют держателя и навык', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedExecutor(db, { id: 'other', skills: ['dev'] })
+  seedExecutor(db, { id: 'ui', skills: ['ui'] })
+
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1, holder: 'developer' })
+  assert.throws(() => deferCard(db, { id: card.id, actor: 'other' }), /держит другой исполнитель/)
+  assert.throws(() => deferCard(db, { id: card.id, actor: 'ui' }), /не подходит исполнителю/)
+
+  const deferred = deferCard(db, { id: card.id, actor: 'owner' })
+  assert.equal(deferred.status, 'deferred')
+  assert.throws(() => resumeCard(db, { id: card.id, actor: 'ui' }), /не подходит исполнителю/)
+  assert.equal(resumeCard(db, { id: card.id, actor: 'owner' }).status, 'approval')
+})
+
+test('одна карточка в работе на держателя держится при смешении забега и одиночного take', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const standalone = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  const inRun = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
+  editCard(db, { id: standalone.id, actor: 'owner', patch: { needsMerge: false } })
+  editCard(db, { id: inRun.id, actor: 'owner', patch: { needsMerge: false } })
+
+  takeCard(db, { id: standalone.id, actor: 'developer', root: '' })
+  startRun(db, { executorId: 'developer', cardIds: [inRun.id], actor: 'developer' })
+
+  assert.throws(
+    () => takeCard(db, { id: inRun.id, actor: 'developer', root: '' }),
+    /уже есть карточка в работе/,
+  )
+  assert.equal(getCard(db, inRun.id)!.status, 'booked')
+
+  finishCard(db, { id: standalone.id, actor: 'developer', summary: 'готово', root: '' })
+  const taken = takeCard(db, { id: inRun.id, actor: 'developer', root: '' })
+  assert.equal(taken.status, 'in_progress')
+})
+
+test('после ответа на вопрос resume задачи возвращает её в очередь', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'blocked' })
+  db.prepare('update cards set approved_at = ? where id = ?').run(nowIso(), card.id)
+  const question = ask(db, { cardId: card.id, author: 'developer', text: 'какой вариант?' })
+
+  deferCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumeCard(db, { id: card.id, actor: 'developer' }).status, 'blocked')
+
+  answer(db, { cardId: card.id, questionId: question.id, text: 'второй', actor: 'owner' })
+  deferCard(db, { id: card.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumed.status, 'ready')
+  assert.ok(resumed.position)
+})
+
+test('продвижение запроса правилом забега фиксирует approved_at', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const request = seedCard(db, { phase: 'request', status: 'new' })
+  startRun(db, { executorId: 'developer', cardIds: [request.id], actor: 'developer' })
+  editCard(db, { id: request.id, actor: 'owner', patch: { needsMerge: false } })
+
+  takeCard(db, { id: request.id, actor: 'developer', root: '' })
+  editCard(db, {
+    id: request.id,
+    actor: 'developer',
+    patch: { body: 'spec', acceptance: ['ok'], importance: 2, urgency: 2, scope: ['src/**'] },
+  })
+
+  const promoted = takeCard(db, { id: request.id, actor: 'developer', root: '' })
+  assert.equal(promoted.status, 'in_progress')
+  assert.ok(promoted.approvedAt)
+
+  blockCard(db, { id: request.id, actor: 'developer', reason: 'needs_decision', note: '?' })
+  deferCard(db, { id: request.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: request.id, actor: 'developer' })
+  assert.equal(resumed.status, 'ready')
+})
+
+test('approve сбрасывает позицию запроса и ставит задачу по оценке', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'approval', position: 5, importance: 3, urgency: 3 })
+
+  const approved = approveCard(db, { id: card.id, actor: 'owner' })
+  assert.equal(approved.status, 'ready')
+  assert.equal(approved.position, 1)
+})
+
+test('запрос из shape-файла, resume и amend получают позицию', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  // new_cards из shape-файла
+  const host = seedCard(db, { phase: 'request', status: 'new' })
+  shapeCard(db, { id: host.id, actor: 'developer' })
+  const shaped = applyShapeFile(db, {
+    id: host.id,
+    actor: 'developer',
+    file: {
+      new_cards: [{ key: 'a', group: 'UI', title: 'Новый', skill: 'dev' }],
+    },
+  })
+  assert.equal(shaped.newCards.length, 1)
+  assert.ok(shaped.newCards[0].position)
+
+  // defer + resume запроса
+  const request = seedCard(db, { phase: 'request', status: 'new' })
+  deferCard(db, { id: request.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: request.id, actor: 'developer' })
+  assert.equal(resumed.status, 'new')
+  assert.ok(resumed.position)
+
+  // amend запроса
+  const approved = seedCard(db, { phase: 'task', status: 'approval' })
+  const amended = amendCard(db, { id: approved.id, actor: 'developer', reason: 'уточнение' })
+  assert.equal(amended.status, 'shaping')
+  assert.ok(amended.position)
+})
+
+test('block, submit и reject очищают позицию, resumeAfterAnswer ставит запрос в очередь', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  const resumed = []
+  for (const title of ['A', 'B']) {
+    const card = seedCard(db, { phase: 'request', status: 'new', title })
+    insertIntoQueue(db, card.id)
+    const question = ask(db, { cardId: card.id, author: 'developer', text: '?' })
+    blockCard(db, { id: card.id, actor: 'developer', reason: 'needs_decision' })
+    assert.equal(getCard(db, card.id)!.position, null)
+
+    answer(db, { cardId: card.id, questionId: question.id, text: 'ok', actor: 'owner' })
+    resumeAfterAnswer(db, card.id, 'developer')
+    resumed.push(getCard(db, card.id)!)
+  }
+
+  assert.deepEqual(
+    resumed.map((card) => card.position),
+    [1, 2],
+  )
+
+  const shaped = shapedRequest(t, db)
+  db.prepare('update cards set position = 1 where id = ?').run(shaped.id)
+  submitCard(db, { id: shaped.id, actor: 'developer' })
+  assert.equal(getCard(db, shaped.id)!.position, null)
+
+  const approval = seedCard(db, { phase: 'task', status: 'approval', position: 1 })
+  rejectCard(db, { id: approval.id, actor: 'owner', reason: 'не так' })
+  assert.ok(getCard(db, approval.id)!.position)
+})
+
+test('два отклонённых запроса получают разные позиции', (t) => {
+  const { db } = board(t)
+  const first = seedCard(db, { phase: 'task', status: 'approval' })
+  const second = seedCard(db, { phase: 'task', status: 'approval' })
+
+  rejectCard(db, { id: first.id, actor: 'owner', reason: 'раз' })
+  rejectCard(db, { id: second.id, actor: 'owner', reason: 'два' })
+
+  const positions = [getCard(db, first.id)!.position, getCard(db, second.id)!.position]
+  assert.notEqual(positions[0], null)
+  assert.notEqual(positions[1], null)
+  assert.notEqual(positions[0], positions[1])
+})
+
+test('owner-конверсия снимает держателя, lease и забег; submit owner отказывает', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  const host = seedCard(db, { phase: 'request', status: 'new' })
+  shapeCard(db, { id: host.id, actor: 'developer' })
+  applyShapeFile(db, {
+    id: host.id,
+    actor: 'developer',
+    file: { skill: 'owner', needs_merge: false },
+  })
+  const converted = getCard(db, host.id)!
+  assert.equal(converted.holder, null)
+  assert.equal(converted.leaseUntil, null)
+  assert.equal(converted.runId, null)
+
+  const inRun = seedCard(db, { phase: 'request', status: 'new' })
+  const run = startRun(db, { executorId: 'developer', cardIds: [inRun.id], actor: 'developer' })
+  editCard(db, { id: inRun.id, actor: 'owner', patch: { skill: 'owner', needsMerge: false } })
+  assert.equal(getCard(db, inRun.id)!.runId, null)
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === inRun.id)!.status, 'dropped')
+
+  const owner = seedCard(db, { skill: 'owner' })
+  assert.throws(() => submitCard(db, { id: owner.id, actor: 'developer' }), /владелец/)
+})
+
+test('take сохраняет position: карточка в работе видна в now 3', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+
+  startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  takeCard(db, { id: card.id, actor: 'developer', root: '' })
+
+  assert.equal(getCard(db, card.id)!.position, 1)
+  const view = nowData(db, { view: 3, executorId: 'developer' })
+  assert.ok(view.queue?.some((item) => item.id === card.id))
 })

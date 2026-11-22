@@ -125,12 +125,52 @@ test('queue move отказывает без цели, с двумя целям�
   assert.equal(missing.code, 3)
   assert.match(missing.err, /не найдена/)
 
-  json(dir, ['card', 'add', '--group', 'UI', '--title', 'Запрос', '--skill', 'dev'])
-  const notQueued = run(dir, ['queue', 'move', 'UI-4', '--top'])
+  const added = json(dir, ['card', 'add', '--group', 'UI', '--title', 'Запрос', '--skill', 'dev']) as {
+    id: string
+  }
+  const movedRequest = run(dir, ['queue', 'move', added.id, '--top'])
+  assert.equal(movedRequest.code, 0, movedRequest.err)
+
+  json(dir, ['card', 'defer', added.id, '--as', 'owner'])
+  const notQueued = run(dir, ['queue', 'move', added.id, '--top'])
   assert.equal(notQueued.code, 3)
   assert.match(notQueued.err, /не в очереди/)
 
   const usage = run(dir, ['queue', 'wat'])
   assert.equal(usage.code, 3)
   assert.match(usage.err, /использование/)
+})
+
+test('card add с оценками ставит запрос по приоритету, reorder пересобирает запросы', (t) => {
+  const dir = project(t)
+  const high = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'Высокий', '--skill', 'dev',
+    '--importance', '3', '--urgency', '3',
+  ]) as { id: string; position: number | null }
+  const low = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'Низкий', '--skill', 'dev',
+    '--importance', '1', '--urgency', '1',
+  ]) as { id: string; position: number | null }
+
+  assert.equal(high.position, 1)
+  assert.equal(low.position, 2)
+
+  run(dir, ['card', 'edit', high.id, '--importance', '1', '--urgency', '1'])
+  run(dir, ['card', 'edit', low.id, '--importance', '3', '--urgency', '3'])
+  run(dir, ['queue', 'reorder'])
+
+  const lowAfter = json(dir, ['card', 'show', low.id]) as { position: number }
+  const highAfter = json(dir, ['card', 'show', high.id]) as { position: number }
+  assert.equal(lowAfter.position, 1)
+  assert.equal(highAfter.position, 2)
+})
+
+test('queue reorder печатает и запросы', (t) => {
+  const dir = project(t)
+  json(dir, ['card', 'add', '--group', 'UI', '--title', 'Запрос', '--skill', 'dev', '--importance', '2', '--urgency', '2'])
+
+  const out = run(dir, ['queue', 'reorder'])
+  assert.equal(out.code, 0, out.err)
+  assert.match(out.out, /запросы: 1/)
+  assert.match(out.out, /UI-1/)
 })

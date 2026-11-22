@@ -191,6 +191,24 @@ function requireRunnableCard(db: DatabaseSync, executor: Executor, cardId: strin
   return card
 }
 
+/**
+ * Карточка для одиночного `take`, без забега: task `ready`/`waiting`, без брони,
+ * держателя и `run_id`, зависимости закрыты, навык подходит исполнителю.
+ */
+export function requireStandaloneCard(
+  db: DatabaseSync,
+  executorId: string,
+  cardId: string,
+): Card {
+  const executor = requireExecutor(db, executorId)
+  const card = requireRunnableCard(db, executor, cardId)
+  const unmet = listDeps(db, card.id).filter((dep) => !isSatisfied(db, dep))
+  if (unmet.length > 0) {
+    throw new UserError(3, `зависимость ${unmet.join(', ')} карточки ${card.id} не закрыта`)
+  }
+  return card
+}
+
 function requireDeps(
   db: DatabaseSync,
   card: Card,
@@ -457,7 +475,13 @@ export function suggestVariantRuns(
   })
     .filter((card) => card.skill !== OWNER && canTake(executor, card))
     .filter((card) => card.runId === null && (card.holder === null || card.holder === executorId))
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+    .sort(
+      (left, right) =>
+        (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER) ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.id.localeCompare(right.id),
+    )
 
   const tasks = listCards(db, {
     phase: 'task',
@@ -532,7 +556,7 @@ export function startRun(
     if (cardIds.length > executor.runSize) {
       throw new UserError(
         3,
-        `в забеге не больше ${executor.runSize} карточек, а передано ${cardIds.length}`,
+        `на старте не больше ${executor.runSize} карточек, а передано ${cardIds.length}`,
       )
     }
 
@@ -625,13 +649,8 @@ export function addToRun(
 
     const card = requireRunnableCard(db, executor, input.cardId)
 
+    // Размер забега ограничен только на старте: дальше он растёт свободно.
     const active = rows.filter((row) => ACTIVE_CARD_STATUSES.includes(row.status))
-    if (active.length >= executor.runSize) {
-      throw new UserError(
-        3,
-        `в забеге ${run.id} уже ${active.length} карточек: не больше ${executor.runSize}`,
-      )
-    }
 
     requireDeps(db, card, new Set(active.map((row) => row.cardId)), run.id)
 
@@ -684,6 +703,16 @@ export function dropFromRun(
         after: getCard(db, card.id),
         note: `снят с забега ${run.id}`,
       })
+      return
+    }
+    if (row.status === 'blocked' || card.status === 'blocked') {
+      // Решение владельца «blocked» сохраняется; карточка лишь покидает забег,
+      // чтобы после approve её можно было вернуть тем же `run add`.
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        run.id,
+        card.id,
+      )
+      detachBlockedCard(db, card, actor, `снята с забега ${run.id}`)
       return
     }
     if (row.status !== 'booked' || card.status !== 'booked') {
@@ -944,6 +973,33 @@ export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number
       })
     }
 
-    return rows.length + shapingIds.length
+    // Одиночные карточки без забега: истёкший lease возвращает их в очередь.
+    // Карточки в забеге возвращает закрытие забега выше.
+    const workingIds = db
+      .prepare(
+        "select id from cards where run_id is null and status in ('booked', 'in_progress') and lease_until is not null and lease_until < ? order by created_at, id",
+      )
+      .all(cutoff) as Array<{ id: string }>
+
+    for (const { id } of workingIds) {
+      const before = getCard(db, id)
+      if (!before) continue
+      const ready = listDeps(db, id).every((dep) => isSatisfied(db, dep))
+
+      db.prepare(
+        'update cards set status = ?, holder = null, lease_until = null, updated_at = ? where id = ?',
+      ).run(ready ? 'ready' : 'waiting', cutoff, id)
+
+      appendEvent(db, {
+        type: 'card.lease_expired',
+        actor: 'system',
+        subject: id,
+        before,
+        after: getCard(db, id),
+        note: cutoff,
+      })
+    }
+
+    return rows.length + shapingIds.length + workingIds.length
   })
 }

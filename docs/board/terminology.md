@@ -17,6 +17,8 @@
 | Superpowers opt-in | Superpowers не глобальный: проект подключает его в `.opencode/opencode.json`. | `plugins: [...]` | owner | 2026-11-22 |
 | Вариант забега | Категория забега по тегу карточки: `new`, `improve`, `review`. | `card add --tag new` | owner | 2026-11-22 |
 | Planned-запрос | Запрос в забеге до разбора; `take` сначала shape, потом promotion. | `run start --cards NOW-3` | owner | 2026-11-22 |
+| Brainstorming | Разговор с владельцем о том, что строить. В board-проекте его итог пишется в карточку, не в `docs/superpowers`. | `brainstorming` → `card shape` | owner | 2026-11-22 |
+| Native | Исполнение карточки агентом без субагентов-исполнителей. | `take` → `finish` | owner | 2026-11-22 |
 
 ## Команды владельца
 

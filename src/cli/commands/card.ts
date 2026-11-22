@@ -10,14 +10,17 @@ import {
   applyShapeFile,
   approveCard,
   cancelCard,
+  deferCard,
   ownerDone,
   rejectCard,
   reopenCard,
+  resumeCard,
   shapeCard,
   submitCard,
   type ShapeFile,
 } from '../../core/lifecycle.ts'
 import { findProject } from '../../core/project.ts'
+import { insertIntoQueue } from '../../core/queue.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
 import { submitVerdict } from '../../core/review.ts'
 import { modelContext, resolveSpecReviewMode } from '../../core/review-policy.ts'
@@ -68,6 +71,16 @@ export default async function command(args: ParsedArgs) {
     const skill = stringFlag(args, 'skill')
     if (!skill) throw new UserError(3, 'нужен --skill dev')
 
+    // Оценки валидируются до создания: ошибка ввода не должна оставлять карточку.
+    const importance = numberFlag(args, 'importance')
+    if (importance !== undefined && (importance < 0 || importance > 3)) {
+      throw new UserError(3, 'важность — целое число от 0 до 3')
+    }
+    const urgency = numberFlag(args, 'urgency')
+    if (urgency !== undefined && (urgency < 0 || urgency > 3)) {
+      throw new UserError(3, 'срочность — целое число от 0 до 3')
+    }
+
     const card = createCard(db, {
       group,
       title,
@@ -77,7 +90,15 @@ export default async function command(args: ParsedArgs) {
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
     })
-    ok(card, `${card.id} создана: ${card.title}`)
+    const score: CardPatch = {}
+    if (importance !== undefined) score.importance = importance
+    if (urgency !== undefined) score.urgency = urgency
+    if (Object.keys(score).length > 0) {
+      editCard(db, { id: card.id, actor: stringFlag(args, 'as') ?? 'owner', patch: score })
+    }
+    insertIntoQueue(db, card.id)
+    const created = getCard(db, card.id)!
+    ok(created, `${created.id} создана: ${created.title}`)
     return 0
   }
 
@@ -518,6 +539,33 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const defer = (args: ParsedArgs): number => {
+    const card = requireCard(
+      args.positionals[0],
+      'использование: board card defer UI-1 --as <исполнитель>',
+    )
+    const updated = deferCard(db, {
+      id: card.id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      note: stringFlag(args, 'note'),
+    })
+    ok(updated, `${updated.id} отложена: ${updated.title}`)
+    return 0
+  }
+
+  const resume = (args: ParsedArgs): number => {
+    const card = requireCard(
+      args.positionals[0],
+      'использование: board card resume UI-1 --as <исполнитель>',
+    )
+    const updated = resumeCard(db, {
+      id: card.id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+    })
+    ok(updated, `${updated.id} возвращена: ${updated.status}`)
+    return 0
+  }
+
   try {
     if (args.sub === 'add') return add(args)
     if (args.sub === 'list') return list(args)
@@ -536,9 +584,11 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'done') return done(args)
     if (args.sub === 'cancel') return cancel(args)
     if (args.sub === 'reopen') return reopen(args)
+    if (args.sub === 'defer') return defer(args)
+    if (args.sub === 'resume') return resume(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume',
     )
   } finally {
     db.close()
