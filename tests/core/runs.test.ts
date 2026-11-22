@@ -377,21 +377,18 @@ test('addToRun добавляет карточку, dropFromRun возвраща
   )
 })
 
-test('addToRun не превышает run_size и проверяет зависимость', (t) => {
+test('addToRun не ограничен стартовым размером и проверяет зависимость', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'], runSize: 2 })
   const first = task(db, { position: 1 })
   const second = task(db, { position: 2 })
   const third = task(db, { position: 3 })
-  const waiting = task(db, { position: 4, status: 'waiting' })
-  addDep(db, waiting.id, third.id)
 
-  startRun(db, { executorId: 'developer', cardIds: [first.id], actor: 'developer' })
+  const run = startRun(db, { executorId: 'developer', cardIds: [first.id], actor: 'developer' })
   addToRun(db, { executorId: 'developer', cardId: second.id, actor: 'developer' })
-  assert.throws(
-    () => addToRun(db, { executorId: 'developer', cardId: third.id, actor: 'developer' }),
-    /не больше 2/,
-  )
+  // Сверх стартового размера: забег растёт после старта.
+  addToRun(db, { executorId: 'developer', cardId: third.id, actor: 'developer' })
+  assert.equal(listRunCards(db, run.id).length, 3)
 
   const { db: other } = board(t)
   seedExecutor(other, { id: 'developer', skills: ['dev'] })
@@ -869,4 +866,36 @@ test('истёкший lease одиночной карточки без забе
   assert.equal(after.holder, null)
   assert.equal(after.leaseUntil, null)
   assert.ok(listEvents(db, card.id).some((event) => event.type === 'card.lease_expired'))
+})
+
+test('забег растёт после старта: на старте не больше 3, add без лимита', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const cards = [1, 2, 3, 4, 5].map((position) => task(db, { position }))
+
+  assert.throws(
+    () =>
+      startRun(db, {
+        executorId: 'developer',
+        cardIds: cards.map((card) => card.id),
+        actor: 'developer',
+      }),
+    /на старте не больше 3/,
+  )
+
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: cards.slice(0, 3).map((card) => card.id),
+    actor: 'developer',
+  })
+  addToRun(db, { executorId: 'developer', cardId: cards[3].id, actor: 'developer' })
+  addToRun(db, { executorId: 'developer', cardId: cards[4].id, actor: 'developer' })
+
+  const rows = listRunCards(db, run.id)
+  assert.equal(rows.length, 5)
+  assert.deepEqual(
+    rows.map((row) => row.cardId),
+    cards.map((card) => card.id),
+  )
+  assert.equal(nextCard(db, { executorId: 'developer' })?.id, cards[0].id)
 })
