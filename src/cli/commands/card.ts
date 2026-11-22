@@ -80,8 +80,17 @@ export default async function command(args: ParsedArgs) {
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
     })
+    const score: CardPatch = {}
+    const importance = numberFlag(args, 'importance')
+    if (importance !== undefined) score.importance = importance
+    const urgency = numberFlag(args, 'urgency')
+    if (urgency !== undefined) score.urgency = urgency
+    if (Object.keys(score).length > 0) {
+      editCard(db, { id: card.id, actor: stringFlag(args, 'as') ?? 'owner', patch: score })
+    }
     insertIntoQueue(db, card.id)
-    ok(card, `${card.id} создана: ${card.title}`)
+    const created = getCard(db, card.id)!
+    ok(created, `${created.id} создана: ${created.title}`)
     return 0
   }
 

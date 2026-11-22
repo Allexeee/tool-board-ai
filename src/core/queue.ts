@@ -174,13 +174,16 @@ export function moveCard(db: DatabaseSync, id: string, target: MoveTarget): void
  */
 export function reorderQueue(db: DatabaseSync): void {
   tx(db, () => {
-    const ordered = listQueue(db).sort(
-      (left, right) =>
-        score(right) - score(left) ||
-        (left.position ?? Number.MAX_SAFE_INTEGER) -
-          (right.position ?? Number.MAX_SAFE_INTEGER),
-    )
-    renumber(db, ordered.map((card) => card.id))
+    for (const phase of ['task', 'request'] as const) {
+      const ordered = listQueue(db, {}, phase).sort(
+        (left, right) =>
+          score(right) - score(left) ||
+          (left.position ?? Number.MAX_SAFE_INTEGER) -
+            (right.position ?? Number.MAX_SAFE_INTEGER),
+      )
+      // Пустой список не нумеруем: у запросов может не быть позиций вовсе.
+      if (ordered.length > 0) renumber(db, ordered.map((card) => card.id))
+    }
   })
 }
 
