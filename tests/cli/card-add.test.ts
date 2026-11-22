@@ -213,3 +213,18 @@ test('card list фильтрует и печатает карточки', (t) =>
   assert.match(human.out, /OPS-1/)
   assert.match(human.out, /new/)
 })
+
+test('card add и edit принимают теги', (t) => {
+  const dir = project(t)
+  const added = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 't', '--skill', 'dev',
+    '--tag', 'New', '--tag', 'backend',
+  ])
+  assert.deepEqual(added.tags, ['new', 'backend'])
+
+  const edited = json(dir, ['card', 'edit', 'UI-1', '--tag', 'review'])
+  assert.deepEqual(edited.tags, ['review'])
+
+  const cleared = json(dir, ['card', 'edit', 'UI-1', '--clear-tags'])
+  assert.deepEqual(cleared.tags, [])
+})
