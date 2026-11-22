@@ -35,6 +35,15 @@ test('навыки ссылаются на terminology.md и на порядок
   assert.match(read('board-work'), /review list/)
 })
 
+test('плагин добавляет brainstorming в системный промпт', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /ctx\.session\.hook\('context'/)
+  assert.match(plugin, /Перед любой работой по доске используй brainstorming/)
+  assert.match(plugin, /Разговор без глагола работы карточек не создаёт/)
+})
+
 test('плагин объявляет board_now и board_setup и зовёт CLI', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
