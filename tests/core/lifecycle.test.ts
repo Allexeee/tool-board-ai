@@ -652,6 +652,7 @@ test('defer откладывает запрос и задачу, resume возв
 
   const request = seedCard(db, { phase: 'request', status: 'new' })
   const task = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  db.prepare('update cards set approved_at = ? where id = ?').run(nowIso(), task.id)
 
   const deferredRequest = deferCard(db, { id: request.id, actor: 'developer' })
   assert.equal(deferredRequest.status, 'deferred')
@@ -690,4 +691,51 @@ test('defer снимает забронированную карточку с з
     () => deferCard(db, { id: working.id, actor: 'developer' }),
     /нельзя отложить/,
   )
+})
+
+test('defer/resume не обходят approve', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'approval' })
+
+  deferCard(db, { id: card.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumed.status, 'approval')
+  assert.equal(resumed.approvedAt, null)
+  assert.throws(
+    () => takeCard(db, { id: card.id, actor: 'developer', root: '' }),
+    /не забронирована/,
+  )
+})
+
+test('resume задачи с открытым вопросом возвращает blocked', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'blocked' })
+  db.prepare('update cards set approved_at = ? where id = ?').run(nowIso(), card.id)
+  ask(db, { cardId: card.id, author: 'developer', text: 'какой вариант?' })
+
+  deferCard(db, { id: card.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumed.status, 'blocked')
+  assert.throws(
+    () => takeCard(db, { id: card.id, actor: 'developer', root: '' }),
+    /не забронирована|ждёт ответа/,
+  )
+})
+
+test('defer/resume проверяют держателя и навык', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedExecutor(db, { id: 'other', skills: ['dev'] })
+  seedExecutor(db, { id: 'ui', skills: ['ui'] })
+
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1, holder: 'developer' })
+  assert.throws(() => deferCard(db, { id: card.id, actor: 'other' }), /держит другой исполнитель/)
+  assert.throws(() => deferCard(db, { id: card.id, actor: 'ui' }), /не подходит исполнителю/)
+
+  const deferred = deferCard(db, { id: card.id, actor: 'owner' })
+  assert.equal(deferred.status, 'deferred')
+  assert.throws(() => resumeCard(db, { id: card.id, actor: 'ui' }), /не подходит исполнителю/)
+  assert.equal(resumeCard(db, { id: card.id, actor: 'owner' }).status, 'approval')
 })

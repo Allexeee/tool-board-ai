@@ -6,6 +6,7 @@ import { tx } from './db.ts'
 import { addDep, isSatisfied, listDeps, refreshReadiness } from './deps.ts'
 import { comment, openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
+import { getExecutor } from './executors.ts'
 import {
   currentBranch,
   ensureWorktree,
@@ -56,6 +57,24 @@ function requireCard(db: DatabaseSync, id: string): Card {
   const card = getCard(db, id)
   if (!card) throw new UserError(3, `карточка ${id} не найдена`)
   return card
+}
+
+/**
+ * Владелец может отложить и вернуть любую карточку. Агент — только карточку
+ * своего навыка, которую не держит другой исполнитель.
+ */
+function assertCanDefer(db: DatabaseSync, card: Card, actor: string): void {
+  if (actor === 'owner') return
+  const executor = getExecutor(db, actor)
+  if (!executor || card.skill === null || !executor.skills.includes(card.skill)) {
+    throw new UserError(
+      3,
+      `навык карточки ${card.id} (${card.skill ?? '—'}) не подходит исполнителю ${actor}`,
+    )
+  }
+  if (card.holder !== null && card.holder !== actor) {
+    throw new UserError(3, `карточку ${card.id} держит другой исполнитель: ${card.holder}`)
+  }
 }
 
 function requireActor(raw: string | undefined): string {
@@ -436,6 +455,7 @@ export function deferCard(
         `карточку ${card.id} в статусе ${card.status} нельзя отложить: сначала finish или block`,
       )
     }
+    assertCanDefer(db, card, actor)
 
     if (card.runId) {
       db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
@@ -463,8 +483,9 @@ export function deferCard(
 }
 
 /**
- * Вернуть отложенную карточку: запрос — в `new`, задача — в `ready`/`waiting`
- * по зависимостям и в очередь по оценке.
+ * Вернуть отложенную карточку туда, где она была по смыслу: запрос — в `new`,
+ * неутверждённая задача — в `approval` (гейт сохраняется), задача с открытым
+ * вопросом — в `blocked`, иначе `ready`/`waiting` по зависимостям и в очередь.
  */
 export function resumeCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
   return tx(db, () => {
@@ -473,19 +494,23 @@ export function resumeCard(db: DatabaseSync, input: { id: string; actor: string 
     if (card.status !== 'deferred') {
       throw new UserError(3, `карточка ${card.id} не отложена: ${card.status}`)
     }
+    assertCanDefer(db, card, actor)
 
     const at = nowIso()
+    let next: CardStatus
     if (card.phase === 'request') {
-      db.prepare("update cards set status = 'new', updated_at = ? where id = ?").run(at, card.id)
+      next = 'new'
+    } else if (card.approvedAt === null) {
+      next = 'approval'
+    } else if (openQuestions(db, card.id).length > 0) {
+      next = 'blocked'
     } else {
       const ready = listDeps(db, card.id).every((dep) => isSatisfied(db, dep))
-      db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(
-        ready ? 'ready' : 'waiting',
-        at,
-        card.id,
-      )
-      insertIntoQueue(db, card.id)
+      next = ready ? 'ready' : 'waiting'
     }
+
+    db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(next, at, card.id)
+    if (next === 'ready' || next === 'waiting') insertIntoQueue(db, card.id)
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {
@@ -880,18 +905,15 @@ function startWork(
         `в забеге ${run.id} уже есть карточка в работе: сначала finish или block`,
       )
     }
-  } else {
-    const other = db
-      .prepare(
-        "select id from cards where holder = ? and status = 'in_progress' and id != ?",
-      )
-      .get(actor, card.id) as { id: string } | undefined
-    if (other) {
-      throw new UserError(
-        3,
-        `у исполнителя ${actor} уже есть карточка в работе: ${other.id} — сначала finish или block`,
-      )
-    }
+  }
+  const busy = db
+    .prepare("select id from cards where holder = ? and status = 'in_progress' and id != ?")
+    .get(actor, card.id) as { id: string } | undefined
+  if (busy) {
+    throw new UserError(
+      3,
+      `у исполнителя ${actor} уже есть карточка в работе: ${busy.id} — сначала finish или block`,
+    )
   }
 
   let branch: string | null = card.branch
