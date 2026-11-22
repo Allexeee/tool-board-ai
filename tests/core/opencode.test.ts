@@ -223,6 +223,8 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-run'), /только части только что разобранной/)
   assert.match(read('board-run'), /Пакет и проход ревью/)
   assert.match(read('board-run'), /7 находок/)
+  assert.match(read('board-run'), /## Ран/)
+  assert.match(read('board-run'), /Беру в работу/)
   assert.match(read('board-work'), /Разобрал/)
   assert.match(read('board-work'), /Приступаю/)
 })
