@@ -277,6 +277,7 @@ export function rejectCard(
       `update cards set status = 'new', phase = 'request', holder = null, lease_until = null,
        approved_at = null, spec_rev = spec_rev + 1, position = null, updated_at = ? where id = ?`,
     ).run(at, card.id)
+    insertIntoQueue(db, card.id)
 
     // Причина отказа остаётся в обсуждении, как требует §10.1.
     comment(db, { cardId: card.id, author: actor, text: reason })
