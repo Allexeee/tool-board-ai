@@ -16,6 +16,7 @@ import {
   reclaimExpired,
   releaseRun,
   suggestRuns,
+  suggestVariantRuns,
   startRun,
 } from '../../src/core/runs.ts'
 import { finishCard } from '../../src/core/lifecycle.ts'
@@ -740,4 +741,35 @@ test('reclaimExpired возвращает просроченную shaping-ка�
   assert.equal(event.type, 'card.lease_expired')
   assert.equal(event.actor, 'system')
   assert.equal(reclaimExpired(db), 0)
+})
+
+test('suggestVariantRuns: три варианта, запросы первыми, без пересечений', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'], runSize: 3 })
+
+  const request = seedCard(db, { phase: 'request', status: 'new', tags: ['new'] })
+  const fresh = seedCard(db, { phase: 'task', status: 'ready', position: 1, tags: ['new'] })
+  const better = seedCard(db, { phase: 'task', status: 'ready', position: 2, tags: ['improve'] })
+  const fix1 = seedCard(db, { phase: 'task', status: 'ready', position: 3, tags: ['review'] })
+  const fix2 = seedCard(db, { phase: 'task', status: 'ready', position: 4, tags: ['review'] })
+
+  const runs = suggestVariantRuns(db, 'dev')
+  assert.deepEqual(runs.map((run) => run.tag), ['new', 'improve', 'review'])
+  assert.deepEqual(runs[0].cards.map((card) => card.id), [request.id, fresh.id])
+  assert.deepEqual(runs[1].cards.map((card) => card.id), [better.id])
+  assert.deepEqual(runs[2].cards.map((card) => card.id), [fix1.id, fix2.id])
+  assert.equal(new Set(runs.flatMap((run) => run.cards.map((card) => card.id))).size, 5)
+})
+
+test('suggestVariantRuns не берёт waiting с внешней зависимостью', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'] })
+  const blocker = seedCard(db, { phase: 'task', status: 'ready', position: 1, tags: ['improve'] })
+  const waiting = seedCard(db, { phase: 'task', status: 'waiting', position: 2, tags: ['new'] })
+  addDep(db, waiting.id, blocker.id, 'owner')
+
+  const runs = suggestVariantRuns(db, 'dev')
+  assert.equal(runs.some((run) => run.cards.some((card) => card.id === waiting.id)), false)
 })

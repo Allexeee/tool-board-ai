@@ -122,4 +122,6 @@ export interface RunSuggestion {
   executorId: string
   cards: Card[]
   group: string | null
+  tag?: string | null
+  label?: string | null
 }

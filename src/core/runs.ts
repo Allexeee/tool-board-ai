@@ -7,6 +7,7 @@ import { isSatisfied, listDeps } from './deps.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
 import { allocateId } from './ids.ts'
+import { RUN_VARIANTS, variantOf } from './tags.ts'
 import type {
   Card,
   Executor,
@@ -368,9 +369,81 @@ export function suggestRuns(
 }
 
 /**
- * Бронирование §8.2. Все проверки и записи — одна транзакция: ошибка не
- * оставляет ни run-записи, ни забронированных карточек.
+ * Вероятные забеги по вариантам: new, improve, review. Запросы идут первыми,
+ * затем задачи по position. До runSize карточек на вариант, без fallback.
  */
+export function suggestVariantRuns(
+  db: DatabaseSync,
+  executorId: string,
+  options: { group?: string; skill?: string; runSize?: number } = {},
+): RunSuggestion[] {
+  const executor = requireExecutor(db, executorId)
+  if (executorId === OWNER) return []
+
+  const runSize = options.runSize ?? executor.runSize
+  const requests = listCards(db, {
+    phase: 'request',
+    status: ['new', 'shaping'],
+    group: options.group,
+    skill: options.skill,
+  })
+    .filter((card) => card.skill !== OWNER && canTake(executor, card))
+    .filter((card) => card.runId === null && (card.holder === null || card.holder === executorId))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+
+  const tasks = listCards(db, {
+    phase: 'task',
+    status: ['ready', 'waiting'],
+    group: options.group,
+    skill: options.skill,
+  })
+    .filter(
+      (card) =>
+        card.position !== null &&
+        card.holder === null &&
+        card.runId === null &&
+        card.skill !== OWNER &&
+        canTake(executor, card),
+    )
+    .sort(
+      (left, right) =>
+        left.position! - right.position! ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.id.localeCompare(right.id),
+    )
+
+  const candidates = [...requests, ...tasks]
+  const used = new Set<string>()
+  const suggestions: RunSuggestion[] = []
+
+  for (const variant of RUN_VARIANTS) {
+    const chosen: Card[] = []
+    const chosenIds = new Set<string>()
+
+    for (const card of candidates) {
+      if (chosen.length >= runSize) break
+      if (used.has(card.id)) continue
+      if (variantOf(card)?.tag !== variant.tag) continue
+      if (!depsStartable(db, card, chosenIds)) continue
+
+      chosen.push(card)
+      chosenIds.add(card.id)
+      used.add(card.id)
+    }
+
+    if (chosen.length > 0) {
+      suggestions.push({
+        executorId,
+        cards: chosen,
+        group: chosen[0].group,
+        tag: variant.tag,
+        label: variant.label,
+      })
+    }
+  }
+
+  return suggestions
+}
 export function startRun(
   db: DatabaseSync,
   input: {

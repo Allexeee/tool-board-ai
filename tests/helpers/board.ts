@@ -91,6 +91,7 @@ export function seedCard(db: DatabaseSync, input: SeedCardInput = {}): Card {
     acceptance: input.acceptance,
     skill: input.skill ?? 'dev',
     author: input.author ?? 'owner',
+    tags: input.tags,
   })
 
   const sets: string[] = []
