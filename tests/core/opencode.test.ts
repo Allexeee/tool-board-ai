@@ -314,3 +314,18 @@ test('команда ревью описывает пакет, бюджет и �
   assert.match(command, /7 находок/)
   assert.match(command, /--kind review/)
 })
+
+test('AGENTS и board-work описывают ревью пакетом', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+  const work = readFileSync(join(root, '.opencode', 'skills', 'board-work', 'SKILL.md'), 'utf8')
+
+  assert.match(agents, /Ревью идёт пакетом/)
+  assert.match(agents, /сборник в `deferred`/)
+  assert.doesNotMatch(agents, /findings становятся карточками/)
+
+  assert.match(work, /только читает/)
+  assert.match(work, /сборник/)
+  assert.match(work, /до 3 important/)
+})

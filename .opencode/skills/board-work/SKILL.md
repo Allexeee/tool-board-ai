@@ -29,10 +29,10 @@ description: Доска: исполнить карточку — take, план 
 ## Ревью
 
 - `/spec-review` — полнота spec до approve; self или субагент по настройке.
-- `/review` — run review: соответствие plan и код; пакет — `board review list --json`. Субагент `board-reviewer` работает на default-варианте модели.
-- Findings: `board review finding <ID> --severity critical|important|other --text "..."`.
-- Вердикт: `board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer <id>`.
-- Один цикл: findings не переоткрывают исходную карточку; `critical` блокирует release, `important`/`other` идут в backlog. Второй reopen — только владелец. Свою карточку не ревьюй: для кода вердикт даёт свежий субагент.
+- `/review` — проход по пакету (`board review list --json`): все карточки в `review` с прошлого прохода. Субагент `board-reviewer` только читает: карточек не создаёт, итоги прохода пишет в `run note`.
+- Бюджет прохода: critical и регрессии этого diff — всегда, до 3 important по рангу ревьюера, остальное — сборник `review notes` в deferred.
+- Находки оформляет агент: critical и до 3 important — `board review finding <ID> --severity ... --text "..."`; в карточке — вердикт и ссылка `card ref add --kind review`.
+- Свою карточку не ревьюй: вердикт даёт свежий субагент. `critical` блокирует release.
 
 ## Правила
 
