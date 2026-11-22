@@ -188,6 +188,32 @@ board now 3    # открытые запросы и общая очередь
 
 Фильтры `now 3`: `--group UI`, `--skill dev`, `--status ready,waiting`, `--mine`, `--phase request`, `--limit`, `--all`; в `now 1/2` — `--group` и `--skill`. Все команды принимают `--json`.
 
+## Superpowers
+
+Глобально superpowers не подключён: в `~/.config/opencode/opencode.json` нет
+его плагина, поэтому ни скиллы, ни bootstrap-текст не появляются в проектах по
+умолчанию. Проект, которому нужны эти скиллы, добавляет свой конфиг:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["C:\\Users\\aleks\\.config\\opencode\\node_modules\\superpowers"]
+}
+```
+
+Если проект включает superpowers, но `brainstorming` в нём не нужен:
+
+```jsonc
+{
+  "permissions": [
+    { "action": "skill", "resource": "brainstorming", "effect": "deny" }
+  ]
+}
+```
+
+Остальные глобальные скиллы (`frontend-design`, `ui-ux-pro-max`, `unity-2022`)
+продолжают работать.
+
 ## Решения и терминология
 
 - `docs/board/decisions.md` — общий журнал решений и допущений; пишется командой `decision` и перезаписывается атомарно.

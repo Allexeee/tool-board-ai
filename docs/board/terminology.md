@@ -14,6 +14,7 @@
 | Версия board | Версия в `tools/board`, привязанная к тегу/коммиту; проект работает только с ней. | `board init --board-version v1.2.0` | owner | 2026-11-22 |
 | Глобальный диспетчер | `board` в PATH, который передаёт команду локальному `tools/board`; без локального CLI — установка и диагностика. | `board --global --version` | owner | 2026-11-22 |
 | Upgrade | Осознанное переключение `tools/board` на другой тег/коммит. | `board upgrade v1.2.0` | owner | 2026-11-22 |
+| Superpowers opt-in | Superpowers не глобальный: проект подключает его в `.opencode/opencode.json`. | `plugins: [...]` | owner | 2026-11-22 |
 
 ## Команды владельца
 
