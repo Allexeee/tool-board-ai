@@ -239,7 +239,8 @@ export function approveCard(
       ).run(at, at, card.id)
     } else {
       db.prepare(
-        `update cards set status = 'waiting', approved_at = ?, updated_at = ? where id = ?`,
+        `update cards set status = 'waiting', approved_at = ?, position = null, updated_at = ?
+         where id = ?`,
       ).run(at, at, card.id)
       insertIntoQueue(db, card.id)
       refreshReadiness(db)
@@ -878,11 +879,10 @@ function takeRequest(
   const promoted = startWork(db, card, actor, root, run)
   // Правило забега — авторизация вместо approve: фиксируем её, чтобы resume
   // вернул карточку в работу, а не в approval.
-  if (promoted.approvedAt === null) {
-    db.prepare('update cards set approved_at = ? where id = ? and approved_at is null').run(
-      nowIso(),
-      card.id,
-    )
+  if (promoted.approvedAt === null || promoted.position !== null) {
+    db.prepare(
+      'update cards set approved_at = coalesce(approved_at, ?), position = null where id = ?',
+    ).run(nowIso(), card.id)
   }
   const authorized = getCard(db, card.id)!
   appendEvent(db, {

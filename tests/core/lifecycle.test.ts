@@ -802,3 +802,13 @@ test('продвижение запроса правилом забега фик
   const resumed = resumeCard(db, { id: request.id, actor: 'developer' })
   assert.equal(resumed.status, 'ready')
 })
+
+test('approve сбрасывает позицию запроса и ставит задачу по оценке', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'approval', position: 5, importance: 3, urgency: 3 })
+
+  const approved = approveCard(db, { id: card.id, actor: 'owner' })
+  assert.equal(approved.status, 'ready')
+  assert.equal(approved.position, 1)
+})

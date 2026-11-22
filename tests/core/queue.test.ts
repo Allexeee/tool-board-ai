@@ -110,16 +110,17 @@ test('карточка с наибольшей оценкой встаёт в н
   assert.deepEqual(positions(listQueue(db)), [1, 2])
 })
 
-test('в очередь ставятся только задачи в waiting или ready', (t) => {
+test('в очередь ставятся задачи waiting/ready и запросы new/shaping', (t) => {
   const { db } = board(t)
   const request = task(db, { phase: 'request', status: 'new' })
   const approval = task(db, { phase: 'task', status: 'approval' })
   const done = task(db, { phase: 'task', status: 'done' })
 
   assert.throws(() => insertIntoQueue(db, 'UI-999'), /не найдена/)
-  assert.throws(() => insertIntoQueue(db, request.id), /запрос/)
-  assert.throws(() => insertIntoQueue(db, approval.id), /waiting или ready/)
-  assert.throws(() => insertIntoQueue(db, done.id), /waiting или ready/)
+  assert.equal(insertIntoQueue(db, request.id), undefined)
+  assert.equal(listQueue(db, {}, 'request').length, 1)
+  assert.throws(() => insertIntoQueue(db, approval.id), /new или shaping|waiting или ready/)
+  assert.throws(() => insertIntoQueue(db, done.id), /new или shaping|waiting или ready/)
   assert.equal(listQueue(db).length, 0)
 })
 
@@ -223,4 +224,26 @@ test('listQueue фильтрует по статусу, группе, навык
   assert.deepEqual(ids(listQueue(db, { limit: 2 })), [ui.id, uiWaiting.id])
   assert.deepEqual(ids(listQueue(db, { limit: 0 })), [])
   assert.deepEqual(ids(listQueue(db, { status: [] })), [])
+})
+
+test('очередь запросов: вставка по оценке, move и отдельность от задач', (t) => {
+  const { db } = board(t)
+  const low = task(db, { phase: 'request', status: 'new', importance: 1, urgency: 1 })
+  const high = task(db, { phase: 'request', status: 'new', importance: 3, urgency: 3 })
+  const mid = task(db, { phase: 'request', status: 'new', importance: 2, urgency: 2 })
+
+  insertIntoQueue(db, low.id)
+  insertIntoQueue(db, high.id)
+  insertIntoQueue(db, mid.id)
+
+  assert.deepEqual(ids(listQueue(db, {}, 'request')), [high.id, mid.id, low.id])
+
+  moveCard(db, low.id, { top: true })
+  assert.deepEqual(ids(listQueue(db, {}, 'request')), [low.id, high.id, mid.id])
+  assert.equal(listQueue(db).length, 0)
+
+  const deferred = task(db, { phase: 'request', status: 'new', importance: 3, urgency: 3 })
+  insertIntoQueue(db, deferred.id)
+  db.prepare("update cards set status = 'deferred', position = null where id = ?").run(deferred.id)
+  assert.equal(listQueue(db, {}, 'request').some((card) => card.id === deferred.id), false)
 })

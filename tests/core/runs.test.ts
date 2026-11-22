@@ -933,3 +933,16 @@ test('blocked-карточку снимают с забега и возвращ�
     /в работе/,
   )
 })
+
+test('suggestVariantRuns берёт запросы по позиции', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const later = seedCard(db, { phase: 'request', status: 'new', title: 'B', tags: ['new'] })
+  const next = seedCard(db, { phase: 'request', status: 'new', title: 'A', tags: ['new'] })
+  db.prepare('update cards set position = 1 where id = ?').run(next.id)
+
+  const suggestion = suggestVariantRuns(db, 'developer').find((run) => run.tag === 'new')
+  assert.ok(suggestion)
+  assert.equal(suggestion!.cards[0].id, next.id)
+  assert.equal(suggestion!.cards.some((card) => card.id === later.id), true)
+})

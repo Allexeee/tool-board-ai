@@ -20,6 +20,7 @@ import {
   type ShapeFile,
 } from '../../core/lifecycle.ts'
 import { findProject } from '../../core/project.ts'
+import { insertIntoQueue } from '../../core/queue.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
 import { submitVerdict } from '../../core/review.ts'
 import { modelContext, resolveSpecReviewMode } from '../../core/review-policy.ts'
@@ -79,6 +80,7 @@ export default async function command(args: ParsedArgs) {
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
     })
+    insertIntoQueue(db, card.id)
     ok(card, `${card.id} создана: ${card.title}`)
     return 0
   }

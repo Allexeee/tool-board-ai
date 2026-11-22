@@ -297,7 +297,13 @@ function openCards(
           group: filters.group,
           skill: filters.skill,
           holder,
-        })
+        }).sort(
+          (left, right) =>
+            (left.position ?? Number.MAX_SAFE_INTEGER) -
+              (right.position ?? Number.MAX_SAFE_INTEGER) ||
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.id.localeCompare(right.id),
+        )
     result.requests = requests.slice(0, limit)
     result.moreRequests = requests.length > limit ? requests.length - limit : 0
   }

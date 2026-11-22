@@ -475,7 +475,13 @@ export function suggestVariantRuns(
   })
     .filter((card) => card.skill !== OWNER && canTake(executor, card))
     .filter((card) => card.runId === null && (card.holder === null || card.holder === executorId))
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+    .sort(
+      (left, right) =>
+        (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER) ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.id.localeCompare(right.id),
+    )
 
   const tasks = listCards(db, {
     phase: 'task',

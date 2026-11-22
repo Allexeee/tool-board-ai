@@ -2,11 +2,11 @@ import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { getCard, listCards } from './cards.ts'
 import { tx } from './db.ts'
-import type { Card, CardStatus } from './types.ts'
+import type { Card, CardPhase, CardStatus } from './types.ts'
 
 /**
- * Статусы задачи, которые видны в очереди §5.1. `approval` ждёт владельца,
- * запросы живут отдельным списком по времени создания.
+ * Статусы задачи, которые видны в очереди §5.1. `approval` ждёт владельца;
+ * запросы стоят в своей очереди по тем же правилам.
  */
 const QUEUE_STATUSES: readonly CardStatus[] = [
   'waiting',
@@ -17,7 +17,19 @@ const QUEUE_STATUSES: readonly CardStatus[] = [
   'review',
 ]
 
+/** Открытые запросы в очереди заявок: new и shaping. */
+const REQUEST_QUEUE_STATUSES: readonly CardStatus[] = ['new', 'shaping']
+
 const QUEUE = new Set<string>(QUEUE_STATUSES)
+const REQUEST_QUEUE = new Set<string>(REQUEST_QUEUE_STATUSES)
+
+function queueStatuses(phase: CardPhase): readonly CardStatus[] {
+  return phase === 'request' ? REQUEST_QUEUE_STATUSES : QUEUE_STATUSES
+}
+
+function inQueue(phase: CardPhase, status: CardStatus): boolean {
+  return (phase === 'request' ? REQUEST_QUEUE : QUEUE).has(status)
+}
 
 export interface QueueFilter {
   status?: CardStatus | CardStatus[]
@@ -43,7 +55,11 @@ function byPosition(left: Card, right: Card): number {
   return (left.position ?? 0) - (right.position ?? 0)
 }
 
-export function listQueue(db: DatabaseSync, filter: QueueFilter = {}): Card[] {
+export function listQueue(
+  db: DatabaseSync,
+  filter: QueueFilter = {},
+  phase: CardPhase = 'task',
+): Card[] {
   const limit = filter.limit
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new UserError(3, '--limit — целое число от 0')
@@ -51,14 +67,14 @@ export function listQueue(db: DatabaseSync, filter: QueueFilter = {}): Card[] {
 
   const statuses =
     filter.status === undefined
-      ? [...QUEUE_STATUSES]
+      ? [...queueStatuses(phase)]
       : Array.isArray(filter.status)
         ? filter.status
         : [filter.status]
   if (statuses.length === 0) return []
 
   const cards = listCards(db, {
-    phase: 'task',
+    phase,
     status: statuses,
     group: filter.group,
     skill: filter.skill,
@@ -66,7 +82,7 @@ export function listQueue(db: DatabaseSync, filter: QueueFilter = {}): Card[] {
   })
 
   const queue = cards
-    .filter((card) => QUEUE.has(card.status) && card.position !== null)
+    .filter((card) => inQueue(phase, card.status) && card.position !== null)
     .sort(byPosition)
   return limit === undefined ? queue : queue.slice(0, limit)
 }
@@ -74,23 +90,22 @@ export function listQueue(db: DatabaseSync, filter: QueueFilter = {}): Card[] {
 /**
  * Вставка по оценке §5.2: после последней карточки с оценкой >= новой, при
  * равной оценке — после всех равных. Затем все позиции перенумерованы 1..N.
+ * Работает и для задач, и для запросов — у каждого своя очередь.
  */
 export function insertIntoQueue(db: DatabaseSync, cardId: string): void {
   tx(db, () => {
     const card = getCard(db, cardId)
     if (!card) throw new UserError(3, `карточка ${cardId} не найдена`)
-    if (card.phase !== 'task') {
-      throw new UserError(3, `карточка ${cardId} — запрос: в очередь задач не ставится`)
-    }
-    if (card.status !== 'waiting' && card.status !== 'ready') {
+    const statuses = queueStatuses(card.phase)
+    if (!statuses.includes(card.status)) {
       throw new UserError(
         3,
-        `карточка ${cardId} в статусе ${card.status}: в очередь ставится waiting или ready`,
+        `карточка ${cardId} в статусе ${card.status}: в очередь ставится ${statuses.join(' или ')}`,
       )
     }
     if (card.position !== null) return
 
-    const others = listQueue(db).filter((item) => item.id !== cardId)
+    const others = listQueue(db, {}, card.phase).filter((item) => item.id !== cardId)
     const cardScore = score(card)
     let index = 0
     for (let i = 0; i < others.length; i++) {
@@ -114,7 +129,7 @@ export function moveCard(db: DatabaseSync, id: string, target: MoveTarget): void
     const card = getCard(db, id)
     if (!card) throw new UserError(3, `карточка ${id} не найдена`)
 
-    const queue = listQueue(db)
+    const queue = listQueue(db, {}, card.phase)
     if (!queue.some((item) => item.id === id)) {
       throw new UserError(3, `карточка ${id} не в очереди`)
     }
