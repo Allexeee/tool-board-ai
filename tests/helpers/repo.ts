@@ -69,7 +69,10 @@ if (args[0] === 'init') {
   const file = join(process.cwd(), '.opencode', 'plugins', 'board', 'index.ts')
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, '// board ' + process.env.BOARD_TEST_VERSION + '\\n')
-  console.log(JSON.stringify({ root: process.cwd(), created: ['.opencode/plugins/board/index.ts'], updated: [] }))
+  const db = join(process.cwd(), '.board', 'board.db')
+  mkdirSync(dirname(db), { recursive: true })
+  writeFileSync(db, '')
+  console.log(JSON.stringify({ root: process.cwd(), created: ['.board/board.db', '.opencode/plugins/board/index.ts'], updated: [] }))
 } else {
   console.log('board')
 }

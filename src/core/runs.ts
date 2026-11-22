@@ -712,16 +712,23 @@ export function nextCard(
   const rows = listRunCards(db, run.id)
 
   for (const row of rows) {
-    if (row.status !== 'planned' && row.status !== 'blocked') continue
+    if (row.status !== 'blocked') continue
     const card = getCard(db, row.cardId)
     if (!card || card.phase !== 'request' || card.runId !== run.id) continue
     if (card.status === 'blocked' || openQuestions(db, card.id).length > 0) continue
-    if (row.status === 'blocked') {
-      db.prepare("update run_cards set status = 'planned' where run_id = ? and card_id = ?").run(
-        run.id,
-        card.id,
-      )
-    }
+
+    const planned = rows.filter((item) => item.status === 'planned')
+    const head = planned.length > 0 ? Math.min(...planned.map((item) => item.position)) - 1 : 0
+    db.prepare(
+      "update run_cards set status = 'planned', position = ? where run_id = ? and card_id = ?",
+    ).run(head, run.id, card.id)
+    return card
+  }
+
+  for (const row of rows) {
+    if (row.status !== 'planned') continue
+    const card = getCard(db, row.cardId)
+    if (!card || card.phase !== 'request' || card.runId !== run.id) continue
     return card
   }
 

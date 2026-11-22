@@ -358,3 +358,18 @@ test('два процесса не бронируют одну карточку 
     1,
   )
 })
+
+test('run start --suggest выбирает вариант по номеру', (t) => {
+  const { root, db } = project(t)
+  db.prepare('update cards set tags = ?').run('["improve"]')
+
+  const first = run(root, ['run', 'start', '--as', 'developer', '--suggest', '1'])
+  assert.equal(first.code, 1)
+  assert.match(first.err, /НОВОЕ/)
+
+  const second = json(root, ['run', 'start', '--as', 'developer', '--suggest', '2']) as { id: string }
+  assert.equal(second.id, 'RUN-1')
+  const held = listCards(db, { holder: 'developer' })
+  assert.equal(held.length, 3)
+  assert.ok(held.every((card) => card.tags.includes('improve')))
+})

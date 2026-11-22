@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { currentBoardVersion } from '../../src/core/git.ts'
@@ -52,4 +52,46 @@ test('init в репозитории board не добавляет submodule', (
   const result = run(repo.root, ['init', '--json'])
   assert.equal(result.status, 0, result.stderr || result.stdout)
   assert.equal(existsSync(join(repo.root, 'tools', 'board')), false)
+})
+
+test('init ремонтирует submodule без bin/board.ts', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+  const boardSource = makeBoardSource()
+  t.after(boardSource.close)
+
+  const init = run(repo.root, [
+    'init', '--board-version', 'v1.1.0', '--board-source', boardSource.source, '--json',
+  ])
+  assert.equal(init.status, 0, init.stderr || init.stdout)
+
+  const sub = join(repo.root, 'tools', 'board')
+  execFileSync('git', ['rm', 'bin/board.ts'], { cwd: sub, windowsHide: true })
+  execFileSync(
+    'git',
+    ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'missing cli'],
+    { cwd: sub, windowsHide: true },
+  )
+
+  const repaired = run(repo.root, ['init', '--json'])
+  assert.equal(repaired.status, 0, repaired.stderr || repaired.stdout)
+  assert.ok(existsSync(join(sub, 'bin', 'board.ts')))
+})
+
+test('init читает BOARD_SOURCE', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+  const source = makeBoardSource()
+  t.after(source.close)
+
+  const previous = process.env.BOARD_SOURCE
+  process.env.BOARD_SOURCE = source.source
+  try {
+    const result = run(repo.root, ['init', '--board-version', 'v1.0.0', '--json'])
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(currentBoardVersion(repo.root), '1.0.0')
+  } finally {
+    if (previous === undefined) delete process.env.BOARD_SOURCE
+    else process.env.BOARD_SOURCE = previous
+  }
 })

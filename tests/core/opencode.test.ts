@@ -7,6 +7,8 @@ import { writeOpenCodeFiles, writeReviewerAgent } from '../../src/core/opencode.
 import { initProject } from '../../src/core/project.ts'
 import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
+process.env.BOARD_ALLOW_GLOBAL = '1'
+
 const tmp = () => mkdtempSync(join(tmpdir(), 'board-oc-'))
 
 test('initProject создаёт скилл, плагин, команды и блок в AGENTS.md', () => {
@@ -184,4 +186,12 @@ test('проект подключает superpowers локально', () => {
     readFileSync(join(process.cwd(), '.opencode', 'opencode.json'), 'utf8'),
   ) as { plugins?: string[] }
   assert.ok(config.plugins?.some((entry) => entry.includes('superpowers')))
+})
+
+test('плагин поднимается из .worktrees в корень', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /basename\(dirname\(dir\)\) === '\.worktrees'/)
+  assert.match(plugin, /dirname\(dirname\(dir\)\)/)
 })

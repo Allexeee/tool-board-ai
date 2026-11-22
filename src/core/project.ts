@@ -147,6 +147,51 @@ export function initProject(
   options: InitProjectOptions = {},
 ): { created: string[]; updated: string[]; root: string; boardVersion: string | null } {
   const root = resolve(dir)
+
+  if (!isRepo(root) && !isBoardSourceRepo(root) && process.env.BOARD_ALLOW_GLOBAL !== '1') {
+    throw new UserError(2, 'нужен git: submodule tools/board ставится только в git-проект')
+  }
+
+  // Проект с git получает свою версию board в tools/board. Пока она не
+  // установлена, .board/board.db не создаём: схему задаёт версия из submodule.
+  if (
+    isRepo(root) &&
+    !isBoardSourceRepo(root) &&
+    process.env.BOARD_DELEGATED !== '1' &&
+    process.env.BOARD_ALLOW_GLOBAL !== '1'
+  ) {
+    const source = options.boardSource ?? process.env.BOARD_SOURCE ?? DEFAULT_BOARD_SOURCE
+    let state = boardSubmoduleState(root)
+    if (state === 'not-submodule') {
+      throw new UserError(3, 'tools/board существует, но это не submodule: уберите каталог или оформите submodule вручную')
+    }
+    if (state === 'not-initialized') {
+      runGit(root, ['submodule', 'update', '--init', 'tools/board'])
+      state = boardSubmoduleState(root)
+    }
+    if (state === 'missing') {
+      const ref = options.boardVersion ?? latestBoardTag(source)
+      addBoardSubmodule(root, source, ref)
+    } else if (options.boardVersion) {
+      checkoutBoardRef(root, options.boardVersion, { allowDowngrade: options.allowDowngrade })
+    } else if (state === 'dirty') {
+      throw new UserError(2, 'tools/board грязный: закоммитьте или откатите изменения')
+    }
+
+    if (!findLocalBoardCli(root)) {
+      runGit(root, ['submodule', 'update', '--init', '--force', 'tools/board'])
+    }
+    if (!findLocalBoardCli(root)) {
+      throw new UserError(
+        2,
+        'board не установлен: выполните board init --board-version <tag> или проверьте tools/board',
+      )
+    }
+
+    const result = runLocalInit(root)
+    return { ...result, root, boardVersion: currentBoardVersion(root) }
+  }
+
   const created: string[] = []
   const updated: string[] = []
 
@@ -185,49 +230,6 @@ export function initProject(
 
   if (updateGitignore(root)) created.push('.gitignore')
 
-  // Проект с git получает свою версию board в tools/board. Сам board и
-  // не-git каталоги (тесты, временные проекты) остаются на локальном CLI.
-  if (
-    isRepo(root) &&
-    !isBoardSourceRepo(root) &&
-    process.env.BOARD_DELEGATED !== '1' &&
-    process.env.BOARD_ALLOW_GLOBAL !== '1'
-  ) {
-    const source = options.boardSource ?? DEFAULT_BOARD_SOURCE
-    let state = boardSubmoduleState(root)
-    if (state === 'not-submodule') {
-      throw new UserError(3, 'tools/board существует, но это не submodule: уберите каталог или оформите submodule вручную')
-    }
-    if (state === 'not-initialized') {
-      runGit(root, ['submodule', 'update', '--init', 'tools/board'])
-      state = boardSubmoduleState(root)
-    }
-    if (state === 'missing') {
-      const ref = options.boardVersion ?? latestBoardTag(source)
-      addBoardSubmodule(root, source, ref)
-    } else if (options.boardVersion) {
-      checkoutBoardRef(root, options.boardVersion, { allowDowngrade: options.allowDowngrade })
-    } else if (state === 'dirty') {
-      throw new UserError(2, 'tools/board грязный: закоммитьте или откатите изменения')
-    }
-
-    const local = findLocalBoardCli(root)
-    if (!local) throw new UserError(2, 'board не установлен: не найден tools/board/bin/board.ts')
-    const raw = execFileSync(process.execPath, [local, 'init', '--refresh', '--json'], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, BOARD_DELEGATED: '1' },
-      windowsHide: true,
-    })
-    const nested = JSON.parse(raw) as { created?: string[]; updated?: string[]; root?: string }
-    return {
-      created: [...created, ...(nested.created ?? [])],
-      updated: [...updated, ...(nested.updated ?? [])],
-      root,
-      boardVersion: currentBoardVersion(root),
-    }
-  }
-
   const opencode = writeOpenCodeFiles(root, { ...options, settings })
   created.push(...opencode.created)
   updated.push(...opencode.updated)
@@ -236,4 +238,29 @@ export function initProject(
   stripToolboxHook(root)
 
   return { created, updated, root, boardVersion: currentBoardVersion(root) }
+}
+
+/** Генерирует .opencode из уже установленной версии tools/board. */
+export function runLocalInit(root: string): { created: string[]; updated: string[] } {
+  const local = findLocalBoardCli(root)
+  if (!local) {
+    throw new UserError(
+      2,
+      'board не установлен: выполните board init --board-version <tag> или проверьте tools/board',
+    )
+  }
+  try {
+    const raw = execFileSync(process.execPath, [local, 'init', '--refresh', '--json'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, BOARD_DELEGATED: '1' },
+      windowsHide: true,
+    })
+    const nested = JSON.parse(raw) as { created?: string[]; updated?: string[] }
+    return { created: nested.created ?? [], updated: nested.updated ?? [] }
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr
+    const message = typeof stderr === 'string' ? stderr.trim() : ''
+    throw new UserError(2, message || 'локальный board init не сработал')
+  }
 }
