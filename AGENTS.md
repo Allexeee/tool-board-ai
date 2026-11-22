@@ -14,5 +14,5 @@
 - Ревью идёт одним циклом: findings становятся карточками; critical блокирует release, important/other — backlog.
 - Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.
 - После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.
-- Коммит и мерж делает `finish`; агент в git не пишет. `main` меняется только `release` владельцем.
+- Коммит делаешь сам в ветке карточки; мерж в `dev` делает `finish`. `main` меняется только `release` владельцем.
 <!-- board:end -->
