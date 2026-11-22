@@ -195,3 +195,13 @@ test('плагин поднимается из .worktrees в корень', () =
   assert.match(plugin, /basename\(dirname\(dir\)\) === '\.worktrees'/)
   assert.match(plugin, /dirname\(dirname\(dir\)\)/)
 })
+
+test('card схема принимает verdict для spec-review', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  const start = plugin.indexOf("name: 'card'")
+  const end = plugin.indexOf("name: 'run'", start)
+  assert.ok(start > 0 && end > start)
+  assert.match(plugin.slice(start, end), /verdict: \{ type: 'string' \}/)
+})

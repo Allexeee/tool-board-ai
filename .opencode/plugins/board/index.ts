@@ -290,6 +290,7 @@ export default Plugin.define({
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
           mode: { type: 'string' },
+          verdict: { type: 'string' },
           plan: { type: 'string' },
           phase: { type: 'string' },
           status: { type: 'string' },
