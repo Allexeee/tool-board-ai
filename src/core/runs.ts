@@ -643,7 +643,9 @@ export function addToRun(
 
     const rows = listRunCards(db, run.id)
     const existing = rows.find((row) => row.cardId === input.cardId)
-    if (existing && existing.status !== 'dropped') {
+    // Stale blocked-строка (после block → ask → answer) не значит, что карточка
+    // всё ещё в забеге: её переиспользуем, но саму карточку проверит requireRunnableCard.
+    if (existing && existing.status !== 'dropped' && existing.status !== 'blocked') {
       throw new UserError(3, `карточка ${input.cardId} уже в забеге ${run.id}`)
     }
 
