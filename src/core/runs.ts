@@ -8,6 +8,7 @@ import { openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
 import { allocateId } from './ids.ts'
+import { insertIntoQueue } from './queue.ts'
 import { RUN_VARIANTS, variantOf } from './tags.ts'
 import type {
   Card,
@@ -277,6 +278,11 @@ function releaseCard(
     `update cards set status = ?, holder = null, run_id = null, lease_until = null, updated_at = ?
      where id = ?`,
   ).run(status, nowIso(), card.id)
+
+  const released = getCard(db, card.id)!
+  if (released.phase === 'task' && released.position === null) {
+    insertIntoQueue(db, card.id)
+  }
 
   appendEvent(db, {
     type: 'card.released',

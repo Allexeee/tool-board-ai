@@ -7,9 +7,10 @@ import { editCard, getCard } from '../../src/core/cards.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { openDb } from '../../src/core/db.ts'
 import { isAncestor, runGit } from '../../src/core/git.ts'
-import { blockCard, finishCard, shapeCard, takeCard, touchCard } from '../../src/core/lifecycle.ts'
+import { blockCard, finishCard, resumeAfterAnswer, shapeCard, takeCard, touchCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { endRun, getActiveRun, listRunCards, nextCard, startRun } from '../../src/core/runs.ts'
+import { listQueue } from '../../src/core/queue.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
@@ -326,4 +327,22 @@ test('take запроса: shaping, затем promotion с веткой', (t) =
   assert.equal(promoted.runId, run.id)
   assert.ok(promoted.branch)
   assert.equal(listRunCards(db, run.id)[0].status, 'in_progress')
+})
+
+test('отпущенный promoted-запрос получает позицию в очереди', (t) => {
+  const { root, db } = repoBoard(t)
+  const req = seedCard(db, { phase: 'request', status: 'new', tags: ['new'] })
+  startRun(db, { executorId: 'developer', cardIds: [req.id], actor: 'developer' })
+
+  takeCard(db, { id: req.id, actor: 'developer', root })
+  editCard(db, { id: req.id, actor: 'developer', patch: { body: 'spec', acceptance: ['ok'], scope: ['src/**'] } })
+  editCard(db, { id: req.id, actor: 'owner', patch: { importance: 2, urgency: 2 } })
+  takeCard(db, { id: req.id, actor: 'developer', root })
+
+  blockCard(db, { id: req.id, actor: 'developer', reason: 'needs_decision' })
+  resumeAfterAnswer(db, req.id, 'owner')
+
+  const released = getCard(db, req.id)!
+  assert.ok(released.position !== null)
+  assert.ok(listQueue(db).some((card) => card.id === req.id))
 })
