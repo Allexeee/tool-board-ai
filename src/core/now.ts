@@ -6,7 +6,8 @@ import { todayStartIso } from './clock.ts'
 import { openQuestions, type Discussion } from './discussion.ts'
 import { getExecutor, listExecutors } from './executors.ts'
 import { listQueue } from './queue.ts'
-import { reclaimExpired } from './runs.ts'
+import { reclaimExpired, suggestVariantRuns } from './runs.ts'
+import { variantOf } from './tags.ts'
 import type { Card, CardPhase, CardStatus } from './types.ts'
 
 /** Вкладка доски `now` (§11): 0 — владельцу, 1 — мои задачи, 2 — все агенты, 3 — запросы и очередь. */
@@ -36,6 +37,17 @@ export interface NowAgentTasks {
   queue: Card[]
 }
 
+export interface NowProbableCard {
+  card: Card
+  request: boolean
+}
+
+export interface NowProbableRun {
+  tag: string
+  label: string
+  cards: NowProbableCard[]
+}
+
 export interface NowView {
   view: NowViewKind
   header: NowHeader
@@ -43,6 +55,8 @@ export interface NowView {
   skills?: string[]
   current?: Card[]
   queue?: Card[]
+  probableRuns?: NowProbableRun[]
+  untagged?: number
   executors?: NowAgentTasks[]
   approvals?: Card[]
   ownerCards?: Card[]
@@ -103,7 +117,7 @@ export function nowData(db: DatabaseSync, options: NowOptions): NowView {
 
   if (view === 0) return { view, header, ...ownerView(db) }
   if (view === 1) return { view, header, ...agentView(db, executorId, filters) }
-  if (view === 2) return { view, header, ...allAgentsView(db, filters) }
+  if (view === 2) return { view, header, ...allAgentsView(db, executorId, filters) }
   return { view, header, ...openCards(db, executorId, filters) }
 }
 
@@ -131,7 +145,7 @@ function computeHeader(db: DatabaseSync): NowHeader {
 /** Вкладка владельцу §11.2: на утверждении, owner-карточки в ready, открытые вопросы. */
 function ownerView(db: DatabaseSync): Pick<NowView, 'approvals' | 'ownerCards' | 'questions'> {
   const approvals = listCards(db, { status: 'approval' })
-  const ownerCards = listCards(db, { skill: 'owner', status: 'ready' }).sort(
+  const ownerCards = listCards(db, { skill: 'owner', status: ['ready', 'waiting'] }).sort(
     (left, right) =>
       (right.importance ?? -1) - (left.importance ?? -1) ||
       left.createdAt.localeCompare(right.createdAt) ||
@@ -146,20 +160,39 @@ function agentView(
   db: DatabaseSync,
   executorId: string,
   filters: NowFilters,
-): Pick<NowView, 'executor' | 'skills' | 'current' | 'queue'> {
+): Pick<
+  NowView,
+  'executor' | 'skills' | 'current' | 'queue' | 'probableRuns' | 'untagged'
+> {
   const executor = getExecutor(db, executorId)
   const skills = executor?.skills ?? []
   if (executorId === OWNER) {
-    return { executor: executorId, skills, current: [], queue: [] }
+    return { executor: executorId, skills, current: [], queue: [], probableRuns: [], untagged: 0 }
   }
-  return { executor: executorId, skills, ...tasksFor(db, executorId, skills, filters) }
+  const tasks = tasksFor(db, executorId, skills, filters)
+  const probableRuns = suggestVariantRuns(db, executorId, {
+    group: filters.group,
+    skill: filters.skill,
+  }).map((run) => ({
+    tag: run.tag ?? '',
+    label: run.label ?? '',
+    cards: run.cards.map((card) => ({ card, request: card.phase === 'request' })),
+  }))
+  const untagged = [...tasks.current, ...tasks.queue].filter(
+    (card) => variantOf(card) === null,
+  ).length
+  return { executor: executorId, skills, ...tasks, probableRuns, untagged }
 }
 
-/** Вкладка «задачи по агентам» §11.4: по блоку на каждого не-owner исполнителя. */
-function allAgentsView(db: DatabaseSync, filters: NowFilters): Pick<NowView, 'executors'> {
+/** Вкладка «задачи по агентам» §11.4: по блоку на каждого другого исполнителя. */
+function allAgentsView(
+  db: DatabaseSync,
+  executorId: string,
+  filters: NowFilters,
+): Pick<NowView, 'executors'> {
   const executors: NowAgentTasks[] = []
   for (const executor of listExecutors(db)) {
-    if (executor.id === OWNER) continue
+    if (executor.id === OWNER || executor.id === executorId) continue
     const tasks = tasksFor(db, executor.id, executor.skills, filters)
     if (tasks.current.length === 0 && tasks.queue.length === 0) continue
     executors.push({ id: executor.id, skills: executor.skills, ...tasks })
@@ -262,7 +295,7 @@ function asStatuses(value: CardStatus | CardStatus[]): CardStatus[] {
 }
 
 const VIEW_TITLES: Record<NowViewKind, string> = {
-  0: 'ВЛАДЕЛЬЦУ',
+  0: 'ЗАДАЧИ ДЛЯ МЕНЯ',
   1: 'МОИ ЗАДАЧИ',
   2: 'ЗАДАЧИ ПО АГЕНТАМ',
   3: 'ЗАПРОСЫ И ОЧЕРЕДЬ',
@@ -317,7 +350,7 @@ function agentColor(id: string): ColorName {
 /** Текстовый набросок доски §11. Цвет не обязателен; вывод читается в пайпе. */
 export function renderNow(data: NowView, options: NowRenderOptions = {}): string {
   const painter = makePainter(options.color === true)
-  const lines: string[] = [titleLine(data, painter)]
+  const lines: string[] = [titleLine(data)]
   if (data.view === 3) renderOpen(lines, data, painter)
   else if (data.view === 0) renderOwner(lines, data, painter)
   else if (data.view === 1) renderAgentTasks(lines, data, painter)
@@ -325,18 +358,32 @@ export function renderNow(data: NowView, options: NowRenderOptions = {}): string
   return lines.join('\n')
 }
 
-function titleLine(data: NowView, painter: Painter): string {
-  if (data.view === 1) {
-    const executor = data.executor && data.executor !== OWNER ? data.executor : undefined
-    return executor
-      ? `[1] МОИ ЗАДАЧИ — ${painter(executor, agentColor(executor))}`
-      : '[1] МОИ ЗАДАЧИ'
-  }
+function titleLine(data: NowView): string {
   return `[${data.view}] ${VIEW_TITLES[data.view]}`
 }
 
 function renderAgentTasks(lines: string[], data: NowView, painter: Painter): void {
+  if (data.executor === OWNER) {
+    lines.push('владельцу — now 0')
+    return
+  }
   renderTaskSections(lines, data.current ?? [], data.queue ?? [], painter)
+  renderProbableRuns(lines, data, painter)
+}
+
+function renderProbableRuns(lines: string[], data: NowView, painter: Painter): void {
+  const runs = data.probableRuns ?? []
+  if (runs.length > 0) {
+    lines.push('ВЕРОЯТНЫЕ ЗАБЕГИ')
+    for (const run of runs) {
+      lines.push(`  ${run.label}`)
+      for (const item of run.cards) {
+        const mark = item.request ? painter('?', 'yellow') : ' '
+        lines.push(`    ${mark}  ${item.card.id.padEnd(7)} ${item.card.title}`)
+      }
+    }
+  }
+  if ((data.untagged ?? 0) > 0) lines.push(`  БЕЗ ТЕГА: ${data.untagged}`)
 }
 
 function renderAllTasks(lines: string[], data: NowView, painter: Painter): void {
@@ -417,7 +464,7 @@ function renderOwner(lines: string[], data: NowView, painter: Painter): void {
   if (data.ownerCards && data.ownerCards.length > 0) {
     lines.push(`ЗАДАЧИ (${data.ownerCards.length})`)
     for (const card of data.ownerCards) {
-      lines.push(`  ${card.id.padEnd(7)} ${card.title}  owner`)
+      lines.push(`  ${card.id.padEnd(7)} ${card.title}`)
     }
   }
   if (data.questions && data.questions.length > 0) {

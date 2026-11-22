@@ -22,7 +22,7 @@ function daysAgo(days: number): string {
 /** Задача в очереди с позицией: верхняя доступная карточка исполнителя. */
 function readyCard(
   db: DatabaseSync,
-  input: { position: number; skill?: string; group?: string },
+  input: { position: number; skill?: string; group?: string; tags?: string[] },
 ) {
   return seedCard(db, {
     phase: 'task',
@@ -32,6 +32,7 @@ function readyCard(
     group: input.group ?? 'UI',
     importance: 3,
     urgency: 3,
+    tags: input.tags,
   })
 }
 
@@ -153,6 +154,7 @@ test('now 0: утвердить, задачи владельца и открыт
 
   const approval = seedCard(db, { phase: 'task', status: 'approval', skill: 'dev', importance: 3, urgency: 2 })
   const ownerCard = seedCard(db, { skill: 'owner', status: 'ready', title: 'Создать VK группу' })
+  const ownerWaiting = seedCard(db, { skill: 'owner', status: 'waiting', title: 'Ждёт зависимости' })
   const answered = seedCard(db, { phase: 'task', status: 'ready', title: 'Прошлый вопрос' })
   ask(db, { cardId: answered.id, author: 'developer', text: 'Отвечен' })
   ask(db, { cardId: approval.id, author: 'developer', text: 'Нужен ли SSO?' })
@@ -160,7 +162,7 @@ test('now 0: утвердить, задачи владельца и открыт
   const data = nowData(db, { view: 0, executorId: 'owner', root })
 
   assert.deepEqual(data.approvals!.map((card) => card.id), [approval.id])
-  assert.deepEqual(data.ownerCards!.map((card) => card.id), [ownerCard.id])
+  assert.deepEqual(data.ownerCards!.map((card) => card.id).sort(), [ownerCard.id, ownerWaiting.id].sort())
   assert.equal(data.questions!.length, 2)
   assert.ok(data.questions!.every((question) => question.status === 'open'))
 })
@@ -172,13 +174,15 @@ test('now 1: задачи агента на руках и очередь по е
 
   const inWork = seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
   const review = seedCard(db, { phase: 'task', status: 'review', holder: 'developer' })
-  const ownQueue = readyCard(db, { position: 1 })
-  const backendQueue = readyCard(db, { position: 2, skill: 'backend', group: 'API' })
+  const request = seedCard(db, { phase: 'request', status: 'new', tags: ['new'] })
+  const ownQueue = readyCard(db, { position: 1, tags: ['new'] })
+  const backendQueue = readyCard(db, { position: 2, skill: 'backend', group: 'API', tags: ['improve'] })
   const waiting = seedCard(db, {
     phase: 'task',
     status: 'waiting',
     position: 3,
     skill: 'dev',
+    tags: ['review'],
   })
   const foreignQueue = seedCard(db, {
     phase: 'task',
@@ -208,6 +212,10 @@ test('now 1: задачи агента на руках и очередь по е
   assert.deepEqual(data.skills, ['dev', 'backend'])
   assert.deepEqual(data.current!.map((card) => card.id), [inWork.id, review.id])
   assert.deepEqual(data.queue!.map((card) => card.id), [ownQueue.id, backendQueue.id, waiting.id])
+  assert.deepEqual(data.probableRuns!.map((run) => run.tag), ['new', 'improve', 'review'])
+  assert.equal(data.probableRuns![0].cards[0].card.id, request.id)
+  assert.equal(data.probableRuns![0].cards[0].request, true)
+  assert.equal(data.untagged, 2)
   for (const card of [foreignQueue, foreignHeld, heldQueue]) {
     assert.ok(!data.current!.some((item) => item.id === card.id))
     assert.ok(!data.queue!.some((item) => item.id === card.id))
@@ -245,13 +253,12 @@ test('now 2: задачи по всем агентам без выделения
   assert.equal(data.view, 2)
   assert.equal('executor' in data, false)
   assert.equal('suggestions' in data, false)
-  assert.deepEqual(data.executors!.map((item) => item.id), ['developer', 'marketer'])
-  const developer = data.executors![0]
-  const marketer = data.executors![1]
-  assert.deepEqual(developer.current.map((card) => card.id), [devHeld.id])
-  assert.deepEqual(developer.queue.map((card) => card.id), [devQueue.id])
+  assert.deepEqual(data.executors!.map((item) => item.id), ['marketer'])
+  const marketer = data.executors![0]
   assert.deepEqual(marketer.current, [])
   assert.deepEqual(marketer.queue.map((card) => card.id), [marketerQueue.id])
+  assert.ok(!data.executors!.some((item) => item.current.some((card) => card.id === devHeld.id)))
+  assert.ok(!data.executors!.some((item) => item.queue.some((card) => card.id === devQueue.id)))
 })
 
 test('now 1/2: текст с секциями НА РУКАХ и ОЧЕРЕДЬ, без фич и фиксов', (t) => {
@@ -259,13 +266,16 @@ test('now 1/2: текст с секциями НА РУКАХ и ОЧЕРЕДЬ,
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
 
   seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
-  readyCard(db, { position: 1 })
+  readyCard(db, { position: 1, tags: ['new'] })
 
   const one = nowData(db, { view: 1, executorId: 'developer', root })
   const text = renderNow(one)
-  assert.match(text, /\[1\] МОИ ЗАДАЧИ — developer/)
+  assert.match(text, /\[1\] МОИ ЗАДАЧИ/)
+  assert.doesNotMatch(text, /МОИ ЗАДАЧИ —/)
   assert.match(text, /НА РУКАХ \(1\)/)
   assert.match(text, /ОЧЕРЕДЬ \(1\)/)
+  assert.match(text, /ВЕРОЯТНЫЕ ЗАБЕГИ/)
+  assert.match(text, /НОВОЕ/)
   assert.doesNotMatch(text, /ФИЧИ|ФИКСЫ/)
 
   const two = nowData(db, { view: 2, executorId: 'owner', root })
