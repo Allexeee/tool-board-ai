@@ -291,3 +291,15 @@ test('queue reorder нумерует запросы без позиции и и�
   reorderQueue(db)
   assert.equal(getCard(db, approval.id)!.position, null)
 })
+
+test('queue reorder не нумерует owner-запросы', (t) => {
+  const { db } = board(t)
+  const owner = task(db, { phase: 'request', status: 'new', skill: 'owner', importance: 3, urgency: 3 })
+  const normal = task(db, { phase: 'request', status: 'new', importance: 2, urgency: 2 })
+
+  reorderQueue(db)
+
+  assert.equal(getCard(db, owner.id)!.position, null)
+  assert.equal(listQueue(db, {}, 'request').some((card) => card.id === owner.id), false)
+  assert.equal(getCard(db, normal.id)!.position, 1)
+})
