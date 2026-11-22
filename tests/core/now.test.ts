@@ -210,33 +210,31 @@ test('now 1: задачи агента на руках и очередь по е
   assert.equal(data.view, 1)
   assert.equal(data.executor, 'developer')
   assert.deepEqual(data.skills, ['dev', 'backend'])
-  assert.deepEqual(data.current!.map((card) => card.id), [inWork.id, review.id])
-  assert.deepEqual(data.queue!.map((card) => card.id), [ownQueue.id, backendQueue.id, waiting.id])
+  assert.deepEqual(
+    data.cards!.map((card) => card.id).sort(),
+    [inWork.id, review.id, request.id, ownQueue.id, backendQueue.id, waiting.id].sort(),
+  )
   assert.deepEqual(data.probableRuns!.map((run) => run.tag), ['new', 'improve', 'review'])
   assert.equal(data.probableRuns![0].cards[0].card.id, request.id)
   assert.equal(data.probableRuns![0].cards[0].request, true)
-  assert.deepEqual(data.requests!.map((card) => card.id), [request.id])
   assert.equal(data.untagged, 2)
   for (const card of [foreignQueue, foreignHeld, heldQueue]) {
-    assert.ok(!data.current!.some((item) => item.id === card.id))
-    assert.ok(!data.queue!.some((item) => item.id === card.id))
+    assert.ok(!data.cards!.some((item) => item.id === card.id))
   }
   assert.equal('suggestions' in data, false)
   assert.equal('runs' in data, false)
   assert.equal('currentRun' in data, false)
 })
 
-test('now 1: у агента без задач пустые списки, у владельца — тоже', (t) => {
+test('now 1: у агента без карточек пустой список, у владельца — тоже', (t) => {
   const { db, root } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
 
   const agent = nowData(db, { view: 1, executorId: 'developer', root })
-  assert.deepEqual(agent.current, [])
-  assert.deepEqual(agent.queue, [])
+  assert.deepEqual(agent.cards, [])
 
   const owner = nowData(db, { view: 1, executorId: 'owner', root })
-  assert.deepEqual(owner.current, [])
-  assert.deepEqual(owner.queue, [])
+  assert.deepEqual(owner.cards, [])
 })
 
 test('now 2: задачи по всем агентам без выделения текущего', (t) => {
@@ -256,13 +254,12 @@ test('now 2: задачи по всем агентам без выделения
   assert.equal('suggestions' in data, false)
   assert.deepEqual(data.executors!.map((item) => item.id), ['marketer'])
   const marketer = data.executors![0]
-  assert.deepEqual(marketer.current, [])
-  assert.deepEqual(marketer.queue.map((card) => card.id), [marketerQueue.id])
-  assert.ok(!data.executors!.some((item) => item.current.some((card) => card.id === devHeld.id)))
-  assert.ok(!data.executors!.some((item) => item.queue.some((card) => card.id === devQueue.id)))
+  assert.deepEqual(marketer.cards.map((card) => card.id), [marketerQueue.id])
+  assert.ok(!data.executors!.some((item) => item.cards.some((card) => card.id === devHeld.id)))
+  assert.ok(!data.executors!.some((item) => item.cards.some((card) => card.id === devQueue.id)))
 })
 
-test('now 1/2: текст с секциями НА РУКАХ и ОЧЕРЕДЬ, без фич и фиксов', (t) => {
+test('now 1/2: единый список КАРТОЧКИ, без секций запросы/на руках/очередь', (t) => {
   const { db, root } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
 
@@ -274,9 +271,8 @@ test('now 1/2: текст с секциями НА РУКАХ и ОЧЕРЕДЬ,
   const text = renderNow(one)
   assert.match(text, /\[1\] МОИ ЗАДАЧИ/)
   assert.doesNotMatch(text, /МОИ ЗАДАЧИ —/)
-  assert.match(text, /НА РУКАХ \(1\)/)
-  assert.match(text, /ОЧЕРЕДЬ \(1\)/)
-  assert.match(text, /ЗАПРОСЫ \(1\)/)
+  assert.match(text, /КАРТОЧКИ \(3\)/)
+  assert.doesNotMatch(text, /НА РУКАХ|ОЧЕРЕДЬ|ЗАПРОСЫ/)
   assert.match(text, /ВЕРОЯТНЫЕ ЗАБЕГИ/)
   assert.match(text, /НОВОЕ/)
   assert.doesNotMatch(text, /ФИЧИ|ФИКСЫ/)
