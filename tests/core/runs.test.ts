@@ -834,4 +834,20 @@ test('отвеченный planned-запрос встаёт в голову о�
   resumeAfterAnswer(db, second.id, 'owner')
   assert.equal(nextCard(db, { executorId: 'dev' })?.id, second.id)
   assert.equal(listRunCards(db, run.id)[0].cardId, second.id)
+  assert.deepEqual(
+    listRunCards(db, run.id).map((row) => row.position),
+    [1, 2],
+  )
+})
+
+test('planned-запрос с открытым вопросом пропускается', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'] })
+  const first = seedCard(db, { phase: 'request', status: 'new' })
+  const second = seedCard(db, { phase: 'request', status: 'new' })
+  startRun(db, { executorId: 'dev', cardIds: [first.id, second.id], actor: 'dev' })
+
+  ask(db, { cardId: first.id, author: 'dev', text: '?' })
+  assert.equal(nextCard(db, { executorId: 'dev' })?.id, second.id)
 })

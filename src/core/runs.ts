@@ -717,11 +717,19 @@ export function nextCard(
     if (!card || card.phase !== 'request' || card.runId !== run.id) continue
     if (card.status === 'blocked' || openQuestions(db, card.id).length > 0) continue
 
-    const planned = rows.filter((item) => item.status === 'planned')
-    const head = planned.length > 0 ? Math.min(...planned.map((item) => item.position)) - 1 : 0
+    // Отвеченный запрос — в голову, позиции снова 1..N.
     db.prepare(
-      "update run_cards set status = 'planned', position = ? where run_id = ? and card_id = ?",
-    ).run(head, run.id, card.id)
+      "update run_cards set status = 'planned', position = 1 where run_id = ? and card_id = ?",
+    ).run(run.id, card.id)
+    let position = 2
+    for (const item of rows) {
+      if (item.cardId === card.id) continue
+      db.prepare('update run_cards set position = ? where run_id = ? and card_id = ?').run(
+        position++,
+        run.id,
+        item.cardId,
+      )
+    }
     return card
   }
 
@@ -729,6 +737,7 @@ export function nextCard(
     if (row.status !== 'planned') continue
     const card = getCard(db, row.cardId)
     if (!card || card.phase !== 'request' || card.runId !== run.id) continue
+    if (card.status === 'blocked' || openQuestions(db, card.id).length > 0) continue
     return card
   }
 
