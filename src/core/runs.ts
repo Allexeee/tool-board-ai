@@ -699,6 +699,16 @@ export function dropFromRun(
       })
       return
     }
+    if (row.status === 'blocked' || card.status === 'blocked') {
+      // Решение владельца «blocked» сохраняется; карточка лишь покидает забег,
+      // чтобы после approve её можно было вернуть тем же `run add`.
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        run.id,
+        card.id,
+      )
+      detachBlockedCard(db, card, actor, `снята с забега ${run.id}`)
+      return
+    }
     if (row.status !== 'booked' || card.status !== 'booked') {
       throw new UserError(3, `карточка ${card.id} не забронирована в ${run.id}`)
     }
