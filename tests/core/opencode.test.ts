@@ -300,4 +300,17 @@ test('ревьюер не создаёт карточки и пишет итог
   assert.match(source, /не создавай карточки/i)
   assert.match(source, /board run note/)
   assert.match(source, /7 находок/)
+  assert.match(source, /--reviewer/)
+  assert.match(source, /--verdict done\|reopen/)
+})
+
+test('команда ревью описывает пакет, бюджет и итоги прохода', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const command = readFileSync(join(root, '.opencode', 'command', 'review.md'), 'utf8')
+  assert.match(command, /Только читаешь/)
+  assert.match(command, /board run note/)
+  assert.match(command, /--reviewer/)
+  assert.match(command, /7 находок/)
+  assert.match(command, /--kind review/)
 })

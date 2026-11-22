@@ -5,7 +5,7 @@ import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 
-export type RefKind = 'link' | 'doc' | 'spec'
+export type RefKind = 'link' | 'doc' | 'spec' | 'review'
 
 /** Ссылка или документ карточки: всё остальное живёт в body. */
 export interface Ref {
@@ -31,7 +31,7 @@ export interface RemoveRefInput {
   actor?: string
 }
 
-const KINDS: readonly RefKind[] = ['link', 'doc', 'spec']
+const KINDS: readonly RefKind[] = ['link', 'doc', 'spec', 'review']
 const DEFAULT_ACTOR = 'owner'
 
 interface Row {
