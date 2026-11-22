@@ -7,6 +7,7 @@ import { listEvents } from '../../src/core/events.ts'
 import { nowIso } from '../../src/core/clock.ts'
 import {
   amendCard,
+  applyShapeFile,
   approveCard,
   blockCard,
   cancelCard,
@@ -188,7 +189,7 @@ test('amend возвращает утверждённый spec в shaping и т�
   assert.equal(amended.phase, 'request')
   assert.equal(amended.holder, 'developer')
   assert.equal(amended.approvedAt, null)
-  assert.equal(amended.position, null)
+  assert.ok(amended.position)
   assert.equal(amended.specRev, before.specRev + 1)
   assert.throws(() => approveCard(db, { id: card.id, actor: 'owner' }), /approval/)
 
@@ -811,4 +812,35 @@ test('approve сбрасывает позицию запроса и ставит
   const approved = approveCard(db, { id: card.id, actor: 'owner' })
   assert.equal(approved.status, 'ready')
   assert.equal(approved.position, 1)
+})
+
+test('запрос из shape-файла, resume и amend получают позицию', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  // new_cards из shape-файла
+  const host = seedCard(db, { phase: 'request', status: 'new' })
+  shapeCard(db, { id: host.id, actor: 'developer' })
+  const shaped = applyShapeFile(db, {
+    id: host.id,
+    actor: 'developer',
+    file: {
+      new_cards: [{ key: 'a', group: 'UI', title: 'Новый', skill: 'dev' }],
+    },
+  })
+  assert.equal(shaped.newCards.length, 1)
+  assert.ok(shaped.newCards[0].position)
+
+  // defer + resume запроса
+  const request = seedCard(db, { phase: 'request', status: 'new' })
+  deferCard(db, { id: request.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: request.id, actor: 'developer' })
+  assert.equal(resumed.status, 'new')
+  assert.ok(resumed.position)
+
+  // amend запроса
+  const approved = seedCard(db, { phase: 'task', status: 'approval' })
+  const amended = amendCard(db, { id: approved.id, actor: 'developer', reason: 'уточнение' })
+  assert.equal(amended.status, 'shaping')
+  assert.ok(amended.position)
 })
