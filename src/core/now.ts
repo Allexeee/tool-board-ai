@@ -162,14 +162,23 @@ function agentView(
   filters: NowFilters,
 ): Pick<
   NowView,
-  'executor' | 'skills' | 'current' | 'queue' | 'probableRuns' | 'untagged'
+  'executor' | 'skills' | 'current' | 'queue' | 'requests' | 'probableRuns' | 'untagged'
 > {
   const executor = getExecutor(db, executorId)
   const skills = executor?.skills ?? []
   if (executorId === OWNER) {
-    return { executor: executorId, skills, current: [], queue: [], probableRuns: [], untagged: 0 }
+    return {
+      executor: executorId,
+      skills,
+      current: [],
+      queue: [],
+      requests: [],
+      probableRuns: [],
+      untagged: 0,
+    }
   }
   const tasks = tasksFor(db, executorId, skills, filters)
+  const requests = openRequestsForAgent(db, executor, filters)
   const probableRuns = suggestVariantRuns(db, executorId, {
     group: filters.group,
     skill: filters.skill,
@@ -181,7 +190,23 @@ function agentView(
   const untagged = [...tasks.current, ...tasks.queue].filter(
     (card) => variantOf(card) === null,
   ).length
-  return { executor: executorId, skills, ...tasks, probableRuns, untagged }
+  return { executor: executorId, skills, ...tasks, requests, probableRuns, untagged }
+}
+
+/** Все открытые запросы навыка агента, независимо от вариантного тега. */
+function openRequestsForAgent(
+  db: DatabaseSync,
+  executor: ReturnType<typeof getExecutor>,
+  filters: NowFilters,
+): Card[] {
+  const skills = executor?.skills ?? []
+  if (!executor) return []
+  return listCards(db, {
+    phase: 'request',
+    status: [...OPEN_REQUEST_STATUSES],
+    group: filters.group,
+    skill: filters.skill,
+  }).filter((card) => card.skill !== null && skills.includes(card.skill))
 }
 
 /** Вкладка «задачи по агентам» §11.4: по блоку на каждого другого исполнителя. */
@@ -368,7 +393,17 @@ function renderAgentTasks(lines: string[], data: NowView, painter: Painter): voi
     return
   }
   renderTaskSections(lines, data.current ?? [], data.queue ?? [], painter)
+  renderRequests(lines, data, painter)
   renderProbableRuns(lines, data, painter)
+}
+
+function renderRequests(lines: string[], data: NowView, painter: Painter): void {
+  const requests = data.requests ?? []
+  if (requests.length === 0) return
+  lines.push(`ЗАПРОСЫ (${requests.length})`)
+  for (const card of requests) {
+    lines.push(`  ${card.id.padEnd(7)} ${card.title}  ${statusWord(card, painter)}`)
+  }
 }
 
 function renderProbableRuns(lines: string[], data: NowView, painter: Painter): void {

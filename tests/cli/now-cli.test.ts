@@ -89,6 +89,7 @@ test('now 1 --json: только задачи указанного агента,
   seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
   seedCard(db, { phase: 'task', status: 'ready', position: 1, skill: 'dev' })
   seedCard(db, { phase: 'task', status: 'ready', position: 2, skill: 'marketing', group: 'IM' })
+  seedCard(db, { phase: 'request', status: 'new', skill: 'dev', title: 'Запрос dev' })
   db.close()
 
   const data = json(dir, ['now', '1', '--as', 'developer'])
@@ -97,6 +98,8 @@ test('now 1 --json: только задачи указанного агента,
   assert.deepEqual(data.skills, ['dev'])
   assert.equal(data.current.length, 1)
   assert.equal(data.queue.length, 1)
+  assert.equal(data.requests.length, 1)
+  assert.equal(data.requests[0].title, 'Запрос dev')
   assert.ok(Array.isArray(data.probableRuns))
   assert.equal(typeof data.untagged, 'number')
   assert.equal(data.suggestions, undefined)

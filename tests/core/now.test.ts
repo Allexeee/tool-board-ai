@@ -215,6 +215,7 @@ test('now 1: задачи агента на руках и очередь по е
   assert.deepEqual(data.probableRuns!.map((run) => run.tag), ['new', 'improve', 'review'])
   assert.equal(data.probableRuns![0].cards[0].card.id, request.id)
   assert.equal(data.probableRuns![0].cards[0].request, true)
+  assert.deepEqual(data.requests!.map((card) => card.id), [request.id])
   assert.equal(data.untagged, 2)
   for (const card of [foreignQueue, foreignHeld, heldQueue]) {
     assert.ok(!data.current!.some((item) => item.id === card.id))
@@ -267,6 +268,7 @@ test('now 1/2: текст с секциями НА РУКАХ и ОЧЕРЕДЬ,
 
   seedCard(db, { phase: 'task', status: 'in_progress', holder: 'developer' })
   readyCard(db, { position: 1, tags: ['new'] })
+  seedCard(db, { phase: 'request', status: 'new', title: 'Запрос' })
 
   const one = nowData(db, { view: 1, executorId: 'developer', root })
   const text = renderNow(one)
@@ -274,6 +276,7 @@ test('now 1/2: текст с секциями НА РУКАХ и ОЧЕРЕДЬ,
   assert.doesNotMatch(text, /МОИ ЗАДАЧИ —/)
   assert.match(text, /НА РУКАХ \(1\)/)
   assert.match(text, /ОЧЕРЕДЬ \(1\)/)
+  assert.match(text, /ЗАПРОСЫ \(1\)/)
   assert.match(text, /ВЕРОЯТНЫЕ ЗАБЕГИ/)
   assert.match(text, /НОВОЕ/)
   assert.doesNotMatch(text, /ФИЧИ|ФИКСЫ/)
