@@ -53,6 +53,9 @@ const DEFERRABLE: readonly CardStatus[] = [
   'blocked',
 ]
 
+/** Scope можно расширять у карточки в работе или готовой к ней. */
+const SCOPABLE: readonly CardStatus[] = ['in_progress', 'booked', 'ready']
+
 function requireCard(db: DatabaseSync, id: string): Card {
   const card = getCard(db, id)
   if (!card) throw new UserError(3, `карточка ${id} не найдена`)
@@ -526,6 +529,57 @@ export function resumeCard(db: DatabaseSync, input: { id: string; actor: string 
       subject: card.id,
       before: card,
       after: updated,
+    })
+    return updated
+  })
+}
+
+/**
+ * Расширение scope у карточки в работе: пути добавляются без дублей, body и
+ * acceptance не меняются — для них нужен amend. Права: держатель или владелец.
+ */
+export function addScope(
+  db: DatabaseSync,
+  input: { id: string; actor: string; paths: string[] },
+): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+    if (!SCOPABLE.includes(card.status)) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} в статусе ${card.status} нельзя расширить: сначала take`,
+      )
+    }
+    if (actor !== 'owner' && card.holder !== actor) {
+      throw new UserError(
+        3,
+        `расширить scope карточки ${card.id} может держатель или владелец`,
+      )
+    }
+
+    const paths = input.paths.map((path) => path.trim()).filter(Boolean)
+    if (paths.length === 0) throw new UserError(3, 'нужен хотя бы один путь')
+
+    const scope = [...new Set([...card.scope, ...paths])]
+    if (scope.length === card.scope.length) return card
+
+    const at = nowIso()
+    db.prepare('update cards set scope = ?, updated_at = ? where id = ?').run(
+      JSON.stringify(scope),
+      at,
+      card.id,
+    )
+    comment(db, { cardId: card.id, author: actor, text: `scope: добавлено ${paths.join(', ')}` })
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.scope_extended',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+      note: paths.join(', '),
     })
     return updated
   })

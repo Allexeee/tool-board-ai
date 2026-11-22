@@ -32,7 +32,7 @@ export const AGENTS_BLOCK = [
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
-  '- Ревью идёт одним циклом: findings становятся карточками; critical блокирует release, important/other — backlog.',
+  '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`; critical и регрессии чинятся сразу, до 3 important по рангу, остальное — сборник в `deferred`.',
   '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
   '- После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.',
   '- Коммит делаешь сам в ветке карточки; мерж в `dev` делает `finish`. `main` меняется только `release` владельцем.',
@@ -91,7 +91,7 @@ description: Доска: исполнить карточку — take, план 
 
 1. \`board take <ID> --as <исполнитель>\` — карточка в работе. Для запроса первый \`take\` переводит его в разбор, второй — в работу.
 2. Перед кодом напиши **plan**: \`board card step add <ID> "шаг + проверка"\`; scope зафиксирован в spec.
-3. Если plan требует нового поведения или scope — остановись: \`amend\` или вопрос владельцу.
+3. Если plan требует новых файлов — \`board card scope add <ID> <path> --as <исполнитель>\`; если нового поведения или acceptance — \`amend\` или вопрос владельцу.
 4. \`board finish <ID> --as <исполнитель> --summary "..."\` — сдать (review или done).
 5. \`board run next --as <исполнитель>\` — следующая карточка забега.
 
@@ -107,10 +107,10 @@ description: Доска: исполнить карточку — take, план 
 ## Ревью
 
 - \`/spec-review\` — полнота spec до approve; self или субагент по настройке.
-- \`/review\` — run review: соответствие plan и код; пакет — \`board review list --json\`. Субагент \`board-reviewer\` работает на default-варианте модели.
-- Findings: \`board review finding <ID> --severity critical|important|other --text "..."\`.
-- Вердикт: \`board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer <id>\`.
-- Один цикл: findings не переоткрывают исходную карточку; \`critical\` блокирует release, \`important\`/\`other\` идут в backlog. Второй reopen — только владелец. Свою карточку не ревьюй: для кода вердикт даёт свежий субагент.
+- \`/review\` — проход по пакету (\`board review list --json\`): все карточки в \`review\` с прошлого прохода. Субагент \`board-reviewer\` только читает: карточек не создаёт, итоги прохода пишет в \`run note\`.
+- Бюджет прохода: critical и регрессии этого diff — всегда, до 3 important по рангу ревьюера, остальное — сборник \`review notes\` в deferred.
+- Находки оформляет агент: critical и до 3 important — \`board review finding <ID> --severity ... --text "..."\`; в карточке — вердикт и ссылка \`card ref add --kind review\`.
+- Свою карточку не ревьюй: вердикт даёт свежий субагент. \`critical\` блокирует release.
 
 ## Правила
 

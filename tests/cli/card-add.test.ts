@@ -246,3 +246,19 @@ test('card add с невалидной оценкой не создаёт кар
   const list = json(dir, ['card', 'list'])
   assert.equal(list.length, 0)
 })
+
+test('card scope add расширяет scope у карточки в работе через CLI', (t) => {
+  const dir = project(t)
+  const card = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'x', '--skill', 'dev',
+  ]) as { id: string }
+
+  const db = openDb(join(dir, '.board', 'board.db'))
+  db.prepare("update cards set status = 'ready', holder = 'developer' where id = ?").run(card.id)
+  db.close()
+
+  const updated = json(dir, ['card', 'scope', 'add', card.id, 'src/a.ts', '--as', 'developer']) as {
+    scope: string[]
+  }
+  assert.deepEqual(updated.scope, ['src/a.ts'])
+})

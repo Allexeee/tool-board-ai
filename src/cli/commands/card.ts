@@ -11,6 +11,7 @@ import {
   approveCard,
   cancelCard,
   deferCard,
+  addScope,
   ownerDone,
   rejectCard,
   reopenCard,
@@ -539,6 +540,22 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const scope = (args: ParsedArgs): number => {
+    const action = args.positionals[0]
+    const usage = 'использование: board card scope add UI-1 src/x.ts [src/y.ts] --as <исполнитель>'
+    if (action !== 'add') throw new UserError(3, usage)
+    const card = requireCard(args.positionals[1], usage)
+    const paths = args.positionals.slice(2)
+    if (paths.length === 0) throw new UserError(3, 'нужен хотя бы один путь')
+    const updated = addScope(db, {
+      id: card.id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      paths,
+    })
+    ok(updated, `${updated.id} · scope: ${updated.scope.join(', ')}`)
+    return 0
+  }
+
   const defer = (args: ParsedArgs): number => {
     const card = requireCard(
       args.positionals[0],
@@ -585,10 +602,11 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'cancel') return cancel(args)
     if (args.sub === 'reopen') return reopen(args)
     if (args.sub === 'defer') return defer(args)
+    if (args.sub === 'scope') return scope(args)
     if (args.sub === 'resume') return resume(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume|scope',
     )
   } finally {
     db.close()

@@ -6,6 +6,7 @@ import { ask, answer, listDiscussion, openQuestions } from '../../src/core/discu
 import { listEvents } from '../../src/core/events.ts'
 import { nowIso } from '../../src/core/clock.ts'
 import {
+  addScope,
   amendCard,
   applyShapeFile,
   approveCard,
@@ -932,4 +933,38 @@ test('take сохраняет position: карточка в работе вид�
   assert.equal(getCard(db, card.id)!.position, 1)
   const view = nowData(db, { view: 3, executorId: 'developer' })
   assert.ok(view.queue?.some((item) => item.id === card.id))
+})
+
+test('card scope add расширяет scope у карточки в работе', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedExecutor(db, { id: 'other', skills: ['dev'] })
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'in_progress',
+    holder: 'developer',
+    scope: ['src/a.ts'],
+  })
+
+  const updated = addScope(db, {
+    id: card.id,
+    actor: 'developer',
+    paths: ['src/b.ts', 'src/b.ts'],
+  })
+  assert.deepEqual(updated.scope, ['src/a.ts', 'src/b.ts'])
+  assert.ok(listEvents(db, card.id).some((event) => event.type === 'card.scope_extended'))
+
+  assert.throws(
+    () => addScope(db, { id: card.id, actor: 'other', paths: ['src/c.ts'] }),
+    /держатель или владелец/,
+  )
+
+  const owner = addScope(db, { id: card.id, actor: 'owner', paths: ['src/c.ts'] })
+  assert.deepEqual(owner.scope, ['src/a.ts', 'src/b.ts', 'src/c.ts'])
+
+  const done = seedCard(db, { phase: 'task', status: 'done', scope: ['src/a.ts'] })
+  assert.throws(
+    () => addScope(db, { id: done.id, actor: 'owner', paths: ['src/b.ts'] }),
+    /сначала take/,
+  )
 })
