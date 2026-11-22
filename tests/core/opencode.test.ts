@@ -246,16 +246,20 @@ test('отчёт: шесть моментов и запрет отчёта по 
   }
 })
 
-test('refresh удаляет старый единый навык board', () => {
+test('refresh удаляет старый единый навык board, обычный init — нет', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const legacy = join(root, '.opencode', 'skills', 'board', 'SKILL.md')
   mkdirSync(join(root, '.opencode', 'skills', 'board'), { recursive: true })
   writeFileSync(legacy, '---\nname: board\n---\n', 'utf8')
 
+  writeOpenCodeFiles(root)
+  assert.equal(existsSync(legacy), true)
+
   writeOpenCodeFiles(root, { refresh: true })
 
   assert.equal(existsSync(legacy), false)
+  assert.equal(existsSync(join(root, '.opencode', 'skills', 'board')), false)
 })
 
 test('разговор у brainstorming, исполнение Native: навыки и AGENTS без правил разговора', () => {
