@@ -140,3 +140,27 @@ test('queue move отказывает без цели, с двумя целям�
   assert.equal(usage.code, 3)
   assert.match(usage.err, /использование/)
 })
+
+test('card add с оценками ставит запрос по приоритету, reorder пересобирает запросы', (t) => {
+  const dir = project(t)
+  const high = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'Высокий', '--skill', 'dev',
+    '--importance', '3', '--urgency', '3',
+  ]) as { id: string; position: number | null }
+  const low = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'Низкий', '--skill', 'dev',
+    '--importance', '1', '--urgency', '1',
+  ]) as { id: string; position: number | null }
+
+  assert.equal(high.position, 1)
+  assert.equal(low.position, 2)
+
+  run(dir, ['card', 'edit', high.id, '--importance', '1', '--urgency', '1'])
+  run(dir, ['card', 'edit', low.id, '--importance', '3', '--urgency', '3'])
+  run(dir, ['queue', 'reorder'])
+
+  const lowAfter = json(dir, ['card', 'show', low.id]) as { position: number }
+  const highAfter = json(dir, ['card', 'show', high.id]) as { position: number }
+  assert.equal(lowAfter.position, 1)
+  assert.equal(highAfter.position, 2)
+})
