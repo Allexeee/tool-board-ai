@@ -191,6 +191,24 @@ function requireRunnableCard(db: DatabaseSync, executor: Executor, cardId: strin
   return card
 }
 
+/**
+ * Карточка для одиночного `take`, без забега: task `ready`/`waiting`, без брони,
+ * держателя и `run_id`, зависимости закрыты, навык подходит исполнителю.
+ */
+export function requireStandaloneCard(
+  db: DatabaseSync,
+  executorId: string,
+  cardId: string,
+): Card {
+  const executor = requireExecutor(db, executorId)
+  const card = requireRunnableCard(db, executor, cardId)
+  const unmet = listDeps(db, card.id).filter((dep) => !isSatisfied(db, dep))
+  if (unmet.length > 0) {
+    throw new UserError(3, `зависимость ${unmet.join(', ')} карточки ${card.id} не закрыта`)
+  }
+  return card
+}
+
 function requireDeps(
   db: DatabaseSync,
   card: Card,
@@ -944,6 +962,33 @@ export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number
       })
     }
 
-    return rows.length + shapingIds.length
+    // Одиночные карточки без забега: истёкший lease возвращает их в очередь.
+    // Карточки в забеге возвращает закрытие забега выше.
+    const workingIds = db
+      .prepare(
+        "select id from cards where run_id is null and status in ('booked', 'in_progress') and lease_until is not null and lease_until < ? order by created_at, id",
+      )
+      .all(cutoff) as Array<{ id: string }>
+
+    for (const { id } of workingIds) {
+      const before = getCard(db, id)
+      if (!before) continue
+      const ready = listDeps(db, id).every((dep) => isSatisfied(db, dep))
+
+      db.prepare(
+        'update cards set status = ?, holder = null, lease_until = null, updated_at = ? where id = ?',
+      ).run(ready ? 'ready' : 'waiting', cutoff, id)
+
+      appendEvent(db, {
+        type: 'card.lease_expired',
+        actor: 'system',
+        subject: id,
+        before,
+        after: getCard(db, id),
+        note: cutoff,
+      })
+    }
+
+    return rows.length + shapingIds.length + workingIds.length
   })
 }

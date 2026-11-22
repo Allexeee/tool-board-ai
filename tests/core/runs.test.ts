@@ -1,7 +1,7 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { DatabaseSync } from 'node:sqlite'
-import { getCard, listCards } from '../../src/core/cards.ts'
+import { editCard, getCard, listCards } from '../../src/core/cards.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { listEvents } from '../../src/core/events.ts'
 import {
@@ -19,7 +19,7 @@ import {
   suggestVariantRuns,
   startRun,
 } from '../../src/core/runs.ts'
-import { blockCard, finishCard, resumeAfterAnswer } from '../../src/core/lifecycle.ts'
+import { blockCard, finishCard, resumeAfterAnswer, takeCard } from '../../src/core/lifecycle.ts'
 import { submitVerdict } from '../../src/core/review.ts'
 import { ask, answer } from '../../src/core/discussion.ts'
 import type { Card, CardStatus } from '../../src/core/types.ts'
@@ -850,4 +850,23 @@ test('planned-запрос с открытым вопросом пропуска
 
   ask(db, { cardId: first.id, author: 'dev', text: '?' })
   assert.equal(nextCard(db, { executorId: 'dev' })?.id, second.id)
+})
+
+test('истёкший lease одиночной карточки без забега возвращает её в очередь', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+
+  takeCard(db, { id: card.id, actor: 'developer', root: '' })
+  db.prepare('update cards set lease_until = ? where id = ?').run('2020-01-01T00:00:00.000Z', card.id)
+
+  const count = reclaimExpired(db, new Date('2020-01-02T00:00:00.000Z'))
+  assert.equal(count, 1)
+
+  const after = getCard(db, card.id)!
+  assert.equal(after.status, 'ready')
+  assert.equal(after.holder, null)
+  assert.equal(after.leaseUntil, null)
+  assert.ok(listEvents(db, card.id).some((event) => event.type === 'card.lease_expired'))
 })
