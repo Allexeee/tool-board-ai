@@ -643,7 +643,9 @@ export function addToRun(
 
     const rows = listRunCards(db, run.id)
     const existing = rows.find((row) => row.cardId === input.cardId)
-    if (existing && existing.status !== 'dropped') {
+    // Stale blocked-строка (после block → ask → answer) не значит, что карточка
+    // всё ещё в забеге: её переиспользуем, но саму карточку проверит requireRunnableCard.
+    if (existing && existing.status !== 'dropped' && existing.status !== 'blocked') {
       throw new UserError(3, `карточка ${input.cardId} уже в забеге ${run.id}`)
     }
 
@@ -870,6 +872,36 @@ export function endRun(
     })
 
     return ended
+  })
+}
+
+/**
+ * Итоги прохода ревью: один блок текста в `runs.note`. Пишет ревьюер;
+ * карточки при этом не создаются — в них остаётся вердикт и ссылка.
+ */
+export function noteRun(
+  db: DatabaseSync,
+  input: { runId: string; text: string; actor: string },
+): Run {
+  return tx(db, () => {
+    const actor = requiredActor(input.actor)
+    const run = getRun(db, input.runId)
+    if (!run) throw new UserError(3, `забег ${input.runId} не найден`)
+    const text = input.text.trim()
+    if (!text) throw new UserError(3, 'нужен текст итогов: --text «...»')
+
+    db.prepare('update runs set note = ? where id = ?').run(text, run.id)
+    const updated = getRun(db, run.id)!
+
+    appendEvent(db, {
+      type: 'run.noted',
+      actor,
+      subject: run.id,
+      before: run,
+      after: updated,
+      note: text,
+    })
+    return updated
   })
 }
 

@@ -356,3 +356,12 @@ test('owner-карточка после смены навыка не видна 
   const ownerView = nowData(db, { view: 0, executorId: 'owner' })
   assert.equal(ownerView.ownerCards?.some((item) => item.id === card.id) ?? false, true)
 })
+
+test('now 0 показывает счётчик карточек на ревью', (t) => {
+  const { db } = board(t)
+  seedCard(db, { phase: 'task', status: 'review', holder: 'developer' })
+
+  const owner = nowData(db, { view: 0, executorId: 'owner' })
+  assert.equal(owner.reviewCount, 1)
+  assert.match(stripAnsi(renderNow(owner)), /НА РЕВЬЮ \(1\)/)
+})

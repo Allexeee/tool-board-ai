@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeOpenCodeFiles, writeReviewerAgent } from '../../src/core/opencode.ts'
+import { writeOpenCodeFiles, writeReviewerAgent, reviewerAgentSource } from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
 import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
@@ -216,9 +216,13 @@ test('четыре навыка: разные description и свои прави
   assert.equal(new Set(descriptions).size, 4)
 
   assert.match(read('board-spec'), /без глагола работы/i)
+  assert.match(read('board-spec'), /«Ран» — board-run/)
+  assert.match(read('board-spec'), /«работай» — board-work/)
   assert.match(read('board-spec'), /reviewRequired/)
   assert.match(read('board-run'), /не больше 3/)
   assert.match(read('board-run'), /только части только что разобранной/)
+  assert.match(read('board-run'), /Пакет и проход ревью/)
+  assert.match(read('board-run'), /7 находок/)
   assert.match(read('board-work'), /Разобрал/)
   assert.match(read('board-work'), /Приступаю/)
 })
@@ -242,16 +246,20 @@ test('отчёт: шесть моментов и запрет отчёта по 
   }
 })
 
-test('refresh удаляет старый единый навык board', () => {
+test('refresh удаляет старый единый навык board, обычный init — нет', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const legacy = join(root, '.opencode', 'skills', 'board', 'SKILL.md')
   mkdirSync(join(root, '.opencode', 'skills', 'board'), { recursive: true })
   writeFileSync(legacy, '---\nname: board\n---\n', 'utf8')
 
+  writeOpenCodeFiles(root)
+  assert.equal(existsSync(legacy), true)
+
   writeOpenCodeFiles(root, { refresh: true })
 
   assert.equal(existsSync(legacy), false)
+  assert.equal(existsSync(join(root, '.opencode', 'skills', 'board')), false)
 })
 
 test('разговор у brainstorming, исполнение Native: навыки и AGENTS без правил разговора', () => {
@@ -285,4 +293,24 @@ test('card схема принимает verdict для spec-review', () => {
   const end = plugin.indexOf("name: 'run'", start)
   assert.ok(start > 0 && end > start)
   assert.match(plugin.slice(start, end), /verdict: \{ type: 'string' \}/)
+})
+
+test('ревьюер не создаёт карточки и пишет итоги в run note', () => {
+  const source = reviewerAgentSource('acme/main')
+  assert.match(source, /не создавай карточки/i)
+  assert.match(source, /board run note/)
+  assert.match(source, /7 находок/)
+  assert.match(source, /--reviewer/)
+  assert.match(source, /--verdict done\|reopen/)
+})
+
+test('команда ревью описывает пакет, бюджет и итоги прохода', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const command = readFileSync(join(root, '.opencode', 'command', 'review.md'), 'utf8')
+  assert.match(command, /Только читаешь/)
+  assert.match(command, /board run note/)
+  assert.match(command, /--reviewer/)
+  assert.match(command, /7 находок/)
+  assert.match(command, /--kind review/)
 })

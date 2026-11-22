@@ -86,3 +86,17 @@ test('refs проверяют вид, значение, карточку и но
   assert.throws(() => addRef(db, { cardId: 'UI-9', kind: 'link', value: 'x' }), /не найдена/)
   assert.throws(() => removeRef(db, { cardId: card.id, id: 42 }), /не найдена/)
 })
+
+test('addRef принимает вид review для ссылки на итоги прохода', (t) => {
+  const { db, card } = makeCardBoard(t)
+
+  const ref = addRef(db, {
+    cardId: card.id,
+    kind: 'review',
+    value: 'RUN-1',
+    title: 'итоги прохода',
+  })
+  assert.equal(ref.kind, 'review')
+  assert.equal(ref.value, 'RUN-1')
+  assert.deepEqual(listRefs(db, card.id).map((item) => item.kind), ['review'])
+})

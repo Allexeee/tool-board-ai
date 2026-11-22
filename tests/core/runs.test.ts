@@ -946,3 +946,21 @@ test('suggestVariantRuns берёт запросы по позиции', (t) => 
   assert.equal(suggestion!.cards[0].id, next.id)
   assert.equal(suggestion!.cards.some((card) => card.id === later.id), true)
 })
+
+test('run add возвращает карточку после block → answer → resumeAfterAnswer', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = task(db, { position: 1 })
+  editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false } })
+  db.prepare('update cards set approved_at = ? where id = ?').run(new Date().toISOString(), card.id)
+
+  const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+  const question = ask(db, { cardId: card.id, author: 'developer', text: '?' })
+  blockCard(db, { id: card.id, actor: 'developer', reason: 'needs_decision' })
+
+  answer(db, { cardId: card.id, questionId: question.id, text: 'ok', actor: 'owner' })
+  resumeAfterAnswer(db, card.id, 'developer')
+
+  addToRun(db, { executorId: 'developer', cardId: card.id, actor: 'developer' })
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === card.id)!.status, 'booked')
+})

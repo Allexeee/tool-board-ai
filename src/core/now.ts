@@ -64,6 +64,7 @@ export interface NowView {
   moreQueue?: number
   moreRequests?: number
   deferredCount?: number
+  reviewCount?: number
 }
 
 export interface NowOptions {
@@ -150,7 +151,7 @@ function computeHeader(db: DatabaseSync): NowHeader {
 /** Вкладка владельцу §11.2: на утверждении, owner-карточки в ready, открытые вопросы. */
 function ownerView(
   db: DatabaseSync,
-): Pick<NowView, 'approvals' | 'ownerCards' | 'questions' | 'deferredCount'> {
+): Pick<NowView, 'approvals' | 'ownerCards' | 'questions' | 'deferredCount' | 'reviewCount'> {
   const approvals = listCards(db, { status: 'approval' })
   const ownerCards = listCards(db, { skill: 'owner', status: ['ready', 'waiting'] }).sort(
     (left, right) =>
@@ -160,7 +161,8 @@ function ownerView(
   )
   const questions = openQuestions(db)
   const deferredCount = listCards(db, { status: 'deferred' }).length
-  return { approvals, ownerCards, questions, deferredCount }
+  const reviewCount = listCards(db, { status: 'review' }).length
+  return { approvals, ownerCards, questions, deferredCount, reviewCount }
 }
 
 /** Вкладка «мои задачи» §11.3: карточки на руках и очередь по навыкам агента. */
@@ -504,6 +506,9 @@ function renderOwner(lines: string[], data: NowView, painter: Painter): void {
   }
   if (data.deferredCount && data.deferredCount > 0) {
     lines.push(`ОТЛОЖЕНО (${data.deferredCount})`)
+  }
+  if (data.reviewCount && data.reviewCount > 0) {
+    lines.push(`НА РЕВЬЮ (${data.reviewCount})`)
   }
 }
 

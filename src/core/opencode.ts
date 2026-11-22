@@ -1,4 +1,4 @@
-﻿import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+﻿import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
   effectiveReviewerModel,
@@ -52,7 +52,7 @@ description: Доска: разобрать запрос в spec и утверд
 
 Разговор ведёт brainstorming, а не этот навык. В board-проекте brainstorming не пишет \`docs/superpowers/**\`: spec и критерии приёмки идут в карточку (\`card shape\`), решения — в body карточки или \`board decision\`, утверждение дизайна — \`card approve\`. Второго гейта (отдельного design doc) нет.
 
-Доска реагирует только на глагол работы: «разбери / добавь / оформи» — карточка, «работай / Ран» — навык board-work. Без глагола работы карточки не создаются: на «порассуждать» доска молчит.
+Доска реагирует только на глагол работы: «разбери / добавь / оформи» — карточка и навык board-spec, «работай» — board-work, «Ран» — board-run. Без глагола работы карточки не создаются: на «порассуждать» доска молчит.
 
 ## Разбор
 
@@ -147,7 +147,15 @@ description: Доска: забег — «Ран», состав, порядок
 Одно сообщение на событие, не на команду; spec не пересказывать, сроки не обещать, о каждом вызове инструмента не отчитываться. События по самой карточке — в board-work.
 
 - \`run start\` — «Беру в работу (n)» и по 1–2 предложения на карточку: что будет сделано;
-- \`run end\` — «Забег закрыт: сделано n, вынесено m».
+- \`run end\` — «Забег закрыт: сделано n, вынесено m» и «В review n карточек (из них k ядра) — ревью сейчас или до релиза?».
+
+## Пакет и проход ревью
+
+Пакет ревью — все карточки в \`review\` с прошлого прохода. Он не ограничен; проходов может быть несколько, вести их может один ревьюер подряд. Ревью запускается по слову владельца «Ревью», после накопления и обязательно перед release.
+
+Бюджет прохода: critical и регрессии этого diff — всегда; до 3 important по рангу ревьюера; остальное — один сборник \`review notes: <пакет>\` в deferred. Больше 7 находок на проход не перечисляй.
+
+Ревьюер только читает: карточек не создаёт. Итоги прохода — \`board run note <RUN> --text "..." --as <ревьюер>\` (или \`board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\` для одиночной карточки), в карточке — вердикт и ссылка \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`. Оформляет находки агент: critical и до 3 important — через \`review finding\`, остальное — в сборник.
 `
 
 export const SKILL_NOW_SOURCE = `---
@@ -608,11 +616,12 @@ export default Plugin.define({
 `
 
 export const COMMAND_SOURCE = `---
-description: Ревью забега: plan и код
+description: Ревью пакета карточек: план, код, итоги прохода
 subagent: false
 ---
 
-Ты — ревьюер. Не редактируй файлы.
+Ты — ревьюер. Только читаешь: файлы не редактируй, карточки не создавай
+(ни \`board review finding\`, ни \`board card add\`).
 
 Пакет карточек на ревью (\`board review list --json\`):
 
@@ -620,20 +629,19 @@ subagent: false
 
 Порядок:
 
-1. Если предыдущий \`run end\` вернул \`reviewMode: subagent\`, запусти субагента
-   \`board-reviewer\` и передай ему этот пакет. Если \`self\` — проверь сам.
-2. Если \`reviewReopens > 0\` — проверь только diff и открытые findings;
-   не перепроверяй всю карточку. Иначе проверь:
-   - spec и все критерии приёмки;
-   - все шаги plan выполнены, scope не превышен;
-   - код: корректность, тесты, обработка ошибок, безопасность.
-3. Findings оформляй до вердикта: \`board review finding <ID> --severity critical|important|other --text "..."\`.
-4. Вердикт: \`board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer review\`.
-   - \`plan failed\` требует \`reopen\`;
-   - \`plan done\` с code-findings — \`done\`; findings станут карточками.
-5. Один цикл: не переоткрывай карточку из-за стиля. \`critical\` блокирует
-   release; \`important\`/\`other\` — backlog. Второй reopen — только владелец.
-6. Если карточек нет — сообщи, что ревьюить нечего.
+1. Пакет — все карточки в \`review\` с прошлого прохода. Запусти субагента
+   \`board-reviewer\` и передай ему пакет; проходов может быть несколько.
+2. Каждая карточка: spec и все критерии приёмки, шаги plan, scope, diff.
+3. Итоги прохода — один блок: покрытые карточки, вердикты, находки с severity
+   и рангом important (не больше 7 находок).
+   - для забега: \`board run note <RUN> --text "..." --as <ревьюер>\`;
+   - для одиночной карточки: \`board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\`.
+4. Вердикт по каждой: \`board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"\`.
+   Critical или регрессия этого diff — \`reopen\`; \`plan failed\` требует \`reopen\`.
+5. В карточке — ссылка: \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`.
+6. Бюджет прохода: critical и регрессии — всегда, до 3 important по рангу;
+   остальное агент свернёт в сборник.
+7. Если карточек нет — сообщи, что ревьюить нечего.
 `
 
 export const SPEC_REVIEW_COMMAND_SOURCE = `---
@@ -692,9 +700,17 @@ permissions:
     effect: allow
 ---
 
-Ты — свежий ревьюер. Не редактируй файлы. Проверяй spec/acceptance, plan и
-код. Findings — с file:line. Вердикт записывай через
-\`board review submit --plan done|failed\`.
+Ты — свежий ревьюер. Не редактируй файлы и не создавай карточки:
+ни \`board review finding\`, ни \`board card add\`.
+
+Проверяй acceptance, plan и код. Итоги прохода пиши одним блоком:
+- для забега — \`board run note <RUN> --text "..." --as <твой id>\`;
+- для одиночной карточки — \`board review submit <ID> --plan done --verdict done --reviewer <твой id> --note "ИТОГИ: ..."\`.
+В блоке: покрытые карточки, вердикты, находки с severity и рангом important.
+Больше 7 находок на проход не перечисляй — выбирай важнейшие.
+
+Вердикт по карточке: \`board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <твой id> --note "итоги: <RUN или ID>"\`. Critical или регрессия из этого diff — \`reopen\`.
+В карточке оставь ссылку: \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`.
 `
 }
 
@@ -764,12 +780,13 @@ export function writeOpenCodeFiles(
     ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
   ]
 
-  // Старый единый навык: удаляем, иначе у агента два описания доски.
+  // Старый единый навык: удаляем только при refresh, иначе init не должен
+  // трогать уже установленные файлы.
   const legacySkill = join(root, '.opencode', 'skills', 'board', 'SKILL.md')
-  if (existsSync(legacySkill)) {
+  if (options.refresh && existsSync(legacySkill)) {
     rmSync(legacySkill)
     try {
-      rmSync(dirname(legacySkill))
+      rmdirSync(dirname(legacySkill))
     } catch {
       // в каталоге остались чужие файлы — не трогаем
     }
