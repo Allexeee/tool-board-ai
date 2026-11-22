@@ -5,6 +5,7 @@ import { nowIso } from '../../src/core/clock.ts'
 import { ask } from '../../src/core/discussion.ts'
 import { nowData, renderNow } from '../../src/core/now.ts'
 import { deferCard } from '../../src/core/lifecycle.ts'
+import { editCard } from '../../src/core/cards.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 
 type Board = ReturnType<typeof makeBoard>
@@ -342,4 +343,16 @@ test('отложенные не видны агенту, владелец вид
   const owner = nowData(db, { view: 0, executorId: 'owner' })
   assert.equal(owner.deferredCount, 2)
   assert.match(stripAnsi(renderNow(owner)), /ОТЛОЖЕНО \(2\)/)
+})
+
+test('owner-карточка после смены навыка не видна в now 3 и видна владельцу', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'request', status: 'new', title: 'Стать owner' })
+  editCard(db, { id: card.id, actor: 'owner', patch: { skill: 'owner', needsMerge: false } })
+
+  const requestsView = nowData(db, { view: 3, executorId: 'owner' })
+  assert.equal(requestsView.requests?.some((item) => item.id === card.id) ?? false, false)
+
+  const ownerView = nowData(db, { view: 0, executorId: 'owner' })
+  assert.equal(ownerView.ownerCards?.some((item) => item.id === card.id) ?? false, true)
 })
