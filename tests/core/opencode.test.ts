@@ -216,6 +216,8 @@ test('четыре навыка: разные description и свои прави
   assert.equal(new Set(descriptions).size, 4)
 
   assert.match(read('board-spec'), /без глагола работы/i)
+  assert.match(read('board-spec'), /«Ран» — board-run/)
+  assert.match(read('board-spec'), /«работай» — board-work/)
   assert.match(read('board-spec'), /reviewRequired/)
   assert.match(read('board-run'), /не больше 3/)
   assert.match(read('board-run'), /только части только что разобранной/)
