@@ -875,5 +875,19 @@ test('block, submit и reject очищают позицию, resumeAfterAnswer �
 
   const approval = seedCard(db, { phase: 'task', status: 'approval', position: 1 })
   rejectCard(db, { id: approval.id, actor: 'owner', reason: 'не так' })
-  assert.equal(getCard(db, approval.id)!.position, null)
+  assert.ok(getCard(db, approval.id)!.position)
+})
+
+test('два отклонённых запроса получают разные позиции', (t) => {
+  const { db } = board(t)
+  const first = seedCard(db, { phase: 'task', status: 'approval' })
+  const second = seedCard(db, { phase: 'task', status: 'approval' })
+
+  rejectCard(db, { id: first.id, actor: 'owner', reason: 'раз' })
+  rejectCard(db, { id: second.id, actor: 'owner', reason: 'два' })
+
+  const positions = [getCard(db, first.id)!.position, getCard(db, second.id)!.position]
+  assert.notEqual(positions[0], null)
+  assert.notEqual(positions[1], null)
+  assert.notEqual(positions[0], positions[1])
 })
