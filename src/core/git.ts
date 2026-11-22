@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { nowIso } from './clock.ts'
@@ -68,6 +68,23 @@ export function findLocalBoardCli(root: string): string | null {
   if (existsSync(vendored)) return vendored
   if (isBoardSourceRepo(root)) return join(root, 'bin', 'board.ts')
   return null
+}
+
+/**
+ * Корень проекта для диспетчера. Worktree в `<root>/.worktrees/<id>` имеет
+ * собственный `.git`, но версия board живёт в корне: поднимаемся выше.
+ */
+export function findProjectRootForCli(startDir: string): string | null {
+  let dir = resolve(startDir)
+  for (;;) {
+    if (existsSync(join(dir, '.board'))) return dir
+    if (existsSync(join(dir, '.git'))) {
+      return basename(dirname(dir)) === '.worktrees' ? dirname(dirname(dir)) : dir
+    }
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
 }
 
 export type BoardSubmoduleState =
