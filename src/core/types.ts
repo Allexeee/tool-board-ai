@@ -91,6 +91,7 @@ export interface Card {
   needsMerge: boolean
   reviewRequired: boolean
   scope: string[]
+  tags: string[]
   severity: Severity | null
   originCardId: string | null
   summary: string | null

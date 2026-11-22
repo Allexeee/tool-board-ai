@@ -14,6 +14,7 @@ export interface NewCardInput {
   acceptance?: string[]
   skill: string
   author: string
+  tags?: string[]
 }
 
 export interface CardFilter {
@@ -22,6 +23,7 @@ export interface CardFilter {
   skill?: string
   holder?: string
   group?: string
+  tag?: string
 }
 
 export interface CardPatch {
@@ -34,6 +36,7 @@ export interface CardPatch {
   needsMerge?: boolean
   reviewRequired?: boolean
   scope?: string[]
+  tags?: string[]
   note?: string | null
 }
 
@@ -77,6 +80,7 @@ interface Row {
   needs_merge: number
   review_required: number
   scope: string
+  tags: string
   severity: string | null
   origin_card_id: string | null
   summary: string | null
@@ -119,6 +123,7 @@ const toCard = (row: Row): Card => ({
   needsMerge: row.needs_merge === 1,
   reviewRequired: row.review_required === 1,
   scope: JSON.parse(row.scope) as string[],
+  tags: JSON.parse(row.tags) as string[],
   severity: row.severity as Card['severity'],
   originCardId: row.origin_card_id,
   summary: row.summary,
@@ -162,6 +167,11 @@ function normalizeScope(raw: string[]): string[] {
   return raw.map((value) => value.trim()).filter(Boolean)
 }
 
+/** Теги — свободные метки: нижний регистр, без дублей и пустых. */
+export function normalizeTags(raw: string[]): string[] {
+  return [...new Set(raw.map((value) => value.trim().toLowerCase()).filter(Boolean))]
+}
+
 function normalizeAcceptance(raw: string[]): string {
   return raw
     .map((value) => value.trim())
@@ -190,6 +200,7 @@ interface CardInsert {
   status: CardStatus
   skill: string
   needsMerge: boolean
+  tags: string
   createdAt: string
 }
 
@@ -197,14 +208,14 @@ function insertCard(db: DatabaseSync, card: CardInsert): void {
   db.prepare(
     `insert into cards (
        id, group_prefix, group_seq, title, body, acceptance, phase, status, skill,
-       importance, urgency, position, needs_merge, review_required, scope,
+       importance, urgency, position, needs_merge, review_required, scope, tags,
        severity, origin_card_id, summary, holder, run_id, branch, attempt,
        spec_rev, review_reopens, merge_commit, in_dev, in_main, reverted_at,
        revert_commit, waive_deps, lease_until, previous_holder, created_at,
        updated_at, shaped_at, approved_at, done_at, cancel_reason, note
      ) values (
        ?, ?, ?, ?, ?, ?, ?, ?, ?,
-       null, null, null, ?, 0, '[]',
+       null, null, null, ?, 0, '[]', ?,
        null, null, null, null, null, null, 1,
        1, 0, null, 0, 0, null,
        null, 0, null, null, ?, ?,
@@ -221,6 +232,7 @@ function insertCard(db: DatabaseSync, card: CardInsert): void {
     card.status,
     card.skill,
     card.needsMerge ? 1 : 0,
+    card.tags,
     card.createdAt,
     card.createdAt,
   )
@@ -253,6 +265,7 @@ export function createCard(db: DatabaseSync, input: NewCardInput): Card {
       status: isOwner ? 'ready' : 'new',
       skill,
       needsMerge: !isOwner,
+      tags: JSON.stringify(normalizeTags(input.tags ?? [])),
       createdAt,
     })
 
@@ -297,6 +310,10 @@ export function listCards(db: DatabaseSync, filter: CardFilter = {}): Card[] {
   if (filter.group !== undefined) {
     where.push('group_prefix = ?')
     params.push(normalizeGroupPrefix(filter.group))
+  }
+  if (filter.tag !== undefined) {
+    where.push('exists (select 1 from json_each(cards.tags) where json_each.value = ?)')
+    params.push(filter.tag)
   }
 
   const sql =
@@ -411,6 +428,13 @@ export function editCard(
         sets.push('scope = ?')
         params.push(JSON.stringify(scope))
         specChanged = true
+      }
+    }
+    if (patch.tags !== undefined) {
+      const tags = normalizeTags(patch.tags)
+      if (JSON.stringify(tags) !== JSON.stringify(card.tags)) {
+        sets.push('tags = ?')
+        params.push(JSON.stringify(tags))
       }
     }
     if (patch.note !== undefined) {

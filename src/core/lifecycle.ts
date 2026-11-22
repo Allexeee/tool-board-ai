@@ -564,6 +564,7 @@ export interface ShapeFileNewCard {
   needs_merge?: boolean
   review_required?: boolean
   scope?: string[]
+  tags?: string[]
 }
 
 export interface ShapeFile {
@@ -577,6 +578,7 @@ export interface ShapeFile {
   needs_merge?: boolean
   review_required?: boolean
   scope?: string[]
+  tags?: string[]
   refs?: Array<{ kind: string; value: string; title?: string }>
   deps?: string[]
   new_cards?: ShapeFileNewCard[]
@@ -624,6 +626,7 @@ export function applyShapeFile(
     if (file.needs_merge !== undefined) patch.needsMerge = file.needs_merge
     if (file.review_required !== undefined) patch.reviewRequired = file.review_required
     if (file.scope !== undefined) patch.scope = file.scope
+    if (file.tags !== undefined) patch.tags = file.tags
     if (Object.keys(patch).length > 0) editCard(db, { id: card.id, actor, patch })
     for (const ref of file.refs ?? []) {
       addRef(db, {
@@ -650,6 +653,7 @@ export function applyShapeFile(
         acceptance: item.acceptance,
         skill: item.skill,
         author: actor,
+        tags: item.tags,
       })
       const createdPatch: CardPatch = {}
       if (item.needs_merge !== undefined) createdPatch.needsMerge = item.needs_merge

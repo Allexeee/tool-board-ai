@@ -378,3 +378,24 @@ test('getCard возвращает null, editCard на неизвестной к
     /не найдена/,
   )
 })
+
+test('tags сохраняются, заменяются и фильтруются', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+
+  const card = createCard(db, {
+    group: 'UI',
+    title: 't',
+    skill: 'dev',
+    author: 'owner',
+    tags: [' New ', 'new', 'backend'],
+  })
+  assert.deepEqual(card.tags, ['new', 'backend'])
+
+  const edited = editCard(db, { id: card.id, actor: 'owner', patch: { tags: ['review'] } })
+  assert.deepEqual(edited.tags, ['review'])
+  assert.deepEqual(listCards(db, { tag: 'review' }).map((item) => item.id), [card.id])
+
+  const cleared = editCard(db, { id: card.id, actor: 'owner', patch: { tags: [] } })
+  assert.deepEqual(cleared.tags, [])
+})
