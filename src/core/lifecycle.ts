@@ -327,6 +327,8 @@ export function amendCard(
        approved_at = null, spec_rev = spec_rev + 1, position = null, shaped_at = ?,
        updated_at = ? where id = ?`,
     ).run(actor, leaseUntil, at, at, card.id)
+    // Возвращённый в разбор запрос снова стоит в очереди запросов.
+    insertIntoQueue(db, card.id)
 
     comment(db, {
       cardId: card.id,
@@ -511,7 +513,7 @@ export function resumeCard(db: DatabaseSync, input: { id: string; actor: string 
     }
 
     db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(next, at, card.id)
-    if (next === 'ready' || next === 'waiting') insertIntoQueue(db, card.id)
+    if (next === 'new' || next === 'ready' || next === 'waiting') insertIntoQueue(db, card.id)
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {
@@ -782,6 +784,7 @@ export function applyShapeFile(
       if (Object.keys(createdPatch).length > 0) {
         editCard(db, { id: created.id, actor, patch: createdPatch })
       }
+      insertIntoQueue(db, created.id)
       newIds.set(key, created.id)
       newCards.push(getCard(db, created.id)!)
     }
