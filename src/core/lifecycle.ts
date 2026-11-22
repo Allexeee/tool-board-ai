@@ -41,6 +41,17 @@ const REOPENABLE: readonly CardStatus[] = ['review', 'done']
 /** Amend меняет уже утверждённый spec; в работе и ревью сначала block/reopen. */
 const AMENDABLE: readonly CardStatus[] = ['approval', 'ready', 'waiting', 'blocked']
 
+/** Отложить можно всё, что не в работе; работающую карточку сначала block. */
+const DEFERRABLE: readonly CardStatus[] = [
+  'new',
+  'shaping',
+  'approval',
+  'ready',
+  'waiting',
+  'booked',
+  'blocked',
+]
+
 function requireCard(db: DatabaseSync, id: string): Card {
   const card = getCard(db, id)
   if (!card) throw new UserError(3, `карточка ${id} не найдена`)
@@ -402,6 +413,87 @@ export function blockCard(
       before: card,
       after: updated,
       note: note ? `${reason} — ${note}` : reason,
+    })
+    return updated
+  })
+}
+
+/**
+ * Отложить карточку: `deferred` — состояние, а не приоритет. Снимает с забега,
+ * очищает держателя, бронь и позицию в очереди; из now 1/2 и `--suggest` пропадает.
+ * Работающую карточку сначала блокируют или сдают.
+ */
+export function deferCard(
+  db: DatabaseSync,
+  input: { id: string; actor: string; note?: string },
+): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+    if (!DEFERRABLE.includes(card.status)) {
+      throw new UserError(
+        3,
+        `карточку ${card.id} в статусе ${card.status} нельзя отложить: сначала finish или block`,
+      )
+    }
+
+    if (card.runId) {
+      db.prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?").run(
+        card.runId,
+        card.id,
+      )
+    }
+
+    db.prepare(
+      `update cards set status = 'deferred', holder = null, run_id = null, lease_until = null,
+       position = null, updated_at = ? where id = ?`,
+    ).run(nowIso(), card.id)
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.deferred',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+      note: input.note?.trim() || null,
+    })
+    return updated
+  })
+}
+
+/**
+ * Вернуть отложенную карточку: запрос — в `new`, задача — в `ready`/`waiting`
+ * по зависимостям и в очередь по оценке.
+ */
+export function resumeCard(db: DatabaseSync, input: { id: string; actor: string }): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.id)
+    const actor = requireActor(input.actor)
+    if (card.status !== 'deferred') {
+      throw new UserError(3, `карточка ${card.id} не отложена: ${card.status}`)
+    }
+
+    const at = nowIso()
+    if (card.phase === 'request') {
+      db.prepare("update cards set status = 'new', updated_at = ? where id = ?").run(at, card.id)
+    } else {
+      const ready = listDeps(db, card.id).every((dep) => isSatisfied(db, dep))
+      db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(
+        ready ? 'ready' : 'waiting',
+        at,
+        card.id,
+      )
+      insertIntoQueue(db, card.id)
+    }
+
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.resumed',
+      actor,
+      subject: card.id,
+      before: card,
+      after: updated,
     })
     return updated
   })
