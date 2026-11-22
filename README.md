@@ -194,26 +194,9 @@ board now 3    # открытые запросы и общая очередь
 
 ## Superpowers
 
-Глобально superpowers не подключён: в `~/.config/opencode/opencode.json` нет
-его плагина, поэтому ни скиллы, ни bootstrap-текст не появляются в проектах по
-умолчанию. Проект, которому нужны эти скиллы, добавляет свой конфиг:
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["C:\\Users\\aleks\\.config\\opencode\\node_modules\\superpowers"]
-}
-```
-
-Если проект включает superpowers, но `brainstorming` в нём не нужен:
-
-```jsonc
-{
-  "permissions": [
-    { "action": "skill", "resource": "brainstorming", "effect": "deny" }
-  ]
-}
-```
+Superpowers — локальная настройка пользователя, а не часть проекта. Проект не
+коммитит `.opencode/opencode.json` и не задаёт путь к пакету; каждая машина
+решает сама, включать ли его.
 
 Остальные глобальные скиллы (`frontend-design`, `ui-ux-pro-max`, `unity-2022`)
 продолжают работать.
