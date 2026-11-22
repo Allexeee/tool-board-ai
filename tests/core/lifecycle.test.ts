@@ -24,6 +24,7 @@ import {
 } from '../../src/core/lifecycle.ts'
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
+import { insertIntoQueue } from '../../src/core/queue.ts'
 
 type Board = ReturnType<typeof makeBoard>
 
@@ -843,4 +844,36 @@ test('запрос из shape-файла, resume и amend получают по�
   const amended = amendCard(db, { id: approved.id, actor: 'developer', reason: 'уточнение' })
   assert.equal(amended.status, 'shaping')
   assert.ok(amended.position)
+})
+
+test('block, submit и reject очищают позицию, resumeAfterAnswer ставит запрос в очередь', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+
+  const resumed = []
+  for (const title of ['A', 'B']) {
+    const card = seedCard(db, { phase: 'request', status: 'new', title })
+    insertIntoQueue(db, card.id)
+    const question = ask(db, { cardId: card.id, author: 'developer', text: '?' })
+    blockCard(db, { id: card.id, actor: 'developer', reason: 'needs_decision' })
+    assert.equal(getCard(db, card.id)!.position, null)
+
+    answer(db, { cardId: card.id, questionId: question.id, text: 'ok', actor: 'owner' })
+    resumeAfterAnswer(db, card.id, 'developer')
+    resumed.push(getCard(db, card.id)!)
+  }
+
+  assert.deepEqual(
+    resumed.map((card) => card.position),
+    [1, 2],
+  )
+
+  const shaped = shapedRequest(t, db)
+  db.prepare('update cards set position = 1 where id = ?').run(shaped.id)
+  submitCard(db, { id: shaped.id, actor: 'developer' })
+  assert.equal(getCard(db, shaped.id)!.position, null)
+
+  const approval = seedCard(db, { phase: 'task', status: 'approval', position: 1 })
+  rejectCard(db, { id: approval.id, actor: 'owner', reason: 'не так' })
+  assert.equal(getCard(db, approval.id)!.position, null)
 })
