@@ -70,6 +70,113 @@ export function findLocalBoardCli(root: string): string | null {
   return null
 }
 
+export type BoardSubmoduleState =
+  | 'missing'
+  | 'not-initialized'
+  | 'not-submodule'
+  | 'dirty'
+  | 'ready'
+
+const BOARD_SUBMODULE = 'tools/board'
+
+function versionParts(tag: string): number[] {
+  return tag.replace(/^v/, '').split('.').map((part) => Number(part) || 0)
+}
+
+function compareVersions(left: string, right: string): number {
+  const a = versionParts(left)
+  const b = versionParts(right)
+  for (let index = 0; index < Math.max(a.length, b.length); index++) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+/** Последний semver-тег источника; сеть нужна только здесь. */
+export function latestBoardTag(source: string): string {
+  const output = runGit(process.cwd(), ['ls-remote', '--tags', '--refs', source])
+  const tags = output
+    .split('\n')
+    .map((line) => line.split('\t')[1] ?? '')
+    .map((ref) => ref.replace(/^refs\/tags\//, ''))
+    .filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag))
+  if (tags.length === 0) throw new UserError(2, `в ${source} нет тегов vX.Y.Z`)
+  return tags.sort(compareVersions).at(-1)!
+}
+
+export function currentBoardVersion(root: string): string | null {
+  const pkg = join(root, BOARD_SUBMODULE, 'package.json')
+  if (!existsSync(pkg)) return null
+  try {
+    return (JSON.parse(readFileSync(pkg, 'utf8')) as { version?: string }).version ?? null
+  } catch {
+    return null
+  }
+}
+
+export function boardSubmoduleState(root: string): BoardSubmoduleState {
+  const dir = join(root, BOARD_SUBMODULE)
+  const modules = join(root, '.gitmodules')
+  const registered =
+    existsSync(modules) && readFileSync(modules, 'utf8').includes(`path = ${BOARD_SUBMODULE}`)
+
+  if (!existsSync(dir)) return registered ? 'not-initialized' : 'missing'
+  if (!registered) return 'not-submodule'
+  if (!existsSync(join(dir, '.git'))) return 'not-initialized'
+  try {
+    if (runGit(dir, ['status', '--porcelain']) !== '') return 'dirty'
+  } catch {
+    return 'not-initialized'
+  }
+  return 'ready'
+}
+
+export function addBoardSubmodule(root: string, source: string, ref: string): void {
+  const dir = join(root, BOARD_SUBMODULE)
+  if (existsSync(dir)) throw new UserError(3, `${BOARD_SUBMODULE} уже существует`)
+  if (!isRepo(root)) throw new UserError(3, 'нужен git-репозиторий')
+  runGit(root, ['-c', 'protocol.file.allow=always', 'submodule', 'add', source, BOARD_SUBMODULE])
+  runGit(dir, ['checkout', ref])
+}
+
+function versionAt(dir: string, ref: string): string | null {
+  try {
+    const raw = runGit(dir, ['show', `${ref}:package.json`])
+    return (JSON.parse(raw) as { version?: string }).version ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Переключает submodule на ref; даунгрейд — только с allowDowngrade. */
+export function checkoutBoardRef(
+  root: string,
+  ref: string,
+  options: { allowDowngrade?: boolean } = {},
+): void {
+  const dir = join(root, BOARD_SUBMODULE)
+  const state = boardSubmoduleState(root)
+  if (state === 'missing' || state === 'not-initialized') {
+    throw new UserError(2, 'board не установлен: выполните board init')
+  }
+  if (state === 'dirty') {
+    throw new UserError(2, `рабочее дерево ${BOARD_SUBMODULE} грязное: закоммитьте или откатите изменения`)
+  }
+  if (state !== 'ready') throw new UserError(2, `submodule ${BOARD_SUBMODULE}: ${state}`)
+
+  runGit(dir, ['fetch', '--tags', '--quiet'])
+  const current = currentBoardVersion(root)
+  const target = versionAt(dir, ref)
+  if (current && target && compareVersions(target, current) < 0 && !options.allowDowngrade) {
+    throw new UserError(
+      2,
+      `даунгрейд ${current} → ${target} требует --allow-downgrade: схема базы может быть новее`,
+    )
+  }
+  runGit(dir, ['checkout', ref])
+}
+
 /** Ветки фиксированы: `main` и `dev` (§7.1). */
 export function resolveBranches(_root: string): { main: string; dev: string } {
   return { main: 'main', dev: 'dev' }

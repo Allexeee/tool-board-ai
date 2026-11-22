@@ -4,11 +4,16 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getCard } from '../../src/core/cards.ts'
 import {
+  addBoardSubmodule,
+  boardSubmoduleState,
+  checkoutBoardRef,
+  currentBoardVersion,
   ensureWorktree,
   findLocalBoardCli,
   isBoardSourceRepo,
   isAncestor,
   isRepo,
+  latestBoardTag,
   mergeCommitFor,
   mergeToDev,
   outOfScope,
@@ -21,7 +26,7 @@ import {
 } from '../../src/core/git.ts'
 import { getRun, reclaimExpired } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor, seedRun } from '../helpers/board.ts'
-import { makeRepo } from '../helpers/repo.ts'
+import { makeBoardSource, makeRepo } from '../helpers/repo.ts'
 
 test('isRepo Рё resolveBranches', (t) => {
   const repo = makeRepo()
@@ -259,7 +264,7 @@ test('mergeCommitFor РЅР°С…РѕРґРёС‚ merge-РєРѕРјРјРёС‚ СЃРІРѕРµР№ РІРµС‚РєРё РїС
   assert.equal(mergeCommitFor(root, branchB), mergeB)
 })
 
-test('findLocalBoardCli находит tools/board и не путает чужой bin', (t) => {
+test('findLocalBoardCli РЅР°С…РѕРґРёС‚ tools/board Рё РЅРµ РїСѓС‚Р°РµС‚ С‡СѓР¶РѕР№ bin', (t) => {
   const repo = makeRepo()
   t.after(repo.close)
 
@@ -275,7 +280,7 @@ test('findLocalBoardCli находит tools/board и не путает чужой bin', (t) => {
   assert.equal(findLocalBoardCli(other.root), null)
 })
 
-test('isBoardSourceRepo узнаёт репозиторий board', (t) => {
+test('isBoardSourceRepo СѓР·РЅР°С‘С‚ СЂРµРїРѕР·РёС‚РѕСЂРёР№ board', (t) => {
   const repo = makeRepo()
   t.after(repo.close)
 
@@ -287,4 +292,40 @@ test('isBoardSourceRepo узнаёт репозиторий board', (t) => {
 
   assert.equal(isBoardSourceRepo(repo.root), true)
   assert.match(findLocalBoardCli(repo.root)!, /bin[\\/]board\.ts$/)
+})
+
+test('latestBoardTag РЅР°С…РѕРґРёС‚ РїРѕСЃР»РµРґРЅРёР№ С‚РµРі bare-РёСЃС‚РѕС‡РЅРёРєР°', (t) => {
+  const source = makeBoardSource()
+  t.after(source.close)
+  assert.equal(latestBoardTag(source.source), 'v1.1.0')
+})
+
+test('addBoardSubmodule, currentBoardVersion Рё checkoutBoardRef', (t) => {
+  const source = makeBoardSource()
+  t.after(source.close)
+  const repo = makeRepo()
+  t.after(repo.close)
+
+  addBoardSubmodule(repo.root, source.source, 'v1.0.0')
+  assert.equal(currentBoardVersion(repo.root), '1.0.0')
+  assert.equal(boardSubmoduleState(repo.root), 'ready')
+
+  checkoutBoardRef(repo.root, 'v1.1.0')
+  assert.equal(currentBoardVersion(repo.root), '1.1.0')
+
+  assert.throws(() => checkoutBoardRef(repo.root, 'v1.0.0'), /allow-downgrade/)
+  checkoutBoardRef(repo.root, 'v1.0.0', { allowDowngrade: true })
+  assert.equal(currentBoardVersion(repo.root), '1.0.0')
+})
+
+test('РіСЂСЏР·РЅС‹Р№ submodule РЅРµ РїРµСЂРµРєР»СЋС‡Р°РµС‚СЃСЏ', (t) => {
+  const source = makeBoardSource()
+  t.after(source.close)
+  const repo = makeRepo()
+  t.after(repo.close)
+
+  addBoardSubmodule(repo.root, source.source, 'v1.0.0')
+  writeFileSync(join(repo.root, 'tools', 'board', 'dirty.txt'), 'x')
+  assert.equal(boardSubmoduleState(repo.root), 'dirty')
+  assert.throws(() => checkoutBoardRef(repo.root, 'v1.1.0'), /РіСЂСЏР·РЅ/)
 })
