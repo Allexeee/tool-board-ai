@@ -761,3 +761,20 @@ test('одна карточка в работе на держателя держ
   const taken = takeCard(db, { id: inRun.id, actor: 'developer', root: '' })
   assert.equal(taken.status, 'in_progress')
 })
+
+test('после ответа на вопрос resume задачи возвращает её в очередь', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, { phase: 'task', status: 'blocked' })
+  db.prepare('update cards set approved_at = ? where id = ?').run(nowIso(), card.id)
+  const question = ask(db, { cardId: card.id, author: 'developer', text: 'какой вариант?' })
+
+  deferCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumeCard(db, { id: card.id, actor: 'developer' }).status, 'blocked')
+
+  answer(db, { cardId: card.id, questionId: question.id, text: 'второй', actor: 'owner' })
+  deferCard(db, { id: card.id, actor: 'developer' })
+  const resumed = resumeCard(db, { id: card.id, actor: 'developer' })
+  assert.equal(resumed.status, 'ready')
+  assert.ok(resumed.position)
+})
