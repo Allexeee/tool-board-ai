@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { nowIso } from '../../src/core/clock.ts'
 import { ask } from '../../src/core/discussion.ts'
 import { nowData, renderNow } from '../../src/core/now.ts'
+import { deferCard } from '../../src/core/lifecycle.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 
 type Board = ReturnType<typeof makeBoard>
@@ -317,4 +318,28 @@ test('now: без цвета по умолчанию, цвета только п
 test('now: неизвестная вкладка — ошибка', (t) => {
   const { db, root } = board(t)
   assert.throws(() => nowData(db, { view: 9 as never, executorId: 'owner', root }), /вкладка/)
+})
+
+test('отложенные не видны агенту, владелец видит счётчик', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const task = readyCard(db, { position: 1 })
+  const request = seedCard(db, { phase: 'request', status: 'new' })
+
+  deferCard(db, { id: task.id, actor: 'developer' })
+  deferCard(db, { id: request.id, actor: 'developer' })
+
+  const mine = nowData(db, { view: 1, executorId: 'developer' })
+  assert.equal(mine.cards?.some((card) => card.id === task.id) ?? false, false)
+  assert.equal(
+    mine.probableRuns?.some((run) => run.cards.some((item) => item.card.id === task.id)) ?? false,
+    false,
+  )
+
+  const queue = nowData(db, { view: 3, executorId: 'developer' })
+  assert.equal(queue.requests?.some((card) => card.id === request.id) ?? false, false)
+
+  const owner = nowData(db, { view: 0, executorId: 'owner' })
+  assert.equal(owner.deferredCount, 2)
+  assert.match(stripAnsi(renderNow(owner)), /ОТЛОЖЕНО \(2\)/)
 })

@@ -50,6 +50,7 @@ const STATUSES: readonly CardStatus[] = [
   'booked',
   'in_progress',
   'blocked',
+  'deferred',
   'review',
   'done',
   'cancelled',

@@ -9,6 +9,7 @@ export type CardStatus =
   | 'booked'
   | 'in_progress'
   | 'blocked'
+  | 'deferred'
   | 'review'
   | 'done'
   | 'cancelled'

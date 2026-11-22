@@ -10,9 +10,11 @@ import {
   applyShapeFile,
   approveCard,
   cancelCard,
+  deferCard,
   ownerDone,
   rejectCard,
   reopenCard,
+  resumeCard,
   shapeCard,
   submitCard,
   type ShapeFile,
@@ -518,6 +520,33 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const defer = (args: ParsedArgs): number => {
+    const card = requireCard(
+      args.positionals[0],
+      'использование: board card defer UI-1 --as <исполнитель>',
+    )
+    const updated = deferCard(db, {
+      id: card.id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      note: stringFlag(args, 'note'),
+    })
+    ok(updated, `${updated.id} отложена: ${updated.title}`)
+    return 0
+  }
+
+  const resume = (args: ParsedArgs): number => {
+    const card = requireCard(
+      args.positionals[0],
+      'использование: board card resume UI-1 --as <исполнитель>',
+    )
+    const updated = resumeCard(db, {
+      id: card.id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+    })
+    ok(updated, `${updated.id} возвращена: ${updated.status}`)
+    return 0
+  }
+
   try {
     if (args.sub === 'add') return add(args)
     if (args.sub === 'list') return list(args)
@@ -536,9 +565,11 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'done') return done(args)
     if (args.sub === 'cancel') return cancel(args)
     if (args.sub === 'reopen') return reopen(args)
+    if (args.sub === 'defer') return defer(args)
+    if (args.sub === 'resume') return resume(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume',
     )
   } finally {
     db.close()
