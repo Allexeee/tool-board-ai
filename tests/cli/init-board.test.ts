@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { currentBoardVersion } from '../../src/core/git.ts'
-import { makeRepo } from '../helpers/repo.ts'
+import { makeBoardSource, makeRepo } from '../helpers/repo.ts'
 
 const bin = resolve('bin/board.ts')
 
@@ -12,7 +12,6 @@ function run(dir: string, args: string[]) {
   return spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
-    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
     windowsHide: true,
   })
 }
@@ -20,13 +19,15 @@ function run(dir: string, args: string[]) {
 test('init в git-проекте ставит submodule и генерирует .opencode', (t) => {
   const repo = makeRepo()
   t.after(repo.close)
+  const source = makeBoardSource()
+  t.after(source.close)
 
   const result = run(repo.root, [
     'init',
     '--board-version',
     'v1.1.0',
     '--board-source',
-    process.cwd(),
+    source.source,
     '--json',
   ])
   assert.equal(result.status, 0, result.stderr || result.stdout)

@@ -9,7 +9,7 @@
   reclaimExpired,
   releaseRun,
   startRun,
-  suggestRuns,
+  suggestVariantRuns,
 } from '../../core/runs.ts'
 import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
@@ -73,7 +73,7 @@ export default async function command(args: ParsedArgs) {
     let cardIds: string[]
     if (suggest !== undefined) {
       if (suggest < 1) throw new UserError(3, '--suggest — целое число от 1')
-      const [suggestion] = suggestRuns(db, executorId, suggest)
+      const suggestion = suggestVariantRuns(db, executorId)[suggest - 1]
       if (!suggestion) fail(1, 'подходящих карточек нет: забег не начат')
       cardIds = suggestion.cards.map((card) => card.id)
     } else {

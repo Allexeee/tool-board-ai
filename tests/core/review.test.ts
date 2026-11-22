@@ -355,3 +355,16 @@ test('reopen очищает run_id/lease: карточка из finish снов�
   assert.equal(getCard(db, card.id)!.status, 'booked')
   assert.equal(getCard(db, card.id)!.runId, second.id)
 })
+
+test('addFinding ставит тег review', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  const origin = seedCard(db, { phase: 'task', status: 'review', skill: 'dev' })
+  const finding = addFinding(db, {
+    cardId: origin.id,
+    severity: 'important',
+    text: 'x',
+    reviewer: 'reviewer',
+  })
+  assert.deepEqual(finding.tags, ['review'])
+})

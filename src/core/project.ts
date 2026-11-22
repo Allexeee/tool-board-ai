@@ -187,7 +187,12 @@ export function initProject(
 
   // Проект с git получает свою версию board в tools/board. Сам board и
   // не-git каталоги (тесты, временные проекты) остаются на локальном CLI.
-  if (isRepo(root) && !isBoardSourceRepo(root) && process.env.BOARD_DELEGATED !== '1') {
+  if (
+    isRepo(root) &&
+    !isBoardSourceRepo(root) &&
+    process.env.BOARD_DELEGATED !== '1' &&
+    process.env.BOARD_ALLOW_GLOBAL !== '1'
+  ) {
     const source = options.boardSource ?? DEFAULT_BOARD_SOURCE
     let state = boardSubmoduleState(root)
     if (state === 'not-submodule') {

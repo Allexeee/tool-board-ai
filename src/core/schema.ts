@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -38,6 +38,7 @@ create table cards (
   needs_merge integer not null default 1,
   review_required integer not null default 0,
   scope text not null default '[]',
+  tags text not null default '[]',
   severity text,
   origin_card_id text,
   summary text,
@@ -175,6 +176,11 @@ alter table reviews add column plan_compliance text;
 alter table runs add column review_mode text;
 `
 
+/** Теги; автотег находок ревью выполняется отдельно после проверки колонки. */
+const MIGRATE_V2_TO_V3 = `
+alter table cards add column tags text not null default '[]';
+`
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -195,8 +201,20 @@ export function migrate(db: DatabaseSync): number {
   db.exec('begin immediate')
   try {
     if (from === 0) db.exec(DDL)
-    else if (from === 1) db.exec(MIGRATE_V1_TO_V2)
+    else if (from === 1) {
+      db.exec(MIGRATE_V1_TO_V2)
+      db.exec(MIGRATE_V2_TO_V3)
+    } else if (from === 2) db.exec(MIGRATE_V2_TO_V3)
     else throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
+
+    if (from === 1 || from === 2) {
+      const hasOrigin = (db.prepare('pragma table_info(cards)').all() as Array<{ name: string }>).some(
+        (row) => row.name === 'origin_card_id',
+      )
+      if (hasOrigin) {
+        db.exec(`update cards set tags = '["review"]' where origin_card_id is not null`)
+      }
+    }
     db.prepare(
       "insert into meta (key, value) values ('schemaVersion', ?) " +
         'on conflict(key) do update set value = excluded.value',
