@@ -899,3 +899,37 @@ test('забег растёт после старта: на старте не б
   )
   assert.equal(nextCard(db, { executorId: 'developer' })?.id, cards[0].id)
 })
+
+test('blocked-карточку снимают с забега и возвращают после approve', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = task(db, { position: 1 })
+  const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
+
+  blockCard(db, { id: card.id, actor: 'developer', reason: 'needs_decision' })
+  dropFromRun(db, { executorId: 'developer', cardId: card.id, actor: 'developer' })
+
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === card.id)!.status, 'dropped')
+  assert.equal(getCard(db, card.id)!.status, 'blocked')
+  assert.equal(getCard(db, card.id)!.runId, null)
+
+  // approve возвращает карточку в ready — её можно вернуть в тот же забег
+  db.prepare("update cards set status = 'ready', updated_at = ? where id = ?").run(
+    new Date().toISOString(),
+    card.id,
+  )
+  addToRun(db, { executorId: 'developer', cardId: card.id, actor: 'developer' })
+  assert.equal(listRunCards(db, run.id).find((row) => row.cardId === card.id)!.status, 'booked')
+
+  // карточку в работе снимать по-прежнему нельзя
+  const { db: other } = board(t)
+  seedExecutor(other, { id: 'developer', skills: ['dev'] })
+  const busy = task(other, { position: 1 })
+  editCard(other, { id: busy.id, actor: 'owner', patch: { needsMerge: false } })
+  startRun(other, { executorId: 'developer', cardIds: [busy.id], actor: 'developer' })
+  takeCard(other, { id: busy.id, actor: 'developer', root: '' })
+  assert.throws(
+    () => dropFromRun(other, { executorId: 'developer', cardId: busy.id, actor: 'developer' }),
+    /в работе/,
+  )
+})
