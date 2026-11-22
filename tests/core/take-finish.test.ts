@@ -303,3 +303,27 @@ test('finish отказывает, если общий worktree не на вет
   assert.equal(getCard(db, cardId)!.branch, branch)
   assert.equal(runGit(root, ['rev-parse', 'dev']), devHead, 'dev не сдвинулся')
 })
+
+test('take запроса: shaping, затем promotion с веткой', (t) => {
+  const { root, db } = repoBoard(t)
+  const req = seedCard(db, { phase: 'request', status: 'new', tags: ['new'] })
+  const run = startRun(db, { executorId: 'developer', cardIds: [req.id], actor: 'developer' })
+
+  const shaped = takeCard(db, { id: req.id, actor: 'developer', root })
+  assert.equal(shaped.status, 'shaping')
+  assert.equal(shaped.runId, run.id)
+
+  editCard(db, {
+    id: req.id,
+    actor: 'developer',
+    patch: { body: 'spec', acceptance: ['ok'], scope: ['src/**'] },
+  })
+  editCard(db, { id: req.id, actor: 'owner', patch: { importance: 2, urgency: 2 } })
+
+  const promoted = takeCard(db, { id: req.id, actor: 'developer', root })
+  assert.equal(promoted.phase, 'task')
+  assert.equal(promoted.status, 'in_progress')
+  assert.equal(promoted.runId, run.id)
+  assert.ok(promoted.branch)
+  assert.equal(listRunCards(db, run.id)[0].status, 'in_progress')
+})
