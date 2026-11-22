@@ -15,6 +15,8 @@ const HELP = `board — доска карточек для людей и аге�
   init [каталог] [--yes] [--refresh]
                           создать .board/board.db и docs/board/; --refresh
                           перезаписывает сгенерированные .opencode-файлы
+  upgrade <ref>|--latest [--allow-downgrade]
+                          переключить tools/board на другую версию
   setup                   мастер настроек: --show, --review-after-run,
                           --no-review-after-run
 

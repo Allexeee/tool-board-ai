@@ -115,6 +115,16 @@ export function currentBoardVersion(root: string): string | null {
   }
 }
 
+/** URL submodule из .gitmodules: нужен для `upgrade --latest`. */
+export function boardSubmoduleSource(root: string): string | null {
+  const modules = join(root, '.gitmodules')
+  if (!existsSync(modules)) return null
+  const text = readFileSync(modules, 'utf8')
+  const section = text.match(/\[submodule "tools\/board"\]([\s\S]*?)(?=\n\[|$)/)
+  const url = section?.[1].match(/^\s*url\s*=\s*(.+)$/m)
+  return url?.[1]?.trim() ?? null
+}
+
 export function boardSubmoduleState(root: string): BoardSubmoduleState {
   const dir = join(root, BOARD_SUBMODULE)
   const modules = join(root, '.gitmodules')

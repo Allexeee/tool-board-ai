@@ -62,7 +62,19 @@ export function makeBoardSource(): { source: string; close: () => void } {
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: work, windowsHide: true })
   mkdirSync(join(work, 'bin'), { recursive: true })
   mkdirSync(join(work, 'src', 'core'), { recursive: true })
-  writeFileSync(join(work, 'bin', 'board.ts'), "console.log('board')\n")
+  const fakeCli = `import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+const args = process.argv.slice(2)
+if (args[0] === 'init') {
+  const file = join(process.cwd(), '.opencode', 'plugins', 'board', 'index.ts')
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, '// board ' + process.env.BOARD_TEST_VERSION + '\\n')
+  console.log(JSON.stringify({ root: process.cwd(), created: ['.opencode/plugins/board/index.ts'], updated: [] }))
+} else {
+  console.log('board')
+}
+`
+  writeFileSync(join(work, 'bin', 'board.ts'), fakeCli)
   writeFileSync(join(work, 'src', 'core', 'now.ts'), 'export const now = true\n')
   writeFileSync(join(work, 'package.json'), JSON.stringify({ name: 'tool-board-ai', version: '1.0.0' }))
 
