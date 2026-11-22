@@ -399,7 +399,15 @@ export function editCard(
         sets.push('skill = ?')
         params.push(skill)
         // Owner-карточки не стоят ни в одной очереди: позиция сбрасывается.
-        if (skill === OWNER_SKILL) sets.push('position = null')
+        if (skill === OWNER_SKILL) {
+          // Owner-карточка — сразу задача владельца: без мержа, ревью и очереди.
+          sets.push('phase = ?')
+          params.push('task')
+          sets.push('status = ?')
+          params.push('ready')
+          sets.push('review_required = 0')
+          sets.push('position = null')
+        }
       }
     }
     if (patch.importance !== undefined) {

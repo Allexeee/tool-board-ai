@@ -264,7 +264,11 @@ test('смена навыка на owner убирает позицию из оч
   assert.ok(getCard(db, card.id)!.position)
 
   editCard(db, { id: card.id, actor: 'owner', patch: { skill: 'owner', needsMerge: false } })
-  assert.equal(getCard(db, card.id)!.position, null)
+  const edited = getCard(db, card.id)!
+  assert.equal(edited.position, null)
+  assert.equal(edited.phase, 'task')
+  assert.equal(edited.status, 'ready')
+  assert.equal(edited.reviewRequired, false)
   assert.equal(listQueue(db, {}, 'request').length, 0)
 })
 
