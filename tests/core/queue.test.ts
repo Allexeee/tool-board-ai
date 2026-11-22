@@ -267,3 +267,23 @@ test('смена навыка на owner убирает позицию из оч
   assert.equal(getCard(db, card.id)!.position, null)
   assert.equal(listQueue(db, {}, 'request').length, 0)
 })
+
+test('queue reorder нумерует запросы без позиции и идемпотентен', (t) => {
+  const { db } = board(t)
+  const low = task(db, { phase: 'request', status: 'new', importance: 1, urgency: 1 })
+  const high = task(db, { phase: 'request', status: 'new', importance: 3, urgency: 3 })
+  const mid = task(db, { phase: 'request', status: 'new', importance: 2, urgency: 2 })
+  assert.equal(getCard(db, high.id)!.position, null)
+
+  reorderQueue(db)
+  const queue = listQueue(db, {}, 'request')
+  assert.deepEqual(queue.map((card) => card.id), [high.id, mid.id, low.id])
+  assert.deepEqual(queue.map((card) => card.position), [1, 2, 3])
+
+  reorderQueue(db)
+  assert.deepEqual(listQueue(db, {}, 'request').map((card) => card.id), [high.id, mid.id, low.id])
+
+  const approval = task(db, { phase: 'task', status: 'approval' })
+  reorderQueue(db)
+  assert.equal(getCard(db, approval.id)!.position, null)
+})
