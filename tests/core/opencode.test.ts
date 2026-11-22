@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeOpenCodeFiles, writeReviewerAgent } from '../../src/core/opencode.ts'
+import { writeOpenCodeFiles, writeReviewerAgent, reviewerAgentSource } from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
 import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
@@ -219,6 +219,8 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-spec'), /reviewRequired/)
   assert.match(read('board-run'), /не больше 3/)
   assert.match(read('board-run'), /только части только что разобранной/)
+  assert.match(read('board-run'), /Пакет и проход ревью/)
+  assert.match(read('board-run'), /7 находок/)
   assert.match(read('board-work'), /Разобрал/)
   assert.match(read('board-work'), /Приступаю/)
 })
@@ -285,4 +287,11 @@ test('card схема принимает verdict для spec-review', () => {
   const end = plugin.indexOf("name: 'run'", start)
   assert.ok(start > 0 && end > start)
   assert.match(plugin.slice(start, end), /verdict: \{ type: 'string' \}/)
+})
+
+test('ревьюер не создаёт карточки и пишет итоги в run note', () => {
+  const source = reviewerAgentSource('acme/main')
+  assert.match(source, /не создавай карточки/i)
+  assert.match(source, /board run note/)
+  assert.match(source, /7 находок/)
 })
