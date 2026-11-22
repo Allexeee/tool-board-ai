@@ -189,6 +189,27 @@ test('плагин поднимается из .worktrees в корень', () =
   assert.match(plugin, /dirname\(dirname\(dir\)\)/)
 })
 
+test('разговор у brainstorming, исполнение Native: skill и AGENTS без правил разговора', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const skill = readFileSync(join(root, '.opencode', 'skills', 'board', 'SKILL.md'), 'utf8')
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+
+  for (const text of [skill, agents]) {
+    assert.match(text, /brainstorming/i)
+    assert.match(text, /docs\/superpowers/)
+    assert.match(text, /Native/)
+    assert.doesNotMatch(text, /subagent-driven|subagent driven/i)
+  }
+
+  assert.match(skill, /spec и критерии приёмки идут в карточку/)
+  assert.match(skill, /отдельного plan-файла нет/)
+  assert.match(skill, /асинхронный вопрос/)
+  assert.match(skill, /только если без ответа нельзя продолжать/)
+  assert.match(agents, /асинхронный вопрос/)
+  assert.match(agents, /без субагентов-исполнителей/)
+})
+
 test('card схема принимает verdict для spec-review', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
