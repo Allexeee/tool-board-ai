@@ -2,13 +2,16 @@
 import { initProject } from '../../core/project.ts'
 import { ensureSettings, type BoardSettings } from '../../core/settings.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
-import { boolFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok, isJsonMode } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const dir = args.positionals[0] ?? process.cwd()
-  const { created, updated, root } = initProject(dir, {
+  const { created, updated, root, boardVersion } = initProject(dir, {
     refresh: boolFlag(args, 'refresh'),
+    boardVersion: stringFlag(args, 'board-version'),
+    boardSource: stringFlag(args, 'board-source'),
+    allowDowngrade: boolFlag(args, 'allow-downgrade'),
   })
 
   let settings: BoardSettings = ensureSettings(root).settings
@@ -39,6 +42,7 @@ export default async function command(args: ParsedArgs) {
     'Ревью spec: ' + settings.specReview.mode,
     'Ревью в конце забега: ' + settings.runReview.mode,
     'Модель ревьюера: ' + (settings.reviewer.model ?? 'не задана'),
+    'Версия board: ' + (boardVersion ?? 'локальная'),
   )
   if (settings.setupAt === null) {
     lines.push('Мастер настроек: запустите board setup (или /setup в OpenCode)')
@@ -46,6 +50,6 @@ export default async function command(args: ParsedArgs) {
   lines.push('', 'Проект: ' + root)
 
   const setupRequired = settings.setupAt === null
-  ok({ root, created, updated, settings, setupRequired }, lines.join('\n'))
+  ok({ root, created, updated, boardVersion, settings, setupRequired }, lines.join('\n'))
   return 0
 }

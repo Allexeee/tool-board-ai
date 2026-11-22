@@ -21,7 +21,7 @@ export const AGENTS_BLOCK = [
   AGENTS_BEGIN,
   '## board',
   '',
-  'Доска карточек: `board` (если CLI в PATH); в плагине OpenCode — `BOARD_CLI`.',
+  'Доска карточек: локальный `tools/board/bin/board.ts`; `BOARD_CLI` — только отладочный override.',
   '',
   '- Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.',
   '- Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.',
@@ -133,16 +133,32 @@ const run = promisify(execFile)
 // Внутри OpenCode process.execPath — сам opencode, а не node.
 const nodeBin = /node(\\.exe)?$/i.test(process.execPath) ? process.execPath : 'node'
 
+function projectRoot(ctx) {
+  const canonical = ctx.location && ctx.location.project && ctx.location.project.canonical
+  if (canonical) return canonical
+  let dir = ctx.location.directory
+  for (;;) {
+    if (existsSync(join(dir, '.board')) || existsSync(join(dir, '.git'))) return dir
+    const parent = join(dir, '..')
+    if (parent === dir) return dir
+    dir = parent
+  }
+}
+
 function resolveCli(ctx) {
-  const override = process.env.BOARD_CLI
-  const local = join(ctx.location.directory, 'bin', 'board.ts')
-  if (override) return { file: nodeBin, args: [override] }
-  if (existsSync(local)) return { file: nodeBin, args: [local] }
-  return { file: 'board', args: [] }
+  const root = projectRoot(ctx)
+  const local = [
+    join(root, 'tools', 'board', 'bin', 'board.ts'),
+    join(root, 'bin', 'board.ts'),
+  ].find((file) => existsSync(file))
+  if (local) return { file: nodeBin, args: [local] }
+  if (process.env.BOARD_CLI) return { file: nodeBin, args: [process.env.BOARD_CLI] }
+  return { file: null, args: [], error: 'board не установлен: выполните board init' }
 }
 
 async function call(ctx, args, context) {
-  const { file, args: prefix } = resolveCli(ctx)
+  const { file, args: prefix, error } = resolveCli(ctx)
+  if (!file) return { content: error, isError: true }
   let env = process.env
   try {
     const session = await ctx.session.get({ sessionID: context.sessionID })
@@ -163,7 +179,7 @@ async function call(ctx, args, context) {
     return { content: stdout.trim() || '{}' }
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return { content: 'CLI board не найден. Укажите BOARD_CLI или положите bin/board.ts', isError: true }
+      return { content: 'CLI board не найден: выполните board init', isError: true }
     }
     return {
       content: error.stdout?.trim() || error.stderr?.trim() || error.message,

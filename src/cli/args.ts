@@ -22,14 +22,14 @@ const KNOWN_FLAGS = new Set([
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
-  'large-spec', 'run-review',
+  'large-spec', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
 ])
 
 const BOOLEAN_FLAGS = new Set([
   'json', 'help', 'version', 'needs-merge', 'no-needs-merge', 'review', 'no-review',
   'waive-dependents', 'done', 'reopen', 'top', 'bottom', 'mine', 'all', 'block',
   'force', 'fresh', 'no-merge', 'yes', 'show', 'refresh', 'review-after-run',
-  'no-review-after-run',
+  'no-review-after-run', 'allow-downgrade',
 ])
 
 export type FlagValue = string | boolean | string[]

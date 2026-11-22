@@ -45,6 +45,18 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   assert.match(plugin, /error\.stdout\?\.trim\(\)\s*\|\|\s*error\.stderr\?\.trim\(\)\s*\|\|\s*error\.message/)
 })
 
+test('плагин ищет tools/board раньше BOARD_CLI и не зовёт глобальный board', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  const local = plugin.indexOf("'tools', 'board'")
+  const override = plugin.indexOf('process.env.BOARD_CLI')
+  assert.ok(local > 0)
+  assert.ok(local < override)
+  assert.doesNotMatch(plugin, /file: 'board'/)
+  assert.match(plugin, /board не установлен/)
+})
+
 test('команда ревью упоминает review list и review submit', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
