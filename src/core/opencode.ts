@@ -1,4 +1,4 @@
-﻿import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+﻿import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
   effectiveReviewerModel,
@@ -780,12 +780,13 @@ export function writeOpenCodeFiles(
     ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
   ]
 
-  // Старый единый навык: удаляем, иначе у агента два описания доски.
+  // Старый единый навык: удаляем только при refresh, иначе init не должен
+  // трогать уже установленные файлы.
   const legacySkill = join(root, '.opencode', 'skills', 'board', 'SKILL.md')
-  if (existsSync(legacySkill)) {
+  if (options.refresh && existsSync(legacySkill)) {
     rmSync(legacySkill)
     try {
-      rmSync(dirname(legacySkill))
+      rmdirSync(dirname(legacySkill))
     } catch {
       // в каталоге остались чужие файлы — не трогаем
     }
