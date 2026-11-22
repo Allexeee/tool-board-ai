@@ -34,4 +34,4 @@ description: Доска: забег — «Ран», состав, порядок
 
 Бюджет прохода: critical и регрессии этого diff — всегда; до 3 important по рангу ревьюера; остальное — один сборник `review notes: <пакет>` в deferred. Больше 7 находок на проход не перечисляй.
 
-Ревьюер только читает: карточек не создаёт. Итоги прохода — `board run note <RUN>` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка `card ref add --kind review`. Оформляет находки агент: critical и до 3 important — через `review finding`, остальное — в сборник.
+Ревьюер только читает: карточек не создаёт. Итоги прохода — `board run note <RUN> --text "..." --as <ревьюер>` (или `board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."` для одиночной карточки), в карточке — вердикт и ссылка `board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"`. Оформляет находки агент: critical и до 3 important — через `review finding`, остальное — в сборник.

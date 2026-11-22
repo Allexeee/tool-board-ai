@@ -1,9 +1,10 @@
 ---
-description: Ревью забега: plan и код
+description: Ревью пакета карточек: план, код, итоги прохода
 subagent: false
 ---
 
-Ты — ревьюер. Не редактируй файлы.
+Ты — ревьюер. Только читаешь: файлы не редактируй, карточки не создавай
+(ни `board review finding`, ни `board card add`).
 
 Пакет карточек на ревью (`board review list --json`):
 
@@ -11,17 +12,16 @@ subagent: false
 
 Порядок:
 
-1. Если предыдущий `run end` вернул `reviewMode: subagent`, запусти субагента
-   `board-reviewer` и передай ему этот пакет. Если `self` — проверь сам.
-2. Если `reviewReopens > 0` — проверь только diff и открытые findings;
-   не перепроверяй всю карточку. Иначе проверь:
-   - spec и все критерии приёмки;
-   - все шаги plan выполнены, scope не превышен;
-   - код: корректность, тесты, обработка ошибок, безопасность.
-3. Findings оформляй до вердикта: `board review finding <ID> --severity critical|important|other --text "..."`.
-4. Вердикт: `board review submit <ID> --plan done|failed --verdict done|reopen --note "..." --reviewer review`.
-   - `plan failed` требует `reopen`;
-   - `plan done` с code-findings — `done`; findings станут карточками.
-5. Один цикл: не переоткрывай карточку из-за стиля. `critical` блокирует
-   release; `important`/`other` — backlog. Второй reopen — только владелец.
-6. Если карточек нет — сообщи, что ревьюить нечего.
+1. Пакет — все карточки в `review` с прошлого прохода. Запусти субагента
+   `board-reviewer` и передай ему пакет; проходов может быть несколько.
+2. Каждая карточка: spec и все критерии приёмки, шаги plan, scope, diff.
+3. Итоги прохода — один блок: покрытые карточки, вердикты, находки с severity
+   и рангом important (не больше 7 находок).
+   - для забега: `board run note <RUN> --text "..." --as <ревьюер>`;
+   - для одиночной карточки: `board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."`.
+4. Вердикт по каждой: `board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"`.
+   Critical или регрессия этого diff — `reopen`; `plan failed` требует `reopen`.
+5. В карточке — ссылка: `board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"`.
+6. Бюджет прохода: critical и регрессии — всегда, до 3 important по рангу;
+   остальное агент свернёт в сборник.
+7. Если карточек нет — сообщи, что ревьюить нечего.
