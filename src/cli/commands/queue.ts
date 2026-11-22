@@ -33,7 +33,16 @@ export default async function command(args: ParsedArgs) {
   const reorder = (): number => {
     reorderQueue(db)
     const cards = listQueue(db)
-    ok(cards, [`очередь пересобрана: ${cards.length}`, ...cards.map(formatQueueRow)].join('\n'))
+    const requests = listQueue(db, {}, 'request')
+    ok(
+      [...cards, ...requests],
+      [
+        `очередь пересобрана: ${cards.length}`,
+        ...cards.map(formatQueueRow),
+        `запросы: ${requests.length}`,
+        ...requests.map(formatQueueRow),
+      ].join('\n'),
+    )
     return 0
   }
 

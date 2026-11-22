@@ -164,3 +164,13 @@ test('card add с оценками ставит запрос по приорит
   assert.equal(lowAfter.position, 1)
   assert.equal(highAfter.position, 2)
 })
+
+test('queue reorder печатает и запросы', (t) => {
+  const dir = project(t)
+  json(dir, ['card', 'add', '--group', 'UI', '--title', 'Запрос', '--skill', 'dev', '--importance', '2', '--urgency', '2'])
+
+  const out = run(dir, ['queue', 'reorder'])
+  assert.equal(out.code, 0, out.err)
+  assert.match(out.out, /запросы: 1/)
+  assert.match(out.out, /UI-1/)
+})
