@@ -933,24 +933,38 @@ board setup --spec-review <mode> --max-spec <n> --large-spec <n> --run-review <m
 `
 
 export function reviewerAgentSource(model: string): string {
+  const shellAllow = [
+    'git diff*',
+    'git log*',
+    'git show*',
+    'git rev-parse*',
+    'git merge-base*',
+    'board review list*',
+    'board card show*',
+    'board run list*',
+    'board run note*',
+    'board review submit*',
+    'board card ref add*',
+  ]
+  const permissions = [
+    '  - action: edit\n    resource: "*"\n    effect: deny',
+    '  - action: read\n    resource: "*"\n    effect: allow',
+    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
+    '  - action: shell\n    resource: "*"\n    effect: deny',
+  ].join('\n')
+
   return `---
 description: Read-only reviewer for spec, plan and code
 mode: subagent
 model: ${model}
 permissions:
-  - action: edit
-    resource: "*"
-    effect: deny
-  - action: read
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "*"
-    effect: allow
+${permissions}
 ---
 
 Ты — свежий ревьюер. Не редактируй файлы и не создавай карточки:
-ни \`board review finding\`, ни \`board card add\`.
+ни \`board review finding\`, ни \`board card add\` — это отклоняется правами, а не просьбой.
+
+Тесты не гоняй: их прогнал исполнитель, полный suite идёт перед релизом, CI — после push. Твой инструмент — чтение файлов и \`git diff\`.
 
 Проверяй acceptance, plan и код. Итоги прохода пиши одним блоком:
 - для забега — \`board run note <RUN> --text "..." --as <твой id>\`;

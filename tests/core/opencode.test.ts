@@ -270,6 +270,21 @@ test('плагин объявляет tool-ы touch, doctor, backup, release, qu
   assert.match(plugin, /input\.as !== 'owner'/)
 })
 
+test('ревьюер: shell только read-only, мутации отклонены', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root, {
+    settings: { ...DEFAULT_SETTINGS, reviewer: { model: 'acme/reviewer' } },
+  })
+  const agent = readFileSync(join(root, '.opencode', 'agents', 'board-reviewer.md'), 'utf8')
+
+  assert.match(agent, /resource: "git diff\*"/)
+  assert.match(agent, /resource: "board review list\*"/)
+  assert.match(agent, /resource: "board run note\*"/)
+  assert.doesNotMatch(agent, /- action: shell\n {4}resource: "\*"\n {4}effect: allow/)
+  assert.match(agent, /Тесты не гоняй/)
+  assert.match(agent, /это отклоняется правами/)
+})
+
 test('reviewer agent берёт effective-модель сессии, если настройка пуста', () => {
   const root = tmp()
   writeOpenCodeFiles(root, {
