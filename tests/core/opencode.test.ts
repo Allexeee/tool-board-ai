@@ -203,6 +203,57 @@ test('плагин собирает аргументы run note, очереди 
     'export', '--format', 'md',
   ])
   assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'backup' }), ['backup'])
+  assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'backup', out: 'C:/x.db' }), [
+    'backup', 'C:/x.db',
+  ])
+})
+
+test('плагин передаёт в card add приоритеты, scope, теги и note', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const args = buildArgs(pluginSource(root), 'cardArgs')({
+    action: 'add',
+    group: 'UI',
+    title: 't',
+    spec: 's',
+    acceptance: ['a'],
+    tags: ['new'],
+    importance: 2,
+    urgency: 3,
+    scope: ['src/**'],
+    needs_merge: false,
+    review: true,
+    note: 'n',
+    skill: 'dev',
+    as: 'owner',
+  })
+
+  for (const pair of [
+    ['--tag', 'new'],
+    ['--importance', '2'],
+    ['--urgency', '3'],
+    ['--scope', 'src/**'],
+    ['--no-needs-merge', null],
+    ['--review', null],
+    ['--note', 'n'],
+  ]) {
+    if (pair[1] === null) {
+      assert.ok(args.includes(pair[0]), pair[0])
+    } else {
+      assert.equal(args[args.indexOf(pair[0]) + 1], pair[1], pair[0])
+    }
+  }
+})
+
+test('плагин: sub обязателен, run list компактен, код 1/2 не ошибка', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const source = pluginSource(root)
+
+  assert.match(source, /нужен sub: add\|done\|remove\|list/)
+  assert.match(source, /runRow/)
+  assert.match(source, /status >= 3/)
+  assert.match(source, /'touch'.*\[.id., .as.\]|schema\(\{ id: \{ type: 'string' \}, as: \{ type: 'string' \} \}, \['id', 'as'\]\)/)
 })
 
 test('плагин объявляет tool-ы touch, doctor, backup, release, queue', () => {
