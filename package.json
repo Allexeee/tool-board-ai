@@ -1,6 +1,6 @@
 {
   "name": "tool-board-ai",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "private": true,
   "description": "Доска карточек для владельца и ИИ-агентов",
   "type": "module",
