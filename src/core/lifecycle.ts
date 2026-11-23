@@ -1047,118 +1047,144 @@ export interface FinishInput {
  * `dev` без fast-forward; конфликт останавливает команду. `--no-merge` не
  * мержит, но требует чистый worktree, scope и merge-коммит в `dev`.
  */
-export function finishCard(db: DatabaseSync, input: FinishInput): Card {
-  return tx(db, () => {
-    const card = requireCard(db, input.id)
-    const actor = requireActor(input.actor)
-    const summary = requireSummary(input.summary)
+interface FinishPlan {
+  card: Card
+  actor: string
+  summary: string
+  mergeCommit: string | null
+  inDev: boolean
+}
 
-    if (card.holder !== actor) {
+/**
+ * Валидация и git-часть finish — вне транзакции: merge может идти секунды,
+ * и держать на нём блокировку базы нельзя.
+ */
+function prepareFinish(db: DatabaseSync, input: FinishInput): FinishPlan {
+  const card = requireCard(db, input.id)
+  const actor = requireActor(input.actor)
+  const summary = requireSummary(input.summary)
+
+  if (card.holder !== actor) {
+    throw new UserError(
+      3,
+      `карточку ${card.id} может закрыть только держатель (сейчас: ${card.holder ?? '—'})`,
+    )
+  }
+  if (card.status !== 'in_progress') {
+    throw new UserError(3, `карточка ${card.id} не в работе: ${card.status}`)
+  }
+  // Переоткрытая зависимость не даёт сдать работу, пока не вернётся в review/done.
+  const unmet = listDeps(db, card.id).filter((dep) => !isSatisfied(db, dep))
+  if (unmet.length > 0) {
+    throw new UserError(
+      3,
+      `зависимость ${unmet.join(', ')} карточки ${card.id} не закрыта: finish невозможен`,
+    )
+  }
+  if (input.noMerge && !card.needsMerge) {
+    throw new UserError(3, `--no-merge применим только к needs_merge=true (карточка ${card.id})`)
+  }
+
+  let mergeCommit: string | null = null
+  let inDev = false
+
+  if (card.needsMerge) {
+    if (!card.branch) {
+      throw new UserError(3, `у карточки ${card.id} нет ветки: сначала board take`)
+    }
+    const worktree = ensureWorktree(input.root, actor)
+    const checkedOut = currentBranch(worktree)
+    if (checkedOut !== card.branch) {
       throw new UserError(
         3,
-        `карточку ${card.id} может закрыть только держатель (сейчас: ${card.holder ?? '—'})`,
+        `рабочее дерево ${worktree} на ветке ${checkedOut ?? 'без ветки'}, а карточка ${card.id} — на ${card.branch}: сначала board take`,
       )
     }
-    if (card.status !== 'in_progress') {
-      throw new UserError(3, `карточка ${card.id} не в работе: ${card.status}`)
-    }
-    // Переоткрытая зависимость не даёт сдать работу, пока не вернётся в review/done.
-    const unmet = listDeps(db, card.id).filter((dep) => !isSatisfied(db, dep))
-    if (unmet.length > 0) {
+    if (runGit(worktree, ['status', '--porcelain']) !== '') {
       throw new UserError(
         3,
-        `зависимость ${unmet.join(', ')} карточки ${card.id} не закрыта: finish невозможен`,
+        `рабочее дерево ${worktree} грязное: сначала закоммитьте или откатите изменения`,
       )
     }
-    if (input.noMerge && !card.needsMerge) {
-      throw new UserError(3, `--no-merge применим только к needs_merge=true (карточка ${card.id})`)
-    }
 
-    let mergeCommit: string | null = null
-    let inDev = false
-
-    if (card.needsMerge) {
-      if (!card.branch) {
-        throw new UserError(3, `у карточки ${card.id} нет ветки: сначала board take`)
+    if (input.noMerge) {
+      const out = outOfScope(input.root, card.branch, card.scope)
+      if (out.length > 0) {
+        throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
       }
-      const worktree = ensureWorktree(input.root, actor)
-      const checkedOut = currentBranch(worktree)
-      if (checkedOut !== card.branch) {
+      mergeCommit = input.mergeCommit ?? mergeCommitFor(input.root, card.branch)
+      if (!mergeCommit) {
+        throw new UserError(3, `merge-коммит ветки ${card.branch} не найден в dev`)
+      }
+      inDev = isAncestor(input.root, mergeCommit, 'dev')
+      if (!inDev) {
+        throw new UserError(3, `коммит ${mergeCommit} не является предком dev`)
+      }
+    } else {
+      // Ветка целиком в dev: повтор после падения между git и БД — не мержим снова.
+      // Сверяем кончик ветки, а не только записанный merge: после reopen в ветке
+      // могут быть новые коммиты, и их надо влить.
+      const tip = runGit(input.root, ['rev-parse', card.branch])
+      if (isAncestor(input.root, tip, 'dev')) {
+        mergeCommit = mergeCommitFor(input.root, card.branch) ?? card.mergeCommit
+        inDev = true
+      } else if (card.mergeCommit !== null && !isAncestor(input.root, card.mergeCommit, 'dev')) {
         throw new UserError(
-          3,
-          `рабочее дерево ${worktree} на ветке ${checkedOut ?? 'без ветки'}, а карточка ${card.id} — на ${card.branch}: сначала board take`,
+          2,
+          `рассинхрон git и БД: merge-коммит ${card.mergeCommit} карточки ${card.id} не предок dev; проверьте board doctor`,
         )
-      }
-      if (runGit(worktree, ['status', '--porcelain']) !== '') {
-        throw new UserError(
-          3,
-          `рабочее дерево ${worktree} грязное: сначала закоммитьте или откатите изменения`,
-        )
-      }
-
-      if (input.noMerge) {
+      } else {
+        syncWithDev(input.root, worktree, card.branch)
         const out = outOfScope(input.root, card.branch, card.scope)
         if (out.length > 0) {
           throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
         }
-        mergeCommit = input.mergeCommit ?? mergeCommitFor(input.root, card.branch)
-        if (!mergeCommit) {
-          throw new UserError(3, `merge-коммит ветки ${card.branch} не найден в dev`)
-        }
+        mergeCommit = mergeToDev(input.root, card.branch, `merge ${card.id}: ${summary}`)
         inDev = isAncestor(input.root, mergeCommit, 'dev')
-        if (!inDev) {
-          throw new UserError(3, `коммит ${mergeCommit} не является предком dev`)
-        }
-      } else {
-        // Ветка целиком в dev: повтор после падения между git и БД — не мержим снова.
-        // Сверяем кончик ветки, а не только записанный merge: после reopen в ветке
-        // могут быть новые коммиты, и их надо влить.
-        const tip = runGit(input.root, ['rev-parse', card.branch])
-        if (isAncestor(input.root, tip, 'dev')) {
-          mergeCommit = mergeCommitFor(input.root, card.branch) ?? card.mergeCommit
-          inDev = true
-        } else if (card.mergeCommit !== null && !isAncestor(input.root, card.mergeCommit, 'dev')) {
-          throw new UserError(
-            2,
-            `рассинхрон git и БД: merge-коммит ${card.mergeCommit} карточки ${card.id} не предок dev; проверьте board doctor`,
-          )
-        } else {
-          syncWithDev(input.root, worktree, card.branch)
-          const out = outOfScope(input.root, card.branch, card.scope)
-          if (out.length > 0) {
-            throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
-          }
-          mergeCommit = mergeToDev(input.root, card.branch, `merge ${card.id}: ${summary}`)
-          inDev = isAncestor(input.root, mergeCommit, 'dev')
-        }
       }
     }
+  }
 
-    const status = card.reviewRequired || input.forceReview === true ? 'review' : 'done'
+  return { card, actor, summary, mergeCommit, inDev }
+}
+
+export function finishCard(db: DatabaseSync, input: FinishInput): Card {
+  const plan = prepareFinish(db, input)
+
+  return tx(db, () => {
+    const current = requireCard(db, input.id)
+    if (current.status !== 'in_progress' || current.holder !== plan.actor) {
+      throw new UserError(
+        3,
+        `карточка ${input.id} изменилась за время finish: ${current.status}`,
+      )
+    }
+
+    const status = current.reviewRequired || input.forceReview === true ? 'review' : 'done'
     const at = nowIso()
     db.prepare(
       `update cards set status = ?, summary = ?, done_at = ?, merge_commit = ?, in_dev = ?, in_main = 0,
        updated_at = ? where id = ?`,
-    ).run(status, summary, status === 'done' ? at : null, mergeCommit, inDev ? 1 : 0, at, card.id)
+    ).run(status, plan.summary, status === 'done' ? at : null, plan.mergeCommit, plan.inDev ? 1 : 0, at, current.id)
 
-    if (card.runId) {
+    if (current.runId) {
       db.prepare('update run_cards set status = ? where run_id = ? and card_id = ?').run(
         status,
-        card.runId,
-        card.id,
+        current.runId,
+        current.id,
       )
     }
 
     refreshReadiness(db)
 
-    const updated = getCard(db, card.id)!
+    const updated = getCard(db, current.id)!
     appendEvent(db, {
       type: 'card.finished',
-      actor,
-      subject: card.id,
-      before: card,
+      actor: plan.actor,
+      subject: current.id,
+      before: plan.card,
       after: updated,
-      note: summary,
+      note: plan.summary,
     })
     return updated
   })
