@@ -102,6 +102,8 @@ export interface Card {
   position: number | null
   needsMerge: boolean
   reviewRequired: boolean
+  /** Осознанно без плана: маленькая задача, шаги не нужны. */
+  planWaived: boolean
   scope: string[]
   tags: string[]
   severity: Severity | null

@@ -9,8 +9,8 @@ function columns(db: DatabaseSync, table: string): string[] {
 
 test('новый файл получает схему v3 с полями spec/review и tags', () => {
   const db = new DatabaseSync(':memory:')
-  assert.equal(migrate(db), 4)
-  assert.equal(SCHEMA_VERSION, 4)
+  assert.equal(migrate(db), 5)
+  assert.equal(SCHEMA_VERSION, 5)
   assert.ok(columns(db, 'cards').includes('acceptance'))
   assert.ok(columns(db, 'cards').includes('spec_rev'))
   assert.ok(columns(db, 'cards').includes('review_reopens'))
@@ -33,8 +33,8 @@ test('база v1 мигрирует без потери карточки', () =
     insert into cards values ('UI-1', 'spec', 'ready');
     insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'review', 'done', '2026-01-01');`)
 
-  assert.equal(migrate(db), 4)
-  assert.equal(schemaVersionOf(db), 4)
+  assert.equal(migrate(db), 5)
+  assert.equal(schemaVersionOf(db), 5)
   assert.equal((db.prepare('select count(*) as n from cards').get() as { n: number }).n, 1)
   assert.equal(columns(db, 'cards').includes('spec_rev'), true)
   assert.equal(columns(db, 'cards').includes('tags'), true)
@@ -48,7 +48,7 @@ test('база v2 мигрирует tags и помечает находки rev
     insert into cards values ('UI-1', 'UI-9');
     insert into cards values ('UI-2', null);`)
 
-  assert.equal(migrate(db), 4)
+  assert.equal(migrate(db), 5)
   const rows = db.prepare('select id, tags from cards order by id').all() as Array<{
     id: string
     tags: string
