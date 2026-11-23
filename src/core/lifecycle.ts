@@ -20,7 +20,7 @@ import {
   startCardBranch,
   syncWithDev,
 } from './git.ts'
-import { insertIntoQueue, moveCard } from './queue.ts'
+import { insertIntoQueue, moveCard, reorderQueue } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
 import { getActiveRun, listRunCards, requireStandaloneCard, RUN_LEASE_MS } from './runs.ts'
@@ -488,6 +488,9 @@ export function deferCard(
       `update cards set status = 'deferred', holder = null, run_id = null, lease_until = null,
        position = null, updated_at = ? where id = ?`,
     ).run(nowIso(), card.id)
+
+    // Отложенная карточка выпадает из очереди — дыр в позициях не оставляем.
+    reorderQueue(db)
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {
