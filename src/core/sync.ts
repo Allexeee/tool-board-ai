@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
 import { runGit } from './git.ts'
@@ -68,6 +68,8 @@ export function syncPull(root: string, dbPath: string, remote: string | null): {
     backup = `${dbPath}.pre-pull-${Date.now()}`
     copyFileSync(dbPath, backup)
   }
+  // Старый WAL от прежней базы не должен примениться к новой.
+  for (const suffix of ['-wal', '-shm']) rmSync(dbPath + suffix, { force: true })
   copyFileSync(join(dir, SYNC_DB), dbPath)
   return { backup }
 }
