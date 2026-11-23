@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedCard, seedExecutor, seedRun } from '../helpers/board.ts'
@@ -32,6 +32,27 @@ test('doctorData: чистая доска без ошибок и предупр�
     const data = doctorData(board.db, board.root)
     assert.deepEqual(data.errors, [])
     assert.deepEqual(data.warnings, [])
+  } finally {
+    board.close()
+  }
+})
+
+test('doctorData: советует superpowers, когда его нет в конфиге', () => {
+  const board = makeBoardRepo()
+  try {
+    const without = doctorData(board.db, board.root)
+    assert.ok(
+      without.recommendations.some((item) => item.includes('superpowers')),
+      without.recommendations.join(' | '),
+    )
+
+    mkdirSync(join(board.root, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(board.root, '.opencode', 'opencode.json'),
+      JSON.stringify({ plugins: ['superpowers'] }),
+      'utf8',
+    )
+    assert.deepEqual(doctorData(board.db, board.root).recommendations, [])
   } finally {
     board.close()
   }
