@@ -16,6 +16,7 @@ import type {
   Run,
   RunCard,
   RunCardStatus,
+  RunNote,
   RunSuggestion,
 } from './types.ts'
 
@@ -106,7 +107,33 @@ export function listRuns(db: DatabaseSync): Run[] {
   const rows = db
     .prepare('select * from runs order by created_at, id')
     .all() as unknown as RunRow[]
-  return rows.map(toRun)
+
+  const notes = db
+    .prepare('select * from run_notes order by run_id, id')
+    .all() as unknown as Array<{ id: number; run_id: string; actor: string; text: string; at: string }>
+
+  const byRun = new Map<string, RunNote[]>()
+  for (const note of notes) {
+    const list = byRun.get(note.run_id) ?? []
+    list.push({ id: note.id, runId: note.run_id, actor: note.actor, text: note.text, at: note.at })
+    byRun.set(note.run_id, list)
+  }
+
+  return rows.map((row) => ({ ...toRun(row), notes: byRun.get(row.id) ?? [] }))
+}
+
+/** История проходов ревью по одному забегу, по порядку. */
+export function listRunNotes(db: DatabaseSync, runId: string): RunNote[] {
+  const rows = db
+    .prepare('select * from run_notes where run_id = ? order by id')
+    .all(runId) as unknown as Array<{ id: number; run_id: string; actor: string; text: string; at: string }>
+  return rows.map((row) => ({
+    id: row.id,
+    runId: row.run_id,
+    actor: row.actor,
+    text: row.text,
+    at: row.at,
+  }))
 }
 
 export function getActiveRun(db: DatabaseSync, executorId: string): Run | null {
@@ -876,8 +903,8 @@ export function endRun(
 }
 
 /**
- * Итоги прохода ревью: один блок текста в `runs.note`. Пишет ревьюер;
- * карточки при этом не создаются — в них остаётся вердикт и ссылка.
+ * Итоги прохода ревью: запись в append-only `run_notes`; `runs.note` хранит
+ * последний текст для совместимости. Пишет ревьюер; карточки не создаются.
  */
 export function noteRun(
   db: DatabaseSync,
@@ -890,6 +917,12 @@ export function noteRun(
     const text = input.text.trim()
     if (!text) throw new UserError(3, 'нужен текст итогов: --text «...»')
 
+    db.prepare('insert into run_notes (run_id, actor, text, at) values (?, ?, ?, ?)').run(
+      run.id,
+      actor,
+      text,
+      nowIso(),
+    )
     db.prepare('update runs set note = ? where id = ?').run(text, run.id)
     const updated = getRun(db, run.id)!
 

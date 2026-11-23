@@ -11,8 +11,10 @@ import {
   getActiveRun,
   getRun,
   listRunCards,
+  listRunNotes,
   listRuns,
   nextCard,
+  noteRun,
   reclaimExpired,
   releaseRun,
   suggestRuns,
@@ -621,6 +623,32 @@ test('reclaimExpired подсказывает touch в событии', (t) => {
   const event = listEvents(db, run.id).at(-1)!
   assert.equal(event.type, 'run.lease_expired')
   assert.match(String(event.note), /touch/)
+})
+
+test('run note копит историю проходов, а не затирает', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = task(db, { position: 1 })
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: [card.id],
+    actor: 'developer',
+  })
+
+  noteRun(db, { runId: run.id, text: 'первый проход', actor: 'reviewer' })
+  noteRun(db, { runId: run.id, text: 'второй проход', actor: 'reviewer' })
+
+  assert.deepEqual(
+    listRunNotes(db, run.id).map((note) => note.text),
+    ['первый проход', 'второй проход'],
+  )
+  assert.equal(getRun(db, run.id)!.note, 'второй проход')
+
+  const listed = listRuns(db).find((item) => item.id === run.id)!
+  assert.deepEqual(
+    listed.notes?.map((note) => note.text),
+    ['первый проход', 'второй проход'],
+  )
 })
 
 test('startRun сохраняет reviewMode забега', (t) => {
