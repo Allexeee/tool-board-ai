@@ -1,5 +1,6 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -96,6 +97,88 @@ test('плагин передаёт модель сессии в CLI', () => {
   assert.match(plugin, /spec-review/)
   assert.match(plugin, /amend/)
   assert.match(plugin, /plan/)
+})
+
+function pluginSource(root: string): string {
+  return readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+}
+
+/** Вырезает функцию из сгенерированного плагина: он не импортируется в тестах. */
+function extractFunction(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`)
+  assert.ok(start >= 0, `нет функции ${name}`)
+  const rest = source.slice(start)
+  const end = rest.search(/\n}\r?\n/)
+  assert.ok(end > 0, `нет конца функции ${name}`)
+  return rest.slice(0, end + 2)
+}
+
+function buildArgs(source: string, name: string): (input: Record<string, unknown>) => string[] {
+  const code = `${extractFunction(source, 'flag')}\n${extractFunction(source, name)}\nreturn ${name}`
+  return new Function(code)() as (input: Record<string, unknown>) => string[]
+}
+
+test('плагин собирает аргументы подкоманд карточки', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const cardArgs = buildArgs(pluginSource(root), 'cardArgs')
+
+  assert.deepEqual(cardArgs({ action: 'step', sub: 'add', id: 'UI-1', text: 'шаг' }), [
+    'card', 'step', 'add', 'UI-1', 'шаг',
+  ])
+  assert.deepEqual(cardArgs({ action: 'step', sub: 'done', id: 'UI-1', index: 2 }), [
+    'card', 'step', 'done', 'UI-1', '2',
+  ])
+  assert.deepEqual(
+    cardArgs({ action: 'ref', sub: 'add', id: 'UI-1', kind: 'doc', value: 'docs/x.md', title: 't' }),
+    ['card', 'ref', 'add', 'UI-1', '--kind', 'doc', '--value', 'docs/x.md', '--title', 't'],
+  )
+  assert.deepEqual(cardArgs({ action: 'dep', sub: 'add', id: 'UI-1', other: 'UI-2' }), [
+    'card', 'dep', 'add', 'UI-1', 'UI-2',
+  ])
+  assert.deepEqual(cardArgs({ action: 'scope', sub: 'add', id: 'UI-1', paths: ['a.ts', 'b.ts'] }), [
+    'card', 'scope', 'add', 'UI-1', 'a.ts', 'b.ts',
+  ])
+  assert.deepEqual(cardArgs({ action: 'defer', id: 'UI-1', note: 'n', as: 'owner' }), [
+    'card', 'defer', 'UI-1', '--note', 'n', '--as', 'owner',
+  ])
+  assert.deepEqual(cardArgs({ action: 'resume', id: 'UI-1', as: 'owner' }), [
+    'card', 'resume', 'UI-1', '--as', 'owner',
+  ])
+})
+
+test('плагин собирает аргументы run note, очереди и бэкапа', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const source = pluginSource(root)
+
+  assert.deepEqual(buildArgs(source, 'runArgs')({ action: 'note', id: 'RUN-1', text: 'итоги', as: 'reviewer' }), [
+    'run', 'note', 'RUN-1', '--text', 'итоги', '--as', 'reviewer',
+  ])
+  assert.deepEqual(buildArgs(source, 'queueArgs')({ action: 'move', id: 'UI-4', before: 'UI-2' }), [
+    'queue', 'move', 'UI-4', '--before', 'UI-2',
+  ])
+  assert.deepEqual(buildArgs(source, 'queueArgs')({ action: 'move', id: 'UI-4', top: true }), [
+    'queue', 'move', 'UI-4', '--top',
+  ])
+  assert.deepEqual(buildArgs(source, 'queueArgs')({ action: 'reorder' }), ['queue', 'reorder'])
+  assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'export', format: 'md' }), [
+    'export', '--format', 'md',
+  ])
+  assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'backup' }), ['backup'])
+})
+
+test('плагин объявляет tool-ы touch, doctor, backup, release, queue', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = pluginSource(root)
+
+  for (const name of ['queue', 'touch', 'doctor', 'backup', 'release']) {
+    assert.match(plugin, new RegExp(`name: '${name}'`), name)
+  }
+  assert.match(plugin, /name: 'run'/)
+  assert.match(plugin, /a === 'note'/)
+  assert.match(plugin, /input\.as !== 'owner'/)
 })
 
 test('reviewer agent берёт effective-модель сессии, если настройка пуста', () => {
@@ -351,4 +434,15 @@ test('AGENTS и board-work описывают ревью пакетом', () => 
   assert.match(work, /только читает/)
   assert.match(work, /сборник/)
   assert.match(work, /до 3 important/)
+})
+
+
+test('сгенерированный плагин синтаксически валиден', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  const copy = join(root, 'plugin-check.mjs')
+  writeFileSync(copy, plugin, 'utf8')
+  const result = spawnSync(process.execPath, ['--check', copy], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
 })

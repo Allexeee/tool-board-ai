@@ -269,8 +269,33 @@ function flag(args, name, value) {
 }
 
 function cardArgs(input) {
-  const args = ['card', input.action]
   const a = input.action
+  if (a === 'step' || a === 'ref' || a === 'dep' || a === 'scope') {
+    const args = ['card', a, input.sub]
+    if (input.id) args.push(input.id)
+    if (a === 'step' && input.sub === 'add') {
+      if (input.text) args.push(input.text)
+    } else if (a === 'step' || a === 'ref') {
+      if (input.index !== undefined) args.push(String(input.index))
+    }
+    if (a === 'ref' && input.sub === 'add') {
+      flag(args, 'kind', input.kind)
+      flag(args, 'value', input.value)
+      flag(args, 'title', input.title)
+    }
+    if (a === 'dep' && (input.sub === 'add' || input.sub === 'remove')) {
+      const other = input.other ?? input.value
+      if (other) args.push(String(other))
+    }
+    if (a === 'scope' && Array.isArray(input.paths)) {
+      for (const path of input.paths) args.push(String(path))
+    }
+    flag(args, 'reason', input.reason)
+    flag(args, 'as', input.as)
+    return args
+  }
+
+  const args = ['card', input.action]
   if (a === 'add') {
     flag(args, 'group', input.group)
     flag(args, 'title', input.title)
@@ -296,6 +321,10 @@ function cardArgs(input) {
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
     flag(args, 'note', input.note)
+    flag(args, 'as', input.as)
+  } else if (a === 'defer' || a === 'resume') {
+    if (input.id) args.push(input.id)
+    if (a === 'defer') flag(args, 'note', input.note)
     flag(args, 'as', input.as)
   } else if (a === 'shape' || a === 'submit') {
     if (input.id) args.push(input.id)
@@ -345,6 +374,10 @@ function runArgs(input) {
     flag(args, 'as', input.as)
   } else if (a === 'next') {
     flag(args, 'as', input.as)
+  } else if (a === 'note') {
+    if (input.id) args.push(input.id)
+    flag(args, 'text', input.text)
+    flag(args, 'as', input.as)
   } else if (a === 'end') {
     flag(args, 'as', input.as)
     if (input.review === true) args.push('--review')
@@ -355,6 +388,28 @@ function runArgs(input) {
     flag(args, 'as', input.as)
   }
   return args
+}
+
+function queueArgs(input) {
+  const args = ['queue', input.action]
+  if (input.action === 'move') {
+    if (input.id) args.push(input.id)
+    flag(args, 'before', input.before)
+    if (input.top) args.push('--top')
+    if (input.bottom) args.push('--bottom')
+  }
+  return args
+}
+
+function backupArgs(input) {
+  if (input.action === 'export') {
+    const args = ['export']
+    flag(args, 'format', input.format)
+    flag(args, 'out', input.out)
+    if (input.md) args.push('--md')
+    return args
+  }
+  return ['backup']
 }
 
 function reviewArgs(input) {
@@ -461,11 +516,18 @@ export default Plugin.define({
 
       editor.add({
         name: 'card',
-        description: 'Карточки: add|list|show|edit|shape|submit|spec-review|approve|amend|reject|done|cancel|reopen|verdict',
+        description: 'Карточки: add|list|show|edit|shape|submit|spec-review|approve|amend|reject|done|cancel|reopen|verdict|step|ref|dep|scope|defer|resume',
         input: schema({
           action: { type: 'string' },
+          sub: { type: 'string', description: 'Подкоманда для step/ref/dep/scope: add|done|remove|list' },
           id: { type: 'string' },
           group: { type: 'string' },
+          other: { type: 'string', description: 'Вторая карточка для dep' },
+          text: { type: 'string', description: 'Текст шага' },
+          index: { type: 'number', description: 'Номер шага или ссылки' },
+          kind: { type: 'string', description: 'Вид ссылки: link|doc|spec' },
+          value: { type: 'string', description: 'Значение ссылки' },
+          paths: { type: 'array', items: { type: 'string' }, description: 'Пути для scope add' },
           title: { type: 'string' },
           body: { type: 'string' },
           spec: { type: 'string' },
@@ -490,16 +552,22 @@ export default Plugin.define({
           phase: { type: 'string' },
           status: { type: 'string' },
         }, ['action']),
-        execute: (input, context) => call(ctx, cardArgs(input), context),
+        execute: (input, context) => {
+          if (input.action === 'approve' && input.as !== 'owner') {
+            return { content: 'approve — только владелец: укажите as: owner', isError: true }
+          }
+          return call(ctx, cardArgs(input), context)
+        },
       })
 
       editor.add({
         name: 'run',
-        description: 'Забег: start|add|drop|next|end|release|list',
+        description: 'Забег: start|add|drop|next|note|end|release|list',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
           cards: { type: 'string' },
+          text: { type: 'string', description: 'Итоги прохода для run note' },
           suggest: { type: 'number' },
           reason: { type: 'string' },
           review: {
@@ -509,6 +577,58 @@ export default Plugin.define({
           as: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, runArgs(input), context),
+      })
+
+      editor.add({
+        name: 'queue',
+        description: 'Очередь: move|reorder',
+        input: schema({
+          action: { type: 'string' },
+          id: { type: 'string' },
+          before: { type: 'string' },
+          top: { type: 'boolean' },
+          bottom: { type: 'boolean' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, queueArgs(input), context),
+      })
+
+      editor.add({
+        name: 'touch',
+        description: 'Продлить lease карточки в работе',
+        input: schema({ id: { type: 'string' }, as: { type: 'string' } }, ['id']),
+        execute: (input, context) =>
+          call(ctx, ['touch', input.id, ...(input.as ? ['--as', input.as] : [])], context),
+      })
+
+      editor.add({
+        name: 'doctor',
+        description: 'Проверка целостности доски',
+        input: schema({}),
+        execute: (_input, context) => call(ctx, ['doctor'], context),
+      })
+
+      editor.add({
+        name: 'backup',
+        description: 'Бэкап базы доски или экспорт карточек: backup|export',
+        input: schema({
+          action: { type: 'string' },
+          format: { type: 'string' },
+          out: { type: 'string' },
+          md: { type: 'boolean' },
+        }),
+        execute: (input, context) => call(ctx, backupArgs(input), context),
+      })
+
+      editor.add({
+        name: 'release',
+        description: 'Релиз: dev в main, только владелец',
+        input: schema({ as: { type: 'string' } }),
+        execute: (input, context) => {
+          if (input.as !== 'owner') {
+            return { content: 'release — только владелец: укажите as: owner', isError: true }
+          }
+          return call(ctx, ['release', '--as', 'owner'], context)
+        },
       })
 
       editor.add({
