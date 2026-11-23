@@ -13,6 +13,7 @@ const base: BoardSettings = {
   reviewer: { model: 'opencode-go/deepseek-v4.1-flash' },
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
+  branches: { main: null, dev: null },
   setupAt: null,
 }
 
