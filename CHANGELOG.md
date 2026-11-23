@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.4.3 — 23.11.2026
+
+Паритет плагина с CLI и меньше шума в контексте.
+
+- Плагин покрывает остальные команды доски: `card step/ref/dep/scope`, `card defer/resume`, `run note`, `queue move/reorder`, `touch`, `doctor`, `backup/export`, `release`. `approve` и `release` требуют `as: owner`.
+- Компактные ответы: запись возвращает `id/status/branch/position`, `board_now` и `card list` — строки без `body`; полный объект только у `card show`.
+- `release` пересчитывает `in_dev`/`in_main` из git до гейта; `finish` идемпотентен и сообщает о рассинхроне git и БД.
+- `touch` упомянут в `board-work` и `board-run`; reclaim пишет подсказку, `step add` продлевает lease карточки и забега.
+- Правила отчёта по ходу работы — в системном промпте плагина, а не только в навыках.
+- Полный `node --test`: 453 теста.
+
 ## v1.4.2 — 23.11.2026
 
 Порог spec review зависит от варианта модели.
