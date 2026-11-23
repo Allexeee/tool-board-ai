@@ -11,7 +11,7 @@ import type { BoardSettings } from '../../src/core/settings.ts'
 const base: BoardSettings = {
   version: 2,
   reviewer: { model: 'opencode-go/deepseek-v4.1-flash' },
-  specReview: { mode: 'auto', largeSpecChars: 6000 },
+  specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
   setupAt: null,
 }
@@ -21,15 +21,27 @@ const context = (variant: string | null, sessionModel: string | null = null) => 
   sessionModel,
 })
 
-test('auto: max/high → subagent, обычный вариант → self', () => {
+test('auto: max режется по maxSpecChars, high и остальные — по общему порогу', () => {
   assert.equal(
-    resolveSpecReviewMode({ settings: base, specLength: 10, context: context('max') }).mode,
-    'subagent',
+    resolveSpecReviewMode({ settings: base, specLength: 1499, context: context('max') }).mode,
+    'self',
+  )
+  const maxHit = resolveSpecReviewMode({ settings: base, specLength: 1500, context: context('max') })
+  assert.equal(maxHit.mode, 'subagent')
+  assert.equal(maxHit.reason, 'max-spec')
+
+  assert.equal(
+    resolveSpecReviewMode({ settings: base, specLength: 1499, context: context('HIGH') }).mode,
+    'self',
   )
   assert.equal(
-    resolveSpecReviewMode({ settings: base, specLength: 10, context: context('HIGH') }).mode,
-    'subagent',
+    resolveSpecReviewMode({ settings: base, specLength: 5999, context: context('high') }).mode,
+    'self',
   )
+  const highHit = resolveSpecReviewMode({ settings: base, specLength: 6000, context: context('high') })
+  assert.equal(highHit.mode, 'subagent')
+  assert.equal(highHit.reason, 'large-spec')
+
   assert.equal(
     resolveSpecReviewMode({ settings: base, specLength: 10, context: context('low') }).mode,
     'self',
@@ -40,21 +52,37 @@ test('auto: max/high → subagent, обычный вариант → self', () =
   )
 })
 
-test('auto: большой spec → subagent, 0 отключает правило', () => {
+test('auto: 0 отключает порог своего уровня', () => {
+  const offLarge = {
+    ...base,
+    specReview: { mode: 'auto' as const, maxSpecChars: 1500, largeSpecChars: 0 },
+  }
   assert.equal(
-    resolveSpecReviewMode({ settings: base, specLength: 6000, context: context(null) }).mode,
+    resolveSpecReviewMode({ settings: offLarge, specLength: 99_999, context: context('high') }).mode,
+    'self',
+  )
+  assert.equal(
+    resolveSpecReviewMode({ settings: offLarge, specLength: 1500, context: context('max') }).mode,
     'subagent',
   )
-  const off = { ...base, specReview: { mode: 'auto' as const, largeSpecChars: 0 } }
+
+  const offMax = {
+    ...base,
+    specReview: { mode: 'auto' as const, maxSpecChars: 0, largeSpecChars: 6000 },
+  }
   assert.equal(
-    resolveSpecReviewMode({ settings: off, specLength: 99_999, context: context(null) }).mode,
+    resolveSpecReviewMode({ settings: offMax, specLength: 99_999, context: context('max') }).mode,
     'self',
+  )
+  assert.equal(
+    resolveSpecReviewMode({ settings: offMax, specLength: 6000, context: context('null') }).mode,
+    'subagent',
   )
 })
 
 test('explicit modes ignore model and size', () => {
   for (const mode of ['none', 'self', 'subagent'] as const) {
-    const settings = { ...base, specReview: { mode, largeSpecChars: 1 } }
+    const settings = { ...base, specReview: { mode, maxSpecChars: 1, largeSpecChars: 1 } }
     const result = resolveSpecReviewMode({
       settings,
       specLength: 999_999,
@@ -68,7 +96,10 @@ test('explicit modes ignore model and size', () => {
 test('subagent без модели: явный режим возвращает null, auto падает в self', () => {
   const noModel = { ...base, reviewer: { model: null } }
   const explicit = resolveSpecReviewMode({
-    settings: { ...noModel, specReview: { mode: 'subagent', largeSpecChars: 6000 } },
+    settings: {
+      ...noModel,
+      specReview: { mode: 'subagent', maxSpecChars: 1500, largeSpecChars: 6000 },
+    },
     specLength: 10,
     context: context('max'),
   })
@@ -112,6 +143,10 @@ test('run review: none по умолчанию, auto учитывает моде
   const auto = { ...base, runReview: { mode: 'auto' as const } }
   assert.equal(
     resolveRunReviewMode({ settings: auto, context: context('max') }).mode,
+    'subagent',
+  )
+  assert.equal(
+    resolveRunReviewMode({ settings: auto, context: context('high') }).mode,
     'subagent',
   )
   assert.equal(

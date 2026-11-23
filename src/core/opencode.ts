@@ -442,14 +442,14 @@ export default Plugin.define({
 
       editor.add({
         name: 'setup',
-        description: 'Настройки доски: show|reviewer-model|spec-review|large-spec|run-review',
+        description: 'Настройки доски: show|reviewer-model|spec-review|max-spec|large-spec|run-review',
         input: schema({ action: { type: 'string' }, value: { type: 'string' } }),
         execute: (input, context) => {
           const action = input.action ?? 'show'
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'large-spec', 'run-review'].includes(action)) {
+          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
           if (action === 'review-after-run' || action === 'no-review-after-run') {
@@ -684,14 +684,15 @@ subagent: false
 Покажи \`board setup --show --json\` и спроси владельца:
 
 - spec review: auto/none/self/subagent;
-- большой spec, символов (0 — выключить правило);
+- порог для max, символов (0 — выключить правило);
+- большой spec для остальных уровней, символов (0 — выключить правило);
 - run review: none/self/subagent/auto (проверяет plan и код);
 - модель ревьюера: provider/model без #variant.
 
 Затем выполни:
 
 \`\`\`bash
-board setup --spec-review <mode> --large-spec <n> --run-review <mode> --reviewer-model <provider/model>
+board setup --spec-review <mode> --max-spec <n> --large-spec <n> --run-review <mode> --reviewer-model <provider/model>
 \`\`\`
 
 Если владелец не хочет менять настройку — ничего не выполняй.

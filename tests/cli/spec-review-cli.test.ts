@@ -107,7 +107,7 @@ test('amend после approve сбрасывает spec review и требуе�
   assert.equal(run(root, ['card', 'approve', 'UI-1', '--as', 'owner']).code, 0)
 })
 
-test('auto на Max требует субагента, self не принимается', (t) => {
+test('auto на Max: короткий spec — self, длинный — субагент', (t) => {
   const { root } = project(t)
   json(root, [
     'setup',
@@ -117,8 +117,12 @@ test('auto на Max требует субагента, self не принима�
   shaped(root)
   const env = { BOARD_MODEL_VARIANT: 'max', BOARD_SESSION_MODEL: 'opencode-go/deepseek-v4.1-flash' }
 
-  const shown = json(root, ['card', 'show', 'UI-1'], env)
-  assert.equal(shown.specReview.mode, 'subagent')
+  const short = json(root, ['card', 'show', 'UI-1'], env)
+  assert.equal(short.specReview.mode, 'self')
+
+  assert.equal(run(root, ['card', 'edit', 'UI-1', '--spec', 'x'.repeat(1600)]).code, 0)
+  const long = json(root, ['card', 'show', 'UI-1'], env)
+  assert.equal(long.specReview.mode, 'subagent')
 
   const selfReview = run(root, [
     'card', 'spec-review', 'UI-1',

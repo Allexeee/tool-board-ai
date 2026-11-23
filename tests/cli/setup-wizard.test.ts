@@ -21,7 +21,7 @@ function decision(overrides: Partial<SetupDecision> = {}): SetupDecision {
   const settings: BoardSettings = {
     version: 2,
     reviewer: { model: null },
-    specReview: { mode: 'auto', largeSpecChars: 6000 },
+    specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
     runReview: { mode: 'none' },
     setupAt: null,
   }
@@ -75,7 +75,7 @@ test('shouldRunSetup: мастер нужен только один раз и т
   assert.equal(shouldRunSetup(decision({ stdoutIsTTY: false })), false)
 })
 
-test('runSetupWizard: собирает все четыре ответа', async (t) => {
+test('runSetupWizard: собирает все ответы', async (t) => {
   const root = tempDir(t)
   const settings = ensureSettings(root).settings
   const input = ttyStream()
@@ -85,6 +85,8 @@ test('runSetupWizard: собирает все четыре ответа', async 
   const done = runSetupWizard(root, settings, { input, output })
   await seen.waitFor('Ревью spec')
   input.write('self\n')
+  await seen.waitFor('Порог для max')
+  input.write('2000\n')
   await seen.waitFor('Большой spec')
   input.write('4000\n')
   await seen.waitFor('Ревью в конце забега')
@@ -93,7 +95,7 @@ test('runSetupWizard: собирает все четыре ответа', async 
   input.write('opencode-go/deepseek-v4.1-flash\n')
 
   const next = await done
-  assert.deepEqual(next.specReview, { mode: 'self', largeSpecChars: 4000 })
+  assert.deepEqual(next.specReview, { mode: 'self', maxSpecChars: 2000, largeSpecChars: 4000 })
   assert.deepEqual(next.runReview, { mode: 'subagent' })
   assert.deepEqual(next.reviewer, { model: 'opencode-go/deepseek-v4.1-flash' })
   assert.ok(next.setupAt)
@@ -108,13 +110,13 @@ test('runSetupWizard: пустые ответы оставляют текущи�
   const seen = tracker(output)
 
   const done = runSetupWizard(root, settings, { input, output })
-  for (const prompt of ['Ревью spec', 'Большой spec', 'Ревью в конце забега', 'Модель ревьюера']) {
+  for (const prompt of ['Ревью spec', 'Порог для max', 'Большой spec', 'Ревью в конце забега', 'Модель ревьюера']) {
     await seen.waitFor(prompt)
     input.write('\n')
   }
 
   const next = await done
-  assert.deepEqual(next.specReview, { mode: 'auto', largeSpecChars: 6000 })
+  assert.deepEqual(next.specReview, { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 })
   assert.deepEqual(next.runReview, { mode: 'none' })
   assert.deepEqual(next.reviewer, { model: null })
   assert.ok(next.setupAt)
@@ -132,6 +134,8 @@ test('runSetupWizard: невалидный режим переспрашивае
   input.write('sometimes\n')
   await seen.waitFor('Допустимо: auto')
   input.write('self\n')
+  await seen.waitFor('Порог для max')
+  input.write('\n')
   await seen.waitFor('Большой spec')
   input.write('\n')
   await seen.waitFor('Ревью в конце забега')

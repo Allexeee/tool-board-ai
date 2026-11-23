@@ -257,14 +257,14 @@ export default Plugin.define({
 
       editor.add({
         name: 'setup',
-        description: 'Настройки доски: show|reviewer-model|spec-review|large-spec|run-review',
+        description: 'Настройки доски: show|reviewer-model|spec-review|max-spec|large-spec|run-review',
         input: schema({ action: { type: 'string' }, value: { type: 'string' } }),
         execute: (input, context) => {
           const action = input.action ?? 'show'
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'large-spec', 'run-review'].includes(action)) {
+          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
           if (action === 'review-after-run' || action === 'no-review-after-run') {
