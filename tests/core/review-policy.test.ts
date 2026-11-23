@@ -15,6 +15,7 @@ const base: BoardSettings = {
   runReview: { mode: 'none' },
   branches: { main: null, dev: null },
   git: true,
+  sync: { remote: null },
   setupAt: null,
 }
 
