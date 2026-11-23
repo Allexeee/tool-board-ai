@@ -35,7 +35,13 @@ export function release(
 
   const all = listCards(db)
 
-  const inDevNotDone = all.filter(
+  // git — источник истины: перед гейтом пересчитываем кэш in_dev/in_main,
+  // иначе ручной merge или рассинхрон пропустят непроверенный код в main.
+  const fresh = all.map((card) =>
+    card.mergeCommit === null ? card : refreshMergeState(db, root, card),
+  )
+
+  const inDevNotDone = fresh.filter(
     (card) => card.inDev && card.status !== 'done' && card.revertedAt === null,
   )
   if (inDevNotDone.length > 0) {
@@ -43,7 +49,7 @@ export function release(
     throw new UserError(2, `релиз заблокирован: в dev есть карточки не done: ${detail}`)
   }
 
-  const critical = all.filter(
+  const critical = fresh.filter(
     (card) => card.severity === 'critical' && card.status !== 'done' && card.status !== 'cancelled',
   )
   if (critical.length > 0) {
@@ -57,7 +63,7 @@ export function release(
 
   return tx(db, () => {
     const cards: Card[] = []
-    for (const card of all) {
+    for (const card of fresh) {
       if (card.mergeCommit !== null) cards.push(refreshMergeState(db, root, card))
     }
 

@@ -12,7 +12,7 @@ import {
   runGit,
   startCardBranch,
 } from '../../src/core/git.ts'
-import { cancelCard } from '../../src/core/lifecycle.ts'
+import { cancelCard, finishCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import type { Card } from '../../src/core/types.ts'
@@ -146,6 +146,95 @@ test('refreshMergeState без merge_commit ставит in_dev/in_main в false
   const refreshed = refreshMergeState(db, root, getCard(db, card.id)!)
   assert.equal(refreshed.inDev, false)
   assert.equal(refreshed.inMain, false)
+})
+
+test('release блокирует карточку review с кодом в dev, даже если in_dev=0', (t) => {
+  const { root, db } = repoBoard(t)
+  const review = merged(root, db, 'review', 'dev-a')
+  db.prepare('update cards set in_dev = 0 where id = ?').run(review.id)
+
+  assert.throws(() => release(db, root, 'owner'), /не done/)
+  assert.equal(getCard(db, review.id)!.inDev, true)
+})
+
+test('release не блокируется ложным in_dev: коммит не в dev', (t) => {
+  const { root, db } = repoBoard(t)
+  merged(root, db, 'done', 'dev-a')
+
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'booked',
+    skill: 'dev',
+    scope: ['src/**'],
+  })
+  const { branch, worktree } = startCardBranch(root, 'dev-x', card)
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src', `${card.id}.txt`), 'x\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', card.id])
+  const commit = runGit(worktree, ['rev-parse', 'HEAD'])
+  db.prepare('update cards set status = ?, branch = ?, merge_commit = ?, in_dev = 1 where id = ?').run(
+    'review',
+    branch,
+    commit,
+    card.id,
+  )
+
+  assert.equal(release(db, root, 'owner').commit.length, 40)
+  assert.equal(getCard(db, card.id)!.inDev, false)
+})
+
+test('повторный finish на уже слитой карточке не мержит второй раз', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'booked',
+    skill: 'dev',
+    scope: ['src/**'],
+  })
+  const { branch, worktree } = startCardBranch(root, 'developer', card)
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src', `${card.id}.txt`), 'x\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', card.id])
+  const merge = mergeToDev(root, branch, card.id)
+
+  // Падение между git и БД: merge уже в dev, карточка ещё в работе без merge_commit.
+  db.prepare(
+    "update cards set status = 'in_progress', holder = 'developer', branch = ?, needs_merge = 1 where id = ?",
+  ).run(branch, card.id)
+  const before = runGit(root, ['rev-list', '--merges', '--count', 'dev'])
+
+  const finished = finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root })
+  assert.equal(finished.mergeCommit, merge)
+  assert.equal(finished.inDev, true)
+  assert.equal(finished.status, 'done')
+  assert.equal(runGit(root, ['rev-list', '--merges', '--count', 'dev']), before)
+})
+
+test('finish с merge_commit вне dev даёт ошибку рассинхрона', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'booked',
+    skill: 'dev',
+    scope: ['src/**'],
+  })
+  const { branch, worktree } = startCardBranch(root, 'developer', card)
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src', `${card.id}.txt`), 'x\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', card.id])
+  const commit = runGit(worktree, ['rev-parse', 'HEAD'])
+
+  db.prepare(
+    "update cards set status = 'in_progress', holder = 'developer', branch = ?, needs_merge = 1, merge_commit = ? where id = ?",
+  ).run(branch, commit, card.id)
+
+  assert.throws(
+    () => finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root }),
+    /рассинхрон/,
+  )
 })
 
 test('release ставит тег версии, повторный release не падает', (t) => {
