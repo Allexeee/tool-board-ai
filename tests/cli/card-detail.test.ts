@@ -45,8 +45,9 @@ test('card show --json отдаёт spec, plan, acceptance и specRev', (t) => {
   assert.equal(shown.body, 'Нужен вход')
   assert.equal(shown.acceptance, 'Вход работает')
   assert.equal(shown.specRev, 3)
-  assert.deepEqual(shown.plan, shown.steps)
   assert.equal(shown.plan[0].text, 'Написать форму')
+  assert.equal('steps' in shown, false)
+  assert.equal('events' in shown, false)
 })
 
 test('card step add/done/list/remove работает через CLI', (t) => {
@@ -126,7 +127,7 @@ test('card dep add/list/remove работает через CLI и виден в 
   assert.equal(added.to, 'UI-2')
   assert.deepEqual(json(dir, ['card', 'dep', 'list', 'UI-1']), ['UI-2'])
 
-  const shown = run(dir, ['card', 'show', 'UI-1'])
+  const shown = run(dir, ['card', 'show', 'UI-1', '--events'])
   assert.equal(shown.code, 0, shown.err)
   assert.match(shown.out, /ЗАВИСИМОСТИ/)
   assert.match(shown.out, /UI-2/)
@@ -140,7 +141,7 @@ test('card dep add/list/remove работает через CLI и виден в 
   assert.equal(removed.to, 'UI-2')
   assert.deepEqual(json(dir, ['card', 'dep', 'list', 'UI-1']), [])
 
-  const afterRemove = run(dir, ['card', 'show', 'UI-1'])
+  const afterRemove = run(dir, ['card', 'show', 'UI-1', '--events'])
   assert.equal(afterRemove.code, 0, afterRemove.err)
   assert.match(afterRemove.out, /передумали/)
 })
@@ -164,7 +165,7 @@ test('card show печатает шаги, ссылки и журнал', (t) =>
   json(dir, ['card', 'step', 'done', 'UI-1', '1'])
   json(dir, ['card', 'ref', 'add', 'UI-1', '--kind', 'spec', '--value', 'docs/specs/login.md'])
 
-  const shown = run(dir, ['card', 'show', 'UI-1'])
+  const shown = run(dir, ['card', 'show', 'UI-1', '--events', '--limit', '10'])
 
   assert.equal(shown.code, 0, shown.err)
   assert.match(shown.out, /ШАГИ \(1\/2\)/)
@@ -188,14 +189,18 @@ test('card show --json отдаёт карточку с шагами, ссылк
   json(dir, ['ask', 'UI-1', 'Нужен ли SSO?', '--as', 'developer'])
   json(dir, ['answer', 'UI-1', 'Нет', '--as', 'owner'])
 
-  const detail = json(dir, ['card', 'show', 'UI-1'])
+  const detail = json(dir, ['card', 'show', 'UI-1', '--events'])
 
   assert.equal(detail.id, 'UI-1')
   assert.equal(detail.title, 'Форма')
-  assert.equal(detail.steps.length, 1)
+  assert.equal(detail.plan.length, 1)
   assert.equal(detail.refs.length, 1)
   assert.equal(detail.discussion.length, 2)
   assert.equal(detail.events[0].type, 'card.created')
+
+  const limited = json(dir, ['card', 'show', 'UI-1', '--events', '--limit', '1'])
+  assert.equal(limited.events.length, 1)
+  assert.equal(limited.events[0].type, 'discussion.answer')
 })
 
 test('card step и card ref отказывают без карточки', (t) => {

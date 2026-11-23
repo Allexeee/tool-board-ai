@@ -46,6 +46,8 @@ const NEW_COMMANDS = [
   'release',
   'now',
   'doctor',
+  'backup',
+  'export',
 ]
 
 const OLD_COMMANDS = ['feature', 'stage', 'plan', 'routine']
@@ -163,4 +165,17 @@ test('doctor --json: новее схема — { errors }, без raw-ошибк
   assert.deepEqual(Object.keys(data).sort(), ['errors', 'warnings'])
   assert.ok(data.errors.some((e) => e.includes('схем')), data.errors.join(' | '))
   assert.equal(result.stderr, '')
+})
+
+test('help знает подкоманды card, run и новые команды', () => {
+  const { status, stdout } = runCli(['--help'])
+  assert.equal(status, 0)
+
+  for (const sub of ['spec-review', 'amend', 'defer', 'resume', 'scope', 'note']) {
+    assert.match(stdout, new RegExp(`\\b${sub}\\b`), sub)
+  }
+  for (const command of ['backup', 'export']) {
+    assert.match(stdout, new RegExp(`\\b${command}\\b`), command)
+  }
+  assert.doesNotMatch(stdout, /skills\/board\/SKILL/)
 })

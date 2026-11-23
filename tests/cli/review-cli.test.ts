@@ -47,11 +47,15 @@ test('review list отдаёт reopens, прошлые вердикты и от�
     reviewReopens: number
     reviews: Array<{ verdict: string; planCompliance: string }>
     findings: Array<{ severity: string; title: string }>
+    runId: string | null
   }>
   assert.equal(items[0].reviewReopens, 1)
   assert.equal(items[0].reviews[0].verdict, 'reopen')
   assert.equal(items[0].reviews[0].planCompliance, 'failed')
   assert.equal(items[0].findings[0].severity, 'important')
+  assert.equal('body' in items[0], false)
+  assert.equal('steps' in items[0], false)
+  assert.ok('runId' in items[0])
 })
 
 test('review submit требует --plan', (t) => {

@@ -133,11 +133,15 @@ export default async function command(args: ParsedArgs) {
     const card = requireCard(args.positionals[0], 'board card show UI-1')
     const steps = listSteps(db, card.id)
     const { resolution } = specGate(card)
+    // События — только по запросу: в каждом полный снимок before/after.
+    const withEvents = args.flags['events'] === true
+    const limit = numberFlag(args, 'limit') ?? 5
+    if (limit < 0) throw new UserError(3, '--limit — целое число от 0')
+    const events = withEvents ? listEvents(db, card.id).slice(-limit) : null
     const detail = {
       ...card,
       spec: card.body,
       plan: steps,
-      steps,
       specReview: {
         mode: resolution.mode,
         reason: resolution.reason,
@@ -147,12 +151,20 @@ export default async function command(args: ParsedArgs) {
       refs: listRefs(db, card.id),
       deps: listDeps(db, card.id),
       discussion: listDiscussion(db, card.id),
-      events: listEvents(db, card.id),
+      ...(events ? { events } : {}),
     }
 
     ok(
       detail,
-      formatCard(db, card, detail.deps, detail.steps, detail.refs, detail.discussion, detail.events),
+      formatCard(
+        db,
+        card,
+        detail.deps,
+        detail.plan,
+        detail.refs,
+        detail.discussion,
+        detail.events ?? [],
+      ),
     )
     return 0
   }
