@@ -7,6 +7,7 @@ import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
+import { readSettings } from './settings.ts'
 import { SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
 
 export interface DoctorResult {
@@ -34,8 +35,11 @@ export function doctorData(
     errors.push('.board/board.db не найден: выполните board init')
   }
 
-  const repo = isRepo(root)
-  if (!repo) {
+  const settings = readSettings(root)
+  const repo = settings.git && isRepo(root)
+  if (!settings.git) {
+    // Доска без git: ветки и мержи не нужны, это осознанный режим.
+  } else if (!repo) {
     errors.push('не git-репозиторий: ветки и коммиты недоступны')
   } else {
     const { main, dev } = resolveBranches(root)

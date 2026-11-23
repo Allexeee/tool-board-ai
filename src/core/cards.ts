@@ -15,6 +15,8 @@ export interface NewCardInput {
   skill: string
   author: string
   tags?: string[]
+  /** false — карточка без git-мержа (доска без git или контент). */
+  needsMerge?: boolean
 }
 
 export interface CardFilter {
@@ -265,7 +267,7 @@ export function createCard(db: DatabaseSync, input: NewCardInput): Card {
       phase: isOwner ? 'task' : 'request',
       status: isOwner ? 'ready' : 'new',
       skill,
-      needsMerge: !isOwner,
+      needsMerge: input.needsMerge ?? !isOwner,
       tags: JSON.stringify(normalizeTags(input.tags ?? [])),
       createdAt,
     })

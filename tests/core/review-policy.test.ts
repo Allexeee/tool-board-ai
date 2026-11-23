@@ -14,6 +14,7 @@ const base: BoardSettings = {
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
   branches: { main: null, dev: null },
+  git: true,
   setupAt: null,
 }
 
