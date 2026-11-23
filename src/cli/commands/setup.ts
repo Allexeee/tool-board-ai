@@ -15,7 +15,7 @@ import { isJsonMode, ok } from '../output.ts'
 
 function human(settings: BoardSettings, effectiveModel: string | null): string {
   const lines = [
-    `Ревью spec: ${settings.specReview.mode} (большой spec: ${settings.specReview.largeSpecChars} символов)`,
+    `Ревью spec: ${settings.specReview.mode} (порог max: ${settings.specReview.maxSpecChars}, остальные: ${settings.specReview.largeSpecChars} символов)`,
     `Ревью в конце забега: ${settings.runReview.mode}`,
     `Модель ревьюера: ${effectiveModel ?? 'не задана'} (default-вариант)`,
     settings.setupAt
@@ -43,16 +43,17 @@ export default async function command(args: ParsedArgs) {
   const specMode = stringFlag(args, 'spec-review')
   const runMode = stringFlag(args, 'run-review')
   const largeSpec = numberFlag(args, 'large-spec')
+  const maxSpec = numberFlag(args, 'max-spec')
   const reviewerModel = stringFlag(args, 'reviewer-model')
 
   if (runMode !== undefined && (reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, 'не сочетайте --run-review с устаревшими --review-after-run/--no-review-after-run')
   }
-  if (show && (specMode !== undefined || runMode !== undefined || largeSpec !== undefined || reviewerModel !== undefined || reviewAfterRun || noReviewAfterRun)) {
+  if (show && (specMode !== undefined || runMode !== undefined || largeSpec !== undefined || maxSpec !== undefined || reviewerModel !== undefined || reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, '--show не сочетается с изменением настроек')
   }
 
-  if (show || (!specMode && runMode === undefined && largeSpec === undefined && reviewerModel === undefined && !reviewAfterRun && !noReviewAfterRun && isJsonMode())) {
+  if (show || (!specMode && runMode === undefined && largeSpec === undefined && maxSpec === undefined && reviewerModel === undefined && !reviewAfterRun && !noReviewAfterRun && isJsonMode())) {
     ok({ ...current, effectiveReviewerModel: currentReviewer }, human(current, currentReviewer))
     return 0
   }
@@ -62,6 +63,9 @@ export default async function command(args: ParsedArgs) {
   if (specMode !== undefined) patch.specReview = { mode: specMode as SpecReviewSetting }
   if (largeSpec !== undefined) {
     patch.specReview = { ...patch.specReview, largeSpecChars: largeSpec }
+  }
+  if (maxSpec !== undefined) {
+    patch.specReview = { ...patch.specReview, maxSpecChars: maxSpec }
   }
   if (runMode !== undefined) patch.runReview = { mode: runMode as RunReviewSetting }
   if (reviewAfterRun) patch.runReview = { mode: 'subagent' }

@@ -22,7 +22,7 @@ const KNOWN_FLAGS = new Set([
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
-  'large-spec', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
+  'large-spec', 'max-spec', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
   'format', 'out', 'md', 'events',
 ])
 
