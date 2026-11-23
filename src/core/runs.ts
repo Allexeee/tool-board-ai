@@ -977,7 +977,7 @@ export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number
         subject: run.id,
         before: run,
         after: expired,
-        note: cutoff,
+        note: `${cutoff}; touch продлевает аренду`,
       })
     }
 
@@ -1001,7 +1001,7 @@ export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number
         subject: id,
         before,
         after: getCard(db, id),
-        note: cutoff,
+        note: `${cutoff}; board touch ${id} продлевает аренду`,
       })
     }
 
@@ -1028,7 +1028,7 @@ export function reclaimExpired(db: DatabaseSync, now: Date = new Date()): number
         subject: id,
         before,
         after: getCard(db, id),
-        note: cutoff,
+        note: `${cutoff}; board touch ${id} продлевает аренду`,
       })
     }
 

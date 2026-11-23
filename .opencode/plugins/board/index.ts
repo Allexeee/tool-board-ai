@@ -83,9 +83,93 @@ function flag(args, name, value) {
   args.push('--' + name, String(value))
 }
 
+// Компактные ответы для агента: CLI печатает карточку целиком, плагин — нет.
+function cardRow(card) {
+  const row = { id: card.id, status: card.status }
+  if (card.title) row.title = card.title
+  if (card.skill) row.skill = card.skill
+  if (card.group) row.group = card.group
+  if (card.holder) row.holder = card.holder
+  return row
+}
+
+function compactCard(value) {
+  if (Array.isArray(value)) return value.map(compactCard)
+  if (!value || typeof value !== 'object') return value
+  if (typeof value.id !== 'string' || typeof value.status !== 'string') return value
+  const out = { id: value.id, status: value.status }
+  if (value.branch) out.branch = value.branch
+  if (value.position !== null && value.position !== undefined) out.position = value.position
+  return out
+}
+
+function compactNow(value) {
+  return stripHeavy(value)
+}
+
+// Тяжёлые поля карточки встречаются в любом вложенном месте now: approvals,
+// queue, requests, executors[].cards, probableRuns[].cards[].card.
+function isCard(value) {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof value.id === 'string' &&
+    typeof value.status === 'string' &&
+    'createdAt' in value
+  )
+}
+
+function stripHeavy(value) {
+  const heavy = ['body', 'acceptance', 'scope', 'steps']
+  if (Array.isArray(value)) return value.map(stripHeavy)
+  if (!value || typeof value !== 'object') return value
+  if (isCard(value)) return cardRow(value)
+  const out = {}
+  for (const key of Object.keys(value)) {
+    if (heavy.includes(key)) continue
+    out[key] = stripHeavy(value[key])
+  }
+  return out
+}
+
+async function withJson(result, fn) {
+  const resolved = await result
+  if (!resolved || resolved.isError) return resolved
+  try {
+    return { ...resolved, content: JSON.stringify(fn(JSON.parse(resolved.content))) }
+  } catch {
+    return resolved
+  }
+}
+
 function cardArgs(input) {
-  const args = ['card', input.action]
   const a = input.action
+  if (a === 'step' || a === 'ref' || a === 'dep' || a === 'scope') {
+    const args = ['card', a, input.sub]
+    if (input.id) args.push(input.id)
+    if (a === 'step' && input.sub === 'add') {
+      if (input.text) args.push(input.text)
+    } else if (a === 'step' || a === 'ref') {
+      if (input.index !== undefined) args.push(String(input.index))
+    }
+    if (a === 'ref' && input.sub === 'add') {
+      flag(args, 'kind', input.kind)
+      flag(args, 'value', input.value)
+      flag(args, 'title', input.title)
+    }
+    if (a === 'dep' && (input.sub === 'add' || input.sub === 'remove')) {
+      const other = input.other ?? input.value
+      if (other) args.push(String(other))
+    }
+    if (a === 'scope' && Array.isArray(input.paths)) {
+      for (const path of input.paths) args.push(String(path))
+    }
+    flag(args, 'reason', input.reason)
+    flag(args, 'as', input.as)
+    return args
+  }
+
+  const args = ['card', input.action]
   if (a === 'add') {
     flag(args, 'group', input.group)
     flag(args, 'title', input.title)
@@ -111,6 +195,10 @@ function cardArgs(input) {
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
     flag(args, 'note', input.note)
+    flag(args, 'as', input.as)
+  } else if (a === 'defer' || a === 'resume') {
+    if (input.id) args.push(input.id)
+    if (a === 'defer') flag(args, 'note', input.note)
     flag(args, 'as', input.as)
   } else if (a === 'shape' || a === 'submit') {
     if (input.id) args.push(input.id)
@@ -160,6 +248,10 @@ function runArgs(input) {
     flag(args, 'as', input.as)
   } else if (a === 'next') {
     flag(args, 'as', input.as)
+  } else if (a === 'note') {
+    if (input.id) args.push(input.id)
+    flag(args, 'text', input.text)
+    flag(args, 'as', input.as)
   } else if (a === 'end') {
     flag(args, 'as', input.as)
     if (input.review === true) args.push('--review')
@@ -170,6 +262,28 @@ function runArgs(input) {
     flag(args, 'as', input.as)
   }
   return args
+}
+
+function queueArgs(input) {
+  const args = ['queue', input.action]
+  if (input.action === 'move') {
+    if (input.id) args.push(input.id)
+    flag(args, 'before', input.before)
+    if (input.top) args.push('--top')
+    if (input.bottom) args.push('--bottom')
+  }
+  return args
+}
+
+function backupArgs(input) {
+  if (input.action === 'export') {
+    const args = ['export']
+    flag(args, 'format', input.format)
+    flag(args, 'out', input.out)
+    if (input.md) args.push('--md')
+    return args
+  }
+  return ['backup']
 }
 
 function reviewArgs(input) {
@@ -237,6 +351,10 @@ export default Plugin.define({
         type: 'text',
         text: 'Перед любой работой по доске используй brainstorming; в этом проекте его spec пишется в карточку. Разговор без глагола работы карточек не создаёт.',
       })
+      event.system.push({
+        type: 'text',
+        text: 'Отчёт по ходу работы обязателен, не откладывай его до конца забега. «Беру в работу (n)» — на старте забега. На take — «Приступаю к {ID}: шаги 1..N». После finish — «Сделал {ID}: …» и на следующей строке «Перехожу к {ID}: …»; для последней карточки забега — только «Сделал». Первая карточка забега — без «Сделал» до её завершения. Итог забега: «Завершил {RUN}.» и список карточек; затем блок «Ревью ожидают задачи (n):» со списком ID и вопросом «Ревью сейчас или до релиза?» — только если в review что-то есть; затем «Следующий Run:» — только если очередь не пуста; последняя строка — «Запустить следующий Run?». Зелёные тесты, doctor, typecheck и номера коммитов в чат не пиши — только если упало.',
+      })
     })
 
     await ctx.tool.transform((editor) => {
@@ -251,7 +369,7 @@ export default Plugin.define({
           if (input.tab) args.push(input.tab)
           if (input.mine) args.push('--mine')
           flag(args, 'as', input.as)
-          return call(ctx, ['now', ...args], context)
+          return withJson(call(ctx, ['now', ...args], context), compactNow)
         },
       })
 
@@ -276,11 +394,18 @@ export default Plugin.define({
 
       editor.add({
         name: 'card',
-        description: 'Карточки: add|list|show|edit|shape|submit|spec-review|approve|amend|reject|done|cancel|reopen|verdict',
+        description: 'Карточки: add|list|show|edit|shape|submit|spec-review|approve|amend|reject|done|cancel|reopen|verdict|step|ref|dep|scope|defer|resume',
         input: schema({
           action: { type: 'string' },
+          sub: { type: 'string', description: 'Подкоманда для step/ref/dep/scope: add|done|remove|list' },
           id: { type: 'string' },
           group: { type: 'string' },
+          other: { type: 'string', description: 'Вторая карточка для dep' },
+          text: { type: 'string', description: 'Текст шага' },
+          index: { type: 'number', description: 'Номер шага или ссылки' },
+          kind: { type: 'string', description: 'Вид ссылки: link|doc|spec' },
+          value: { type: 'string', description: 'Значение ссылки' },
+          paths: { type: 'array', items: { type: 'string' }, description: 'Пути для scope add' },
           title: { type: 'string' },
           body: { type: 'string' },
           spec: { type: 'string' },
@@ -305,16 +430,27 @@ export default Plugin.define({
           phase: { type: 'string' },
           status: { type: 'string' },
         }, ['action']),
-        execute: (input, context) => call(ctx, cardArgs(input), context),
+        execute: (input, context) => {
+          if (input.action === 'approve' && input.as !== 'owner') {
+            return { content: 'approve — только владелец: укажите as: owner', isError: true }
+          }
+          const result = call(ctx, cardArgs(input), context)
+          if (input.action === 'show') return result
+          if (input.action === 'list') {
+            return withJson(result, (value) => (Array.isArray(value) ? value.map(cardRow) : value))
+          }
+          return withJson(result, compactCard)
+        },
       })
 
       editor.add({
         name: 'run',
-        description: 'Забег: start|add|drop|next|end|release|list',
+        description: 'Забег: start|add|drop|next|note|end|release|list',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
           cards: { type: 'string' },
+          text: { type: 'string', description: 'Итоги прохода для run note' },
           suggest: { type: 'number' },
           reason: { type: 'string' },
           review: {
@@ -324,6 +460,58 @@ export default Plugin.define({
           as: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, runArgs(input), context),
+      })
+
+      editor.add({
+        name: 'queue',
+        description: 'Очередь: move|reorder',
+        input: schema({
+          action: { type: 'string' },
+          id: { type: 'string' },
+          before: { type: 'string' },
+          top: { type: 'boolean' },
+          bottom: { type: 'boolean' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, queueArgs(input), context),
+      })
+
+      editor.add({
+        name: 'touch',
+        description: 'Продлить lease карточки в работе',
+        input: schema({ id: { type: 'string' }, as: { type: 'string' } }, ['id']),
+        execute: (input, context) =>
+          call(ctx, ['touch', input.id, ...(input.as ? ['--as', input.as] : [])], context),
+      })
+
+      editor.add({
+        name: 'doctor',
+        description: 'Проверка целостности доски',
+        input: schema({}),
+        execute: (_input, context) => call(ctx, ['doctor'], context),
+      })
+
+      editor.add({
+        name: 'backup',
+        description: 'Бэкап базы доски или экспорт карточек: backup|export',
+        input: schema({
+          action: { type: 'string' },
+          format: { type: 'string' },
+          out: { type: 'string' },
+          md: { type: 'boolean' },
+        }),
+        execute: (input, context) => call(ctx, backupArgs(input), context),
+      })
+
+      editor.add({
+        name: 'release',
+        description: 'Релиз: dev в main, только владелец',
+        input: schema({ as: { type: 'string' } }),
+        execute: (input, context) => {
+          if (input.as !== 'owner') {
+            return { content: 'release — только владелец: укажите as: owner', isError: true }
+          }
+          return call(ctx, ['release', '--as', 'owner'], context)
+        },
       })
 
       editor.add({

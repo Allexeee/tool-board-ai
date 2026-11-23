@@ -1110,13 +1110,27 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
           throw new UserError(3, `коммит ${mergeCommit} не является предком dev`)
         }
       } else {
-        syncWithDev(input.root, worktree, card.branch)
-        const out = outOfScope(input.root, card.branch, card.scope)
-        if (out.length > 0) {
-          throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
+        // Ветка целиком в dev: повтор после падения между git и БД — не мержим снова.
+        // Сверяем кончик ветки, а не только записанный merge: после reopen в ветке
+        // могут быть новые коммиты, и их надо влить.
+        const tip = runGit(input.root, ['rev-parse', card.branch])
+        if (isAncestor(input.root, tip, 'dev')) {
+          mergeCommit = mergeCommitFor(input.root, card.branch) ?? card.mergeCommit
+          inDev = true
+        } else if (card.mergeCommit !== null && !isAncestor(input.root, card.mergeCommit, 'dev')) {
+          throw new UserError(
+            2,
+            `рассинхрон git и БД: merge-коммит ${card.mergeCommit} карточки ${card.id} не предок dev; проверьте board doctor`,
+          )
+        } else {
+          syncWithDev(input.root, worktree, card.branch)
+          const out = outOfScope(input.root, card.branch, card.scope)
+          if (out.length > 0) {
+            throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
+          }
+          mergeCommit = mergeToDev(input.root, card.branch, `merge ${card.id}: ${summary}`)
+          inDev = isAncestor(input.root, mergeCommit, 'dev')
         }
-        mergeCommit = mergeToDev(input.root, card.branch, `merge ${card.id}: ${summary}`)
-        inDev = isAncestor(input.root, mergeCommit, 'dev')
       }
     }
 
