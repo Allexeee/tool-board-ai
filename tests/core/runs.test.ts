@@ -605,6 +605,24 @@ test('reclaimExpired закрывает просроченный забег и �
   assert.equal(getRun(db, future.id)!.status, 'lease_expired')
 })
 
+test('reclaimExpired подсказывает touch в событии', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = task(db, { position: 1 })
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: [card.id],
+    actor: 'developer',
+  })
+  db.prepare("update runs set lease_until = '2000-01-01T00:00:00.000Z' where id = ?").run(run.id)
+
+  reclaimExpired(db)
+
+  const event = listEvents(db, run.id).at(-1)!
+  assert.equal(event.type, 'run.lease_expired')
+  assert.match(String(event.note), /touch/)
+})
+
 test('startRun сохраняет reviewMode забега', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })

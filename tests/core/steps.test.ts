@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createCard } from '../../src/core/cards.ts'
+import { createCard, getCard } from '../../src/core/cards.ts'
 import { listEvents } from '../../src/core/events.ts'
 import {
   addStep,
@@ -45,6 +45,20 @@ test('addStep нумерует шаги по порядку', (t) => {
       [2, 'Добавить тест'],
     ],
   )
+})
+
+test('addStep продлевает lease карточки в работе', (t) => {
+  const { db, card } = makeCardBoard(t)
+  const old = new Date(Date.now() - 60_000).toISOString()
+  db.prepare(
+    "update cards set status = 'in_progress', holder = 'developer', lease_until = ? where id = ?",
+  ).run(old, card.id)
+
+  addStep(db, { cardId: card.id, text: 'шаг', actor: 'developer' })
+
+  const after = getCard(db, card.id)!
+  assert.ok(after.leaseUntil !== null)
+  assert.ok(new Date(after.leaseUntil!).getTime() > Date.now() + 60 * 60 * 1000)
 })
 
 test('addStep пишет событие в журнал карточки', (t) => {
