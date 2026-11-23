@@ -661,8 +661,26 @@ function parseShapeFile(path: string): ShapeFile {
   // Минимальная проверка до изменения карточки: новая карточка без группы
   // не должна оставлять карточку в shaping.
   for (const item of file.new_cards ?? []) {
-    if (typeof item !== 'object' || item === null || !item.group?.trim()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new UserError(3, 'new_cards: каждая запись — объект')
+    }
+    if (typeof item.group !== 'string' || !item.group.trim()) {
       throw new UserError(3, 'у новой карточки нет группы')
+    }
+    if (typeof item.title !== 'string' || !item.title.trim()) {
+      throw new UserError(3, `новая карточка в ${item.group}: нет title`)
+    }
+    for (const field of ['acceptance', 'scope', 'tags'] as const) {
+      const value = item[field]
+      if (value !== undefined && (!Array.isArray(value) || value.some((row) => typeof row !== 'string'))) {
+        throw new UserError(3, `новая карточка ${item.key ?? item.group}: ${field} — массив строк`)
+      }
+    }
+    for (const field of ['spec', 'body', 'skill'] as const) {
+      const value = item[field]
+      if (value !== undefined && typeof value !== 'string') {
+        throw new UserError(3, `новая карточка ${item.key ?? item.group}: ${field} — строка`)
+      }
     }
   }
   return file

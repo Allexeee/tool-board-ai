@@ -261,6 +261,8 @@ function runArgs(input) {
   if (a === 'start') {
     flag(args, 'cards', input.cards)
     if (input.suggest !== undefined) args.push('--suggest', String(input.suggest))
+    if (input.review === true) args.push('--review')
+    else if (input.review === false) args.push('--no-review')
     flag(args, 'as', input.as)
   } else if (a === 'add' || a === 'drop') {
     if (input.id) args.push(input.id)
@@ -459,6 +461,27 @@ export default Plugin.define({
           }
           if (['step', 'ref', 'dep', 'scope'].includes(input.action) && !input.sub) {
             return { content: 'нужен sub: add|done|remove|list', isError: true }
+          }
+          // shape со spec/acceptance/scope: сначала разбор, затем edit — одним действием.
+          if (
+            input.action === 'shape' &&
+            (input.spec || Array.isArray(input.acceptance) || Array.isArray(input.scope))
+          ) {
+            return (async () => {
+              const shaped = await call(ctx, cardArgs(input), context)
+              if (shaped.isError) return shaped
+              const edit = ['card', 'edit']
+              if (input.id) edit.push(input.id)
+              flag(edit, 'spec', input.spec)
+              if (Array.isArray(input.acceptance)) {
+                for (const item of input.acceptance) edit.push('--acceptance', String(item))
+              }
+              if (Array.isArray(input.scope)) {
+                for (const path of input.scope) edit.push('--scope', String(path))
+              }
+              flag(edit, 'as', input.as)
+              return call(ctx, edit, context)
+            })()
           }
           const result = call(ctx, cardArgs(input), context)
           if (input.action === 'show') return result
