@@ -152,8 +152,10 @@ export default async function command(args: ParsedArgs) {
     }
 
     let reviewMode: RunReviewMode
+    let reviewReason: string
     if (noReviewFlag) {
       reviewMode = 'none'
+      reviewReason = 'explicit'
     } else if (reviewFlag) {
       const forced = {
         ...settings,
@@ -161,10 +163,13 @@ export default async function command(args: ParsedArgs) {
           mode: settings.runReview.mode === 'none' ? ('auto' as const) : settings.runReview.mode,
         },
       }
-      reviewMode = resolveRunReviewMode({ settings: forced, context }).mode
+      const resolution = resolveRunReviewMode({ settings: forced, context })
+      reviewMode = resolution.mode
+      reviewReason = resolution.reason
     } else {
-      reviewMode =
-        run.reviewMode ?? resolveRunReviewMode({ settings, context }).mode
+      const resolution = resolveRunReviewMode({ settings, context })
+      reviewMode = run.reviewMode ?? resolution.mode
+      reviewReason = run.reviewMode ? 'explicit' : resolution.reason
     }
 
     if (reviewMode === 'subagent' && effectiveReviewerModel(settings, context) === null) {
@@ -185,7 +190,7 @@ export default async function command(args: ParsedArgs) {
         ? `ревью: ${reviewMode} · карточек на ревью: ${reviewCards}`
         : 'ревью после забега выключено',
     ].join('\n')
-    ok({ ...ended, reviewCards }, human)
+    ok({ ...ended, reviewCards, reviewReason }, human)
     return 0
   }
 
