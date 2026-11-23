@@ -10,7 +10,7 @@ export type RunReviewSetting = 'auto' | 'none' | 'self' | 'subagent'
 export interface BoardSettings {
   version: 2
   reviewer: { model: string | null }
-  specReview: { mode: SpecReviewSetting; largeSpecChars: number }
+  specReview: { mode: SpecReviewSetting; maxSpecChars: number; largeSpecChars: number }
   runReview: { mode: RunReviewSetting }
   /** Когда мастер настроек последний раз завершался; null — ещё не запускался. */
   setupAt: string | null
@@ -19,7 +19,7 @@ export interface BoardSettings {
 export const DEFAULT_SETTINGS: BoardSettings = {
   version: 2,
   reviewer: { model: null },
-  specReview: { mode: 'auto', largeSpecChars: 6000 },
+  specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
   setupAt: null,
 }
@@ -44,7 +44,7 @@ function runModeValue(raw: unknown, fallback: RunReviewSetting): RunReviewSettin
   return raw === 'auto' || raw === 'none' || raw === 'self' || raw === 'subagent' ? raw : fallback
 }
 
-function largeSpecValue(raw: unknown, fallback: number): number {
+function charLimitValue(raw: unknown, fallback: number): number {
   return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : fallback
 }
 
@@ -64,7 +64,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
     return {
       version: 2,
       reviewer: { model: null },
-      specReview: { mode: 'auto', largeSpecChars: 6000 },
+      specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
       runReview: { mode: raw.reviewAfterRun === true ? 'subagent' : 'none' },
       setupAt: setupAtValue(raw.setupAt),
     }
@@ -78,7 +78,8 @@ function normalizeSettings(raw: unknown): BoardSettings {
     reviewer: { model: reviewerModelValue(reviewer.model) },
     specReview: {
       mode: specModeValue(spec.mode, 'auto'),
-      largeSpecChars: largeSpecValue(spec.largeSpecChars, 6000),
+      maxSpecChars: charLimitValue(spec.maxSpecChars, 1500),
+      largeSpecChars: charLimitValue(spec.largeSpecChars, 6000),
     },
     runReview: { mode: runModeValue(run.mode, 'none') },
     setupAt: setupAtValue(raw.setupAt),
@@ -149,12 +150,19 @@ function validateLargeSpec(raw: number): number {
   return raw
 }
 
+function validateMaxSpec(raw: number): number {
+  if (!Number.isInteger(raw) || raw < 0) {
+    throw new UserError(3, 'max-spec — целое число от 0')
+  }
+  return raw
+}
+
 /** Меняет выбранные поля и отмечает, что мастер настроек завершён. */
 export function updateSettings(
   root: string,
   patch: {
     reviewer?: { model?: string | null }
-    specReview?: { mode?: SpecReviewSetting; largeSpecChars?: number }
+    specReview?: { mode?: SpecReviewSetting; maxSpecChars?: number; largeSpecChars?: number }
     runReview?: { mode?: RunReviewSetting }
   },
   now: () => string = nowIso,
@@ -173,6 +181,10 @@ export function updateSettings(
         patch.specReview?.mode !== undefined
           ? validateSpecMode(patch.specReview.mode)
           : current.specReview.mode,
+      maxSpecChars:
+        patch.specReview?.maxSpecChars !== undefined
+          ? validateMaxSpec(patch.specReview.maxSpecChars)
+          : current.specReview.maxSpecChars,
       largeSpecChars:
         patch.specReview?.largeSpecChars !== undefined
           ? validateLargeSpec(patch.specReview.largeSpecChars)

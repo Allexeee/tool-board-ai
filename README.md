@@ -157,12 +157,15 @@ CLI субагентов не порождает — он готовит пак�
 board setup --show                                  # текущие настройки
 board setup --spec-review auto|none|self|subagent   # проверка spec
 board setup --large-spec 6000                       # порог большого spec
+board setup --max-spec 1500                         # порог для max-модели
 board setup --run-review none|self|subagent|auto    # run review: plan + код
 board setup --reviewer-model provider/model         # default-вариант ревьюера
 ```
 
-`specReview.mode=auto` (по умолчанию) выбирает субагента для Max/High или
-большого spec, иначе self. `runReview.mode=none` по умолчанию. `self` — модель
+`specReview.mode=auto` (по умолчанию) выбирает субагента по длине spec:
+для варианта `max` — порог `maxSpecChars` (1500), для `high` и остальных —
+`largeSpecChars` (6000); ниже порога — self. `runReview.mode=none` по
+умолчанию. `self` — модель
 основной сессии; `subagent` — `reviewer.model` без `#variant`. Флаги
 `run end --review/--no-review` перекрывают настройку на один забег.
 
@@ -229,7 +232,7 @@ board command add "RUN" "начать забег по очереди" --as owner
 |---|---|
 | `init [каталог] [--yes] [--refresh] [--board-version <ref>] [--board-source <url>]` | скелет проекта, submodule `tools/board`, мастер настроек и обновление `.opencode` |
 | `upgrade <ref>\|--latest [--allow-downgrade]` | переключить `tools/board` и перегенерировать `.opencode` |
-| `setup [--show\|--spec-review\|--large-spec\|--run-review\|--reviewer-model]` | настройки доски |
+| `setup [--show\|--spec-review\|--max-spec\|--large-spec\|--run-review\|--reviewer-model]` | настройки доски |
 | `executor add\|list\|edit\|remove` | исполнители и навыки |
 | `card add\|list\|show\|edit` | карточки |
 | `card shape\|spec-review\|submit\|approve\|amend\|reject\|verdict\|done\|cancel\|reopen` | жизненный цикл |

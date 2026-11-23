@@ -27,6 +27,7 @@ test('settings: v2 defaults', (t) => {
   assert.deepEqual(first.settings, DEFAULT_SETTINGS)
   assert.equal(first.settings.reviewer.model, null)
   assert.equal(first.settings.specReview.mode, 'auto')
+  assert.equal(first.settings.specReview.maxSpecChars, 1500)
   assert.equal(first.settings.specReview.largeSpecChars, 6000)
   assert.equal(first.settings.runReview.mode, 'none')
   assert.ok(existsSync(settingsPath(root)))
@@ -43,7 +44,7 @@ test('settings: вложенное обновление сохраняет ос�
     root,
     {
       reviewer: { model: 'opencode-go/deepseek-v4.1-flash' },
-      specReview: { mode: 'self', largeSpecChars: 4000 },
+      specReview: { mode: 'self', maxSpecChars: 2000, largeSpecChars: 4000 },
       runReview: { mode: 'subagent' },
     },
     () => '2026-11-21T10:00:00.000Z',
@@ -53,6 +54,7 @@ test('settings: вложенное обновление сохраняет ос�
 
   const second = updateSettings(root, { runReview: { mode: 'none' } }, () => '2026-11-21T11:00:00.000Z')
   assert.equal(second.specReview.mode, 'self')
+  assert.equal(second.specReview.maxSpecChars, 2000)
   assert.equal(second.specReview.largeSpecChars, 4000)
   assert.equal(second.reviewer.model, 'opencode-go/deepseek-v4.1-flash')
   assert.equal(second.runReview.mode, 'none')
@@ -74,6 +76,8 @@ test('settings: v1 мигрирует в v2', (t) => {
   assert.equal(enabled.version, 2)
   assert.equal(enabled.runReview.mode, 'subagent')
   assert.equal(enabled.specReview.mode, 'auto')
+  assert.equal(enabled.specReview.maxSpecChars, 1500)
+  assert.equal(enabled.specReview.largeSpecChars, 6000)
   assert.equal(enabled.reviewer.model, null)
   assert.equal(enabled.setupAt, '2026-01-01T00:00:00.000Z')
 
@@ -95,6 +99,10 @@ test('settings: невалидные значения отклоняются', (
   )
   assert.throws(
     () => updateSettings(root, { specReview: { largeSpecChars: -1 } }),
+    isInputError,
+  )
+  assert.throws(
+    () => updateSettings(root, { specReview: { maxSpecChars: -1 } }),
     isInputError,
   )
   assert.throws(
@@ -124,6 +132,7 @@ test('settings: BOM читается, испорченный файл даёт �
     'utf8',
   )
   assert.equal(readSettings(root).specReview.mode, 'self')
+  assert.equal(readSettings(root).specReview.maxSpecChars, 1500)
   assert.equal(readSettings(root).reviewer.model, 'opencode-go/deepseek-v4.1-flash')
 
   writeFileSync(path, '{ не json', 'utf8')

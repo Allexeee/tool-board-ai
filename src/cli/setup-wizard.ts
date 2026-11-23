@@ -56,8 +56,8 @@ async function ask<T>(
 }
 
 /**
- * Интерактивный мастер настроек. Четыре вопроса: spec review, порог большого
- * spec, run review и модель ревьюера. В не-TTY ничего не спрашивает.
+ * Интерактивный мастер настроек. Пять вопросов: spec review, порог для max,
+ * порог большого spec, run review и модель ревьюера. В не-TTY ничего не спрашивает.
  * Потоки можно подменить в тестах.
  */
 export async function runSetupWizard(
@@ -80,6 +80,18 @@ export async function runSetupWizard(
       `Ревью spec [${current.specReview.mode}] (auto|none|self|subagent): `,
       'Допустимо: auto, none, self, subagent.',
       (answer) => (answer.trim() === '' ? current.specReview.mode : oneOf(answer, specModes)),
+    )
+
+    const maxSpecChars = await ask(
+      (prompt) => rl.question(prompt),
+      output,
+      `Порог для max, символов [${current.specReview.maxSpecChars}] (0 — выкл.): `,
+      'Нужно целое число от 0.',
+      (answer) => {
+        if (answer.trim() === '') return current.specReview.maxSpecChars
+        const value = Number(answer.trim())
+        return Number.isInteger(value) && value >= 0 ? value : undefined
+      },
     )
 
     const largeSpecChars = await ask(
@@ -119,7 +131,7 @@ export async function runSetupWizard(
 
     return updateSettings(root, {
       reviewer: { model: reviewerModel },
-      specReview: { mode: specMode, largeSpecChars },
+      specReview: { mode: specMode, maxSpecChars, largeSpecChars },
       runReview: { mode: runMode },
     })
   } finally {

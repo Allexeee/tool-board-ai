@@ -36,7 +36,7 @@ test('setup: v2 defaults читаются через --show', (t) => {
 
   const shown = json(fixture.root, ['setup', '--show'])
   assert.deepEqual(shown.reviewer, { model: null })
-  assert.deepEqual(shown.specReview, { mode: 'auto', largeSpecChars: 6000 })
+  assert.deepEqual(shown.specReview, { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 })
   assert.deepEqual(shown.runReview, { mode: 'none' })
   assert.equal(shown.setupAt, null)
 })
@@ -48,17 +48,18 @@ test('setup: все режимы обновляются флагами', (t) => 
   const updated = json(fixture.root, [
     'setup',
     '--spec-review', 'self',
+    '--max-spec', '2000',
     '--large-spec', '4000',
     '--run-review', 'subagent',
     '--reviewer-model', 'opencode-go/deepseek-v4.1-flash',
   ])
   assert.deepEqual(updated.reviewer, { model: 'opencode-go/deepseek-v4.1-flash' })
-  assert.deepEqual(updated.specReview, { mode: 'self', largeSpecChars: 4000 })
+  assert.deepEqual(updated.specReview, { mode: 'self', maxSpecChars: 2000, largeSpecChars: 4000 })
   assert.deepEqual(updated.runReview, { mode: 'subagent' })
   assert.match(String(updated.setupAt), /^\d{4}-\d{2}-\d{2}T/)
 
   const shown = json(fixture.root, ['setup', '--show'])
-  assert.deepEqual(shown.specReview, { mode: 'self', largeSpecChars: 4000 })
+  assert.deepEqual(shown.specReview, { mode: 'self', maxSpecChars: 2000, largeSpecChars: 4000 })
 })
 
 test('setup: создаёт и удаляет board-reviewer.md по модели', (t) => {
@@ -142,7 +143,7 @@ test('init --json создаёт v2-настройки и просит запу�
     setupRequired: boolean
     settings: {
       reviewer: { model: string | null }
-      specReview: { mode: string; largeSpecChars: number }
+      specReview: { mode: string; maxSpecChars: number; largeSpecChars: number }
       runReview: { mode: string }
       setupAt: string | null
     }
@@ -151,7 +152,11 @@ test('init --json создаёт v2-настройки и просит запу�
   assert.deepEqual(data.updated, [])
   assert.equal(data.setupRequired, true)
   assert.deepEqual(data.settings.reviewer, { model: null })
-  assert.deepEqual(data.settings.specReview, { mode: 'auto', largeSpecChars: 6000 })
+  assert.deepEqual(data.settings.specReview, {
+    mode: 'auto',
+    maxSpecChars: 1500,
+    largeSpecChars: 6000,
+  })
   assert.deepEqual(data.settings.runReview, { mode: 'none' })
   assert.equal(data.settings.setupAt, null)
   assert.ok(existsSync(join(root, '.opencode', 'command', 'setup.md')))
