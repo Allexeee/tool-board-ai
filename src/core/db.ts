@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { migrate, schemaVersionOf, SCHEMA_VERSION } from './schema.ts'
+import { backupBeforeMigration } from './backup.ts'
 
 export { migrate } from './schema.ts'
 
@@ -27,7 +28,11 @@ export function openDb(path: string, options: OpenDbOptions = {}): DatabaseSync 
       `схема ${version} новее, чем понимает инструмент (${SCHEMA_VERSION}): обновите инструмент`,
     )
   }
-  if (version < SCHEMA_VERSION && !options.allowOutdated) migrate(db)
+  if (version < SCHEMA_VERSION && !options.allowOutdated) {
+    // Перед изменением схемы — копия: миграция необратима.
+    if (version > 0) backupBeforeMigration(db, path)
+    migrate(db)
+  }
 
   return db
 }

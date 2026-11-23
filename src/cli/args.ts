@@ -23,13 +23,14 @@ const KNOWN_FLAGS = new Set([
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
   'large-spec', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
+  'format', 'out', 'md',
 ])
 
 const BOOLEAN_FLAGS = new Set([
   'json', 'help', 'version', 'needs-merge', 'no-needs-merge', 'review', 'no-review',
   'waive-dependents', 'done', 'reopen', 'top', 'bottom', 'mine', 'all', 'block',
   'force', 'fresh', 'no-merge', 'yes', 'show', 'refresh', 'review-after-run',
-  'no-review-after-run', 'allow-downgrade', 'clear-tags',
+  'no-review-after-run', 'allow-downgrade', 'clear-tags', 'md',
 ])
 
 export type FlagValue = string | boolean | string[]
@@ -120,7 +121,7 @@ export function stringsFlag(args: ParsedArgs, name: string): string[] {
   if (value === undefined) return []
   if (value === true) throw new UserError(3, `--${name} требует значения`)
   if (Array.isArray(value)) return value
-  return [value]
+  return [String(value)]
 }
 
 export function boolFlag(args: ParsedArgs, name: string): boolean {

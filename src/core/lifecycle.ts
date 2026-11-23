@@ -22,9 +22,9 @@ import {
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
-import { getActiveRun, listRunCards, requireStandaloneCard, RUN_LEASE_MS, type Run } from './runs.ts'
+import { getActiveRun, listRunCards, requireStandaloneCard, RUN_LEASE_MS } from './runs.ts'
 import { assertSpecReview, type SpecReviewGate } from './spec-review.ts'
-import type { Card, CardStatus } from './types.ts'
+import type { Card, CardStatus, Run } from './types.ts'
 
 /** Навык owner означает owner-карточку: владелец закрывает её одной командой. */
 const OWNER = 'owner'
@@ -486,7 +486,7 @@ export function deferCard(
       subject: card.id,
       before: card,
       after: updated,
-      note: input.note?.trim() || null,
+      note: input.note?.trim() || undefined,
     })
     return updated
   })

@@ -36,7 +36,7 @@ const HELP = `board — доска карточек для людей и аге�
   term add|list|show
   command add|list
   review list|finding|submit
-  release / now / doctor
+  release / now / doctor / backup / export
 
   --json                  машинный вывод
   --version               версия инструмента

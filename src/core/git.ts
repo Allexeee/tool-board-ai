@@ -479,6 +479,19 @@ export function revertMerge(root: string, mergeCommit: string): string {
   )
 }
 
+/** Тег релиза `v<версия>`: ставится один раз, повторный release не падает. */
+export function tagRelease(root: string, version: string): boolean {
+  const tag = `v${version}`
+  try {
+    runGit(root, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])
+    return false
+  } catch {
+    // тега ещё нет — ставим ниже
+  }
+  runGit(root, ['tag', '-a', tag, '-m', `release ${tag}`])
+  return true
+}
+
 /** Мержит `dev` в `main` без fast-forward; возвращает release-коммит. */
 export function releaseToMain(root: string): string {
   if (!isRepo(root)) throw new UserError(3, `не git-репозиторий: ${root}`)

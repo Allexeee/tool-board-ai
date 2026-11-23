@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { getCard } from '../../src/core/cards.ts'
@@ -146,4 +146,25 @@ test('refreshMergeState без merge_commit ставит in_dev/in_main в false
   const refreshed = refreshMergeState(db, root, getCard(db, card.id)!)
   assert.equal(refreshed.inDev, false)
   assert.equal(refreshed.inMain, false)
+})
+
+test('release ставит тег версии, повторный release не падает', (t) => {
+  const { root, db } = repoBoard(t)
+  merged(root, db, 'done', 'developer')
+
+  const first = release(db, root, 'owner')
+  assert.ok(first.commit)
+
+  const version = (
+    JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      version: string
+    }
+  ).version
+  const tags = runGit(root, ['tag', '--list'])
+  assert.match(tags, new RegExp(`^v${version.replace(/\./g, '\\.')}$`, 'm'))
+
+  const second = release(db, root, 'owner')
+  assert.ok(second.commit)
+  const after = runGit(root, ['tag', '--list']).trim().split('\n').filter(Boolean)
+  assert.equal(after.filter((tag) => tag === `v${version}`).length, 1)
 })

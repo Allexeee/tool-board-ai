@@ -41,7 +41,7 @@ function repoBoard(t: { after: (fn: () => void) => void }): { root: string; db: 
 
 test('reopen с критической находкой: карточка ждёт, находка блокирует release', (t) => {
   const { root, db } = repoBoard(t)
-  const card = seedCard(db, { phase: 'task', status: 'review', needs_merge: true })
+  const card = seedCard(db, { phase: 'task', status: 'review', needsMerge: true })
 
   const result = submitVerdict(db, {
     cardId: card.id,
@@ -66,8 +66,8 @@ test('reopen с критической находкой: карточка ждё
 
 test('done с important/other не блокирует release, critical — блокирует', (t) => {
   const { root, db } = repoBoard(t)
-  const important = seedCard(db, { phase: 'task', status: 'review', needs_merge: true })
-  const critical = seedCard(db, { phase: 'task', status: 'review', needs_merge: true })
+  const important = seedCard(db, { phase: 'task', status: 'review', needsMerge: true })
+  const critical = seedCard(db, { phase: 'task', status: 'review', needsMerge: true })
 
   submitVerdict(db, {
     cardId: important.id,
@@ -102,7 +102,7 @@ test('done с important/other не блокирует release, critical — бл
 
 test('addFinding наследует skill/needs_merge/scope и создаёт запрос', (t) => {
   const { db } = board(t)
-  const card = seedCard(db, { phase: 'task', status: 'review', needs_merge: true })
+  const card = seedCard(db, { phase: 'task', status: 'review', needsMerge: true })
   db.prepare("update cards set scope = ?, skill = 'dev' where id = ?").run(
     JSON.stringify(['src/**', 'tests/**']),
     card.id,
