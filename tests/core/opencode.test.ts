@@ -254,6 +254,8 @@ test('spec-review и review команды — оркестраторы с plan/
   assert.match(spec, /subagent: false/)
   assert.match(spec, /card spec-review/)
   assert.match(spec, /specReview\.mode/)
+  assert.match(spec, /board card submit/)
+  assert.match(spec, /При `reopen` submit не делай/)
   assert.match(review, /subagent: false/)
   assert.match(review, /--plan done\|failed/)
   assert.match(review, /acceptance|критери/)

@@ -11,6 +11,7 @@ subagent: false
    ограничения, зависимости, риски и возможность написать plan.
 4. `subagent` — запусти `board-reviewer` и передай ему spec и acceptance.
 5. Если spec неполный, сначала дополни его из контекста проекта, затем задай
-   вопрос владельцу (`ask`/`block`). Не делай submit.
+   вопрос владельцу (`ask`/`block`) и запиши `--verdict reopen`.
 6. Запиши результат: `board card spec-review $1 --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."`.
-7. Владелец утверждает spec через `board card approve $1`.
+7. При вердикте `done` отправь карточку на утверждение: `board card submit $1 --as <исполнитель>` — без этого владелец не сможет `approve`. При `reopen` submit не делай.
+8. Владелец утверждает spec через `board card approve $1`.
