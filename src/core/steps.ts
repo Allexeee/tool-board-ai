@@ -4,6 +4,8 @@ import { getCard } from './cards.ts'
 import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
+import { RUN_LEASE_MS } from './runs.ts'
+import type { Card } from './types.ts'
 
 /** Чек-лист карточки: шаги не влияют на статус, их отмечает исполнитель. */
 export interface Step {
@@ -52,8 +54,10 @@ const toStep = (row: Row): Step => ({
   doneAt: row.done_at,
 })
 
-function requireCard(db: DatabaseSync, cardId: string): void {
-  if (!getCard(db, cardId)) throw new UserError(3, `карточка ${cardId} не найдена`)
+function requireCard(db: DatabaseSync, cardId: string): Card {
+  const card = getCard(db, cardId)
+  if (!card) throw new UserError(3, `карточка ${cardId} не найдена`)
+  return card
 }
 
 function normalizeSeq(raw: number): number {
@@ -80,7 +84,7 @@ export function listSteps(db: DatabaseSync, cardId: string): Step[] {
 /** Новый шаг встаёт в конец: `max(seq) + 1`, дырки не переиспользуются. */
 export function addStep(db: DatabaseSync, input: AddStepInput): Step {
   return tx(db, () => {
-    requireCard(db, input.cardId)
+    const card = requireCard(db, input.cardId)
     const text = input.text.trim()
     if (!text) throw new UserError(3, 'нужен текст шага')
 
@@ -91,6 +95,19 @@ export function addStep(db: DatabaseSync, input: AddStepInput): Step {
 
     db.prepare('insert into steps (card_id, seq, text, done, done_at) values (?, ?, ?, 0, null)')
       .run(input.cardId, seq, text)
+
+    // Шаг — признак живой работы: продлеваем lease, чтобы now/doctor не сняли карточку.
+    if (card.status === 'booked' || card.status === 'in_progress') {
+      const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
+      db.prepare('update cards set lease_until = ?, updated_at = ? where id = ?').run(
+        leaseUntil,
+        nowIso(),
+        card.id,
+      )
+      if (card.runId) {
+        db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, card.runId)
+      }
+    }
 
     const step = getStep(db, input.cardId, seq)!
     appendEvent(db, {

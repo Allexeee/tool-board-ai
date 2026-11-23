@@ -74,6 +74,15 @@ test('плагин ищет tools/board раньше BOARD_CLI и не зовё�
   assert.match(plugin, /board не установлен/)
 })
 
+test('навыки говорят, когда продлевать lease', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const read = (name: string) =>
+    readFileSync(join(root, '.opencode', 'skills', name, 'SKILL.md'), 'utf8')
+  assert.match(read('board-work'), /touch/)
+  assert.match(read('board-run'), /touch/)
+})
+
 test('команда ревью упоминает review list и review submit', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
