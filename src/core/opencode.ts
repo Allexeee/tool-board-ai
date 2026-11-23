@@ -28,7 +28,7 @@ export const AGENTS_BLOCK = [
   '- Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.',
   '- Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.',
   '- После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.',
-  '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`.',
+  '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
