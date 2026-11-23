@@ -222,6 +222,9 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-spec'), /Тип карточки/)
   assert.match(read('board-spec'), /feat:/)
   assert.match(read('board-spec'), /review:/)
+  for (const kind of ['feat:', 'fix:', 'perf:', 'sec:', 'docs:', 'test:', 'chore:', 'review:']) {
+    assert.match(read('board-spec'), new RegExp(kind), kind)
+  }
   assert.match(read('board-work'), /Сделал \{ID\}/)
   assert.match(read('board-work'), /Перехожу/)
   assert.match(read('board-work'), /две строки/)
@@ -229,6 +232,7 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-run'), /Завершил \{RUN\}/)
   assert.match(read('board-run'), /1\. \{ID\}/)
   assert.match(read('board-run'), /Ревью ожидают задачи/)
+  assert.match(read('board-run'), /Ревью сейчас или до релиза\?/)
   assert.match(read('board-run'), /Следующий Run/)
   assert.match(read('board-run'), /Запустить следующий Run\?/)
   assert.match(read('board-work'), /первая карточка забега — без «Сделал»/)
