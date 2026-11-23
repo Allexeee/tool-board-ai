@@ -237,6 +237,35 @@ test('finish с merge_commit вне dev даёт ошибку рассинхро
   )
 })
 
+test('finish после reopen мержит новые коммиты ветки', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'booked',
+    skill: 'dev',
+    scope: ['src/**'],
+  })
+  const { branch, worktree } = startCardBranch(root, 'developer', card)
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src', `${card.id}.txt`), '1\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', 'first'])
+  const first = mergeToDev(root, branch, card.id)
+
+  // Reopen: в ветке появился новый коммит, старый merge уже в dev.
+  writeFileSync(join(worktree, 'src', `${card.id}.txt`), '2\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', 'second'])
+  const tip = runGit(worktree, ['rev-parse', 'HEAD'])
+  db.prepare(
+    "update cards set status = 'in_progress', holder = 'developer', branch = ?, needs_merge = 1, merge_commit = ? where id = ?",
+  ).run(branch, first, card.id)
+
+  const finished = finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root })
+  assert.notEqual(finished.mergeCommit, first)
+  assert.equal(isAncestor(root, tip, 'dev'), true)
+})
+
 test('release ставит тег версии, повторный release не падает', (t) => {
   const { root, db } = repoBoard(t)
   merged(root, db, 'done', 'developer')
