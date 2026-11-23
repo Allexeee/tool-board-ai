@@ -1,10 +1,18 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { readFileSync } from 'node:fs'
 import { UserError } from '../cli/errors.ts'
 import { listCards } from './cards.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { refreshMergeState, releaseToMain } from './git.ts'
+import { refreshMergeState, releaseToMain, tagRelease } from './git.ts'
 import type { Card } from './types.ts'
+
+/** Версия пакета board (package.json рядом с src), по ней ставится тег релиза. */
+function boardVersion(): string {
+  const raw = readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+  const parsed = JSON.parse(raw) as { version?: string }
+  return parsed.version?.trim() || '0.0.0'
+}
 
 /**
  * Релиз §7.5: команда владельца. Мержит `dev` в `main` и обновляет `in_main`.
@@ -44,6 +52,8 @@ export function release(
   }
 
   const commit = releaseToMain(root)
+  const version = boardVersion()
+  tagRelease(root, version)
 
   return tx(db, () => {
     const cards: Card[] = []
