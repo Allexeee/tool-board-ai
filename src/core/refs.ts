@@ -77,7 +77,7 @@ export function addRef(db: DatabaseSync, input: AddRefInput): Ref {
 
     const ref = db
       .prepare('select * from refs where id = ?')
-      .get(Number(result.lastInsertRowid)) as Row
+      .get(Number(result.lastInsertRowid)) as unknown as Row
     appendEvent(db, {
       type: 'ref.added',
       actor: input.actor ?? DEFAULT_ACTOR,
@@ -99,7 +99,7 @@ export function removeRef(db: DatabaseSync, input: RemoveRefInput): Ref {
   return tx(db, () => {
     const row = db
       .prepare('select * from refs where id = ? and card_id = ?')
-      .get(input.id, input.cardId) as Row | undefined
+      .get(input.id, input.cardId) as unknown as Row | undefined
     if (!row) throw new UserError(3, `ссылка ${input.id} не найдена у карточки ${input.cardId}`)
 
     db.prepare('delete from refs where id = ?').run(input.id)

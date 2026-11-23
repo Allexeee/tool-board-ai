@@ -75,7 +75,7 @@ function requiredText(raw: string, message: string): string {
 }
 
 function getItem(db: DatabaseSync, id: number): Discussion {
-  const row = db.prepare('select * from discussion where id = ?').get(id) as Row
+  const row = db.prepare('select * from discussion where id = ?').get(id) as unknown as Row
   return toDiscussion(row)
 }
 
@@ -113,7 +113,7 @@ export function answer(db: DatabaseSync, input: AnswerInput): Discussion {
 
     const row = db
       .prepare('select * from discussion where id = ? and card_id = ?')
-      .get(input.questionId, input.cardId) as Row | undefined
+      .get(input.questionId, input.cardId) as unknown as Row | undefined
     if (!row || row.kind !== 'question') {
       throw new UserError(
         3,

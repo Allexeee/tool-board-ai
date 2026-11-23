@@ -16,9 +16,8 @@ function run(dir: string, args: string[], env: NodeJS.ProcessEnv = {}): Result {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
-    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1', ...env },
     windowsHide: true,
-    env: { ...process.env, ...env },
   })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
 }

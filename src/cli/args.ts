@@ -120,7 +120,7 @@ export function stringsFlag(args: ParsedArgs, name: string): string[] {
   if (value === undefined) return []
   if (value === true) throw new UserError(3, `--${name} требует значения`)
   if (Array.isArray(value)) return value
-  return [value]
+  return [String(value)]
 }
 
 export function boolFlag(args: ParsedArgs, name: string): boolean {

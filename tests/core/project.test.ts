@@ -46,7 +46,7 @@ test('makeBoard создаёт базу со всеми таблицами сх�
   const tables = fixture.db
     .prepare("select name from sqlite_master where type = 'table' order by name")
     .all()
-    .map((row: { name: string }) => row.name)
+    .map((row) => String(row.name))
 
   for (const table of TABLES) {
     assert.ok(tables.includes(table), `missing table ${table}`)
