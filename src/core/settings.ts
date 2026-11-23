@@ -16,6 +16,8 @@ export interface BoardSettings {
   branches: { main: string | null; dev: string | null }
   /** Ведётся ли проект в git; false — доска без мержа и веток. */
   git: boolean
+  /** Приватный git-репозиторий для копии базы; null — sync выключен. */
+  sync: { remote: string | null }
   /** Когда мастер настроек последний раз завершался; null — ещё не запускался. */
   setupAt: string | null
 }
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: BoardSettings = {
   runReview: { mode: 'none' },
   branches: { main: null, dev: null },
   git: true,
+  sync: { remote: null },
   setupAt: null,
 }
 
@@ -60,6 +63,12 @@ function branchValue(raw: unknown): string | null {
   return /^[A-Za-z0-9._/-]+$/.test(value) ? value : null
 }
 
+function syncRemoteValue(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const value = raw.trim()
+  return value === '' ? null : value
+}
+
 /** Читает модель без варианта; невалидное значение при чтении считается пустым. */
 function reviewerModelValue(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
@@ -80,6 +89,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       runReview: { mode: raw.reviewAfterRun === true ? 'subagent' : 'none' },
       branches: { main: null, dev: null },
       git: true,
+      sync: { remote: null },
       setupAt: setupAtValue(raw.setupAt),
     }
   }
@@ -102,6 +112,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       dev: branchValue(branches.dev),
     },
     git: raw.git === false ? false : true,
+    sync: { remote: syncRemoteValue(isRecord(raw.sync) ? raw.sync.remote : null) },
     setupAt: setupAtValue(raw.setupAt),
   }
 }
@@ -197,6 +208,7 @@ export function updateSettings(
     runReview?: { mode?: RunReviewSetting }
     branches?: { main?: string | null; dev?: string | null }
     git?: boolean
+    sync?: { remote?: string | null }
   },
   now: () => string = nowIso,
 ): BoardSettings {
@@ -240,6 +252,10 @@ export function updateSettings(
           : current.branches.dev,
     },
     git: patch.git !== undefined ? patch.git : current.git,
+    sync: {
+      remote:
+        patch.sync?.remote !== undefined ? syncRemoteValue(patch.sync.remote) : current.sync.remote,
+    },
     setupAt: now(),
   }
   writeSettings(root, next)
