@@ -551,6 +551,7 @@ test('AGENTS и board-work описывают ревью пакетом', () => 
   const work = readFileSync(join(root, '.opencode', 'skills', 'board-work', 'SKILL.md'), 'utf8')
 
   assert.match(agents, /Ревью идёт пакетом/)
+  assert.match(agents, /одиночный `take` без забега/)
   assert.match(agents, /сборник в `deferred`/)
   assert.match(agents, /finding-карточка/)
   assert.doesNotMatch(agents, /findings становятся карточками/)
