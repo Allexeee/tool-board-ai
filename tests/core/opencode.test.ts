@@ -57,6 +57,7 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   assert.match(plugin, /board\.ts/)
   assert.match(plugin, /BOARD_CLI/)
   assert.match(plugin, /Plugin\.define/)
+  assert.match(plugin, /windowsHide: true/)
   assert.match(plugin, /error\.stdout\?\.trim\(\)\s*\|\|\s*error\.stderr\?\.trim\(\)\s*\|\|\s*error\.message/)
 })
 
