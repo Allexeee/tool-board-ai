@@ -452,10 +452,15 @@ test('board-work: целевые тесты на карточке, полный 
   writeOpenCodeFiles(root)
   const work = readFileSync(join(root, '.opencode', 'skills', 'board-work', 'SKILL.md'), 'utf8')
   assert.match(work, /целевые тесты/)
-  assert.match(work, /перед релизом/)
+  assert.match(work, /bump-карточки перед релизом/)
   assert.match(work, /настройки, жизненный цикл, git-слой/)
-  assert.match(work, /pytest/)
   assert.doesNotMatch(work, /перед `run end`/)
+  assert.doesNotMatch(work, /node --test` и `tsc/)
+
+  const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8')
+  assert.match(readme, /повторный — только дельта/)
+  assert.match(readme, /finding-карточка/)
+  assert.doesNotMatch(readme, /до 3 important/)
 })
 
 test('команда ревью описывает пакет, бюджет и итоги прохода', () => {
