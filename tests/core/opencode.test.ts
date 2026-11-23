@@ -447,13 +447,15 @@ test('ревьюер не создаёт карточки и пишет итог
   assert.match(source, /--verdict done\|reopen/)
 })
 
-test('board-work: целевые тесты на карточке, полный прогон на забег', () => {
+test('board-work: целевые тесты на карточке, полный прогон перед релизом', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
   const work = readFileSync(join(root, '.opencode', 'skills', 'board-work', 'SKILL.md'), 'utf8')
   assert.match(work, /целевые тесты/)
-  assert.match(work, /перед `run end`|перед run end/)
-  assert.match(work, /settings, lifecycle, git, runs, queue, steps/)
+  assert.match(work, /перед релизом/)
+  assert.match(work, /настройки, жизненный цикл, git-слой/)
+  assert.match(work, /pytest/)
+  assert.doesNotMatch(work, /перед `run end`/)
 })
 
 test('команда ревью описывает пакет, бюджет и итоги прохода', () => {
