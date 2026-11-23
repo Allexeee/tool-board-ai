@@ -203,6 +203,58 @@ test('плагин собирает аргументы run note, очереди 
     'export', '--format', 'md',
   ])
   assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'backup' }), ['backup'])
+  assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'backup', out: 'C:/x.db' }), [
+    'backup', 'C:/x.db',
+  ])
+})
+
+test('плагин передаёт в card add приоритеты, scope, теги и note', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const args = buildArgs(pluginSource(root), 'cardArgs')({
+    action: 'add',
+    group: 'UI',
+    title: 't',
+    spec: 's',
+    acceptance: ['a'],
+    tags: ['new'],
+    importance: 2,
+    urgency: 3,
+    scope: ['src/**'],
+    needs_merge: false,
+    review: true,
+    note: 'n',
+    skill: 'dev',
+    as: 'owner',
+  })
+
+  const pairs: Array<[string, string | null]> = [
+    ['--tag', 'new'],
+    ['--importance', '2'],
+    ['--urgency', '3'],
+    ['--scope', 'src/**'],
+    ['--no-needs-merge', null],
+    ['--review', null],
+    ['--note', 'n'],
+  ]
+  for (const [flagName, expected] of pairs) {
+    if (expected === null) {
+      assert.ok(args.includes(flagName), flagName)
+    } else {
+      assert.equal(args[args.indexOf(flagName) + 1], expected, flagName)
+    }
+  }
+})
+
+test('плагин: sub обязателен, run list компактен, код 1/2 не ошибка', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const source = pluginSource(root)
+
+  assert.match(source, /нужен sub: add\|done\|remove\|list/)
+  assert.match(source, /runRow/)
+  assert.match(source, /status >= 3/)
+  assert.match(source, /'touch'.*\[.id., .as.\]|schema\(\{ id: \{ type: 'string' \}, as: \{ type: 'string' \} \}, \['id', 'as'\]\)/)
 })
 
 test('плагин объявляет tool-ы touch, doctor, backup, release, queue', () => {
