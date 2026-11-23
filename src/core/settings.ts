@@ -12,6 +12,8 @@ export interface BoardSettings {
   reviewer: { model: string | null }
   specReview: { mode: SpecReviewSetting; maxSpecChars: number; largeSpecChars: number }
   runReview: { mode: RunReviewSetting }
+  /** Имена веток; null — определить по git. */
+  branches: { main: string | null; dev: string | null }
   /** Когда мастер настроек последний раз завершался; null — ещё не запускался. */
   setupAt: string | null
 }
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: BoardSettings = {
   reviewer: { model: null },
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
+  branches: { main: null, dev: null },
   setupAt: null,
 }
 
@@ -48,6 +51,12 @@ function charLimitValue(raw: unknown, fallback: number): number {
   return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : fallback
 }
 
+function branchValue(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const value = raw.trim()
+  return /^[A-Za-z0-9._/-]+$/.test(value) ? value : null
+}
+
 /** Читает модель без варианта; невалидное значение при чтении считается пустым. */
 function reviewerModelValue(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
@@ -66,6 +75,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       reviewer: { model: null },
       specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
       runReview: { mode: raw.reviewAfterRun === true ? 'subagent' : 'none' },
+      branches: { main: null, dev: null },
       setupAt: setupAtValue(raw.setupAt),
     }
   }
@@ -73,6 +83,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
   const reviewer = isRecord(raw.reviewer) ? raw.reviewer : {}
   const spec = isRecord(raw.specReview) ? raw.specReview : {}
   const run = isRecord(raw.runReview) ? raw.runReview : {}
+  const branches = isRecord(raw.branches) ? raw.branches : {}
   return {
     version: 2,
     reviewer: { model: reviewerModelValue(reviewer.model) },
@@ -82,6 +93,10 @@ function normalizeSettings(raw: unknown): BoardSettings {
       largeSpecChars: charLimitValue(spec.largeSpecChars, 6000),
     },
     runReview: { mode: runModeValue(run.mode, 'none') },
+    branches: {
+      main: branchValue(branches.main),
+      dev: branchValue(branches.dev),
+    },
     setupAt: setupAtValue(raw.setupAt),
   }
 }
@@ -157,6 +172,17 @@ function validateMaxSpec(raw: number): number {
   return raw
 }
 
+/** Пустая строка — сброс на автоопределение по git. */
+function validateBranchInput(raw: string | null): string | null {
+  if (raw === null) return null
+  const value = raw.trim()
+  if (value === '') return null
+  if (!/^[A-Za-z0-9._/-]+$/.test(value)) {
+    throw new UserError(3, 'имя ветки: буквы, цифры, точка, дефис, слэш, подчёркивание')
+  }
+  return value
+}
+
 /** Меняет выбранные поля и отмечает, что мастер настроек завершён. */
 export function updateSettings(
   root: string,
@@ -164,6 +190,7 @@ export function updateSettings(
     reviewer?: { model?: string | null }
     specReview?: { mode?: SpecReviewSetting; maxSpecChars?: number; largeSpecChars?: number }
     runReview?: { mode?: RunReviewSetting }
+    branches?: { main?: string | null; dev?: string | null }
   },
   now: () => string = nowIso,
 ): BoardSettings {
@@ -195,6 +222,16 @@ export function updateSettings(
         patch.runReview?.mode !== undefined
           ? validateRunMode(patch.runReview.mode)
           : current.runReview.mode,
+    },
+    branches: {
+      main:
+        patch.branches?.main !== undefined
+          ? validateBranchInput(patch.branches.main)
+          : current.branches.main,
+      dev:
+        patch.branches?.dev !== undefined
+          ? validateBranchInput(patch.branches.dev)
+          : current.branches.dev,
     },
     setupAt: now(),
   }

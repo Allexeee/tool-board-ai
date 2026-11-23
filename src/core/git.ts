@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
 import { nowIso } from './clock.ts'
+import { readSettings } from './settings.ts'
 import { scopeAllows } from './scope.ts'
 import type { Card } from './types.ts'
 
@@ -204,9 +205,27 @@ export function checkoutBoardRef(
   runGit(dir, ['checkout', ref])
 }
 
-/** Ветки фиксированы: `main` и `dev` (§7.1). */
-export function resolveBranches(_root: string): { main: string; dev: string } {
-  return { main: 'main', dev: 'dev' }
+/**
+ * Ветки §7.1: из настроек, иначе по git — `main`/`master` и `dev`/`develop`.
+ * Проект с другими именами настраивает их через `board setup --branch-main/--branch-dev`.
+ */
+export function resolveBranches(root: string): { main: string; dev: string } {
+  let explicit: { main: string | null; dev: string | null } | null = null
+  try {
+    explicit = readSettings(root).branches
+  } catch {
+    explicit = null
+  }
+  const main = explicit?.main ?? detectBranch(root, ['main', 'master']) ?? 'main'
+  const dev = explicit?.dev ?? detectBranch(root, ['dev', 'develop']) ?? 'dev'
+  return { main, dev }
+}
+
+function detectBranch(root: string, candidates: string[]): string | null {
+  for (const name of candidates) {
+    if (branchExists(root, name)) return name
+  }
+  return null
 }
 
 export function currentBranch(dir: string): string | null {
