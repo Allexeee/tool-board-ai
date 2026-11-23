@@ -223,6 +223,8 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-spec'), /review:/)
   assert.match(read('board-work'), /Завершил/)
   assert.match(read('board-work'), /Перехожу/)
+  assert.match(read('board-work'), /первая карточка забега — без «Завершил»/)
+  assert.match(read('board-work'), /это шум/)
   assert.match(read('board-spec'), /reviewRequired/)
   assert.match(read('board-run'), /не больше 3/)
   assert.match(read('board-run'), /только части только что разобранной/)
