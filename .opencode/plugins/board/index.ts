@@ -83,6 +83,47 @@ function flag(args, name, value) {
   args.push('--' + name, String(value))
 }
 
+// Компактные ответы для агента: CLI печатает карточку целиком, плагин — нет.
+function cardRow(card) {
+  const row = { id: card.id, status: card.status }
+  if (card.title) row.title = card.title
+  if (card.skill) row.skill = card.skill
+  if (card.group) row.group = card.group
+  if (card.holder) row.holder = card.holder
+  return row
+}
+
+function compactCard(value) {
+  if (Array.isArray(value)) return value.map(compactCard)
+  if (!value || typeof value !== 'object') return value
+  if (typeof value.id !== 'string' || typeof value.status !== 'string') return value
+  const out = { id: value.id, status: value.status }
+  if (value.branch) out.branch = value.branch
+  if (value.position !== null && value.position !== undefined) out.position = value.position
+  return out
+}
+
+function compactNow(value) {
+  if (!value || typeof value !== 'object') return value
+  const out = { ...value }
+  if (out.header && Array.isArray(out.header.lastDone)) {
+    out.header = { ...out.header, lastDone: out.header.lastDone.map(cardRow) }
+  }
+  if (Array.isArray(out.cards)) out.cards = out.cards.map(cardRow)
+  if (Array.isArray(out.ownerCards)) out.ownerCards = out.ownerCards.map(cardRow)
+  return out
+}
+
+async function withJson(result, fn) {
+  const resolved = await result
+  if (!resolved || resolved.isError) return resolved
+  try {
+    return { ...resolved, content: JSON.stringify(fn(JSON.parse(resolved.content))) }
+  } catch {
+    return resolved
+  }
+}
+
 function cardArgs(input) {
   const a = input.action
   if (a === 'step' || a === 'ref' || a === 'dep' || a === 'scope') {
@@ -306,7 +347,7 @@ export default Plugin.define({
           if (input.tab) args.push(input.tab)
           if (input.mine) args.push('--mine')
           flag(args, 'as', input.as)
-          return call(ctx, ['now', ...args], context)
+          return withJson(call(ctx, ['now', ...args], context), compactNow)
         },
       })
 
@@ -371,7 +412,12 @@ export default Plugin.define({
           if (input.action === 'approve' && input.as !== 'owner') {
             return { content: 'approve — только владелец: укажите as: owner', isError: true }
           }
-          return call(ctx, cardArgs(input), context)
+          const result = call(ctx, cardArgs(input), context)
+          if (input.action === 'show') return result
+          if (input.action === 'list') {
+            return withJson(result, (value) => (Array.isArray(value) ? value.map(cardRow) : value))
+          }
+          return withJson(result, compactCard)
         },
       })
 

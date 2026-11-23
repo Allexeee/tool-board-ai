@@ -446,3 +446,48 @@ test('сгенерированный плагин синтаксически в�
   const result = spawnSync(process.execPath, ['--check', copy], { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr)
 })
+
+test('плагин сокращает карточку до id, статуса и ветки', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const compactCard = new Function(`${extractFunction(pluginSource(root), 'compactCard')}; return compactCard`)()
+  const card = {
+    id: 'UI-1', status: 'review', title: 'x', body: 'b', acceptance: 'a',
+    branch: 'card/UI-1', position: 3, scope: ['src/**'],
+  }
+  assert.deepEqual(compactCard(card), {
+    id: 'UI-1', status: 'review', branch: 'card/UI-1', position: 3,
+  })
+  assert.deepEqual(compactCard([card]), [{
+    id: 'UI-1', status: 'review', branch: 'card/UI-1', position: 3,
+  }])
+  const step = { seq: 1, text: 'шаг', done: false }
+  assert.deepEqual(compactCard(step), step)
+})
+
+test('плагин сокращает now и list, show остаётся полным', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const source = pluginSource(root)
+  const compactNow = new Function(
+    `${extractFunction(source, 'cardRow')}\n${extractFunction(source, 'compactNow')}\nreturn compactNow`,
+  )()
+  const big = { id: 'CORE-21', status: 'done', title: 't', body: 'big', acceptance: 'a' }
+  const now = {
+    view: 1,
+    header: { doneToday: 2, lastDone: [big] },
+    cards: [big],
+    deferredCount: 1,
+  }
+  const compacted = compactNow(now)
+  assert.equal(compacted.view, 1)
+  assert.equal(compacted.header.doneToday, 2)
+  assert.equal(compacted.header.lastDone[0].body, undefined)
+  assert.equal(compacted.header.lastDone[0].id, 'CORE-21')
+  assert.equal(compacted.cards[0].body, undefined)
+  assert.equal(compacted.deferredCount, 1)
+
+  assert.match(source, /withJson/)
+  assert.match(source, /if \(input\.action === 'show'\) return result/)
+  assert.match(source, /compactNow/)
+})
