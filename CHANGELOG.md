@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.4.5 — 24.11.2026
+
+Исправления аудита 1.4.4 и закрытие отложенных сборников.
+
+- `openDb`: `busy_timeout` до WAL, retry с backoff и понятная ошибка вместо `database is locked`; merge в `finish` вне транзакции.
+- Ветки `main`/`dev` из настроек с автодетектом `master`/`develop`: `setup --branch-main/--branch-dev`.
+- `/spec-review` при `done` сам вызывает `card submit`.
+- `run note` — append-only история (`run_notes`), старые заметки мигрируют, `run list` отдаёт проходы.
+- Плагин: аргументы `card add` (приоритеты, scope, теги, note), `backup out`, обязательные `touch --as` и `sub`, компакт `run list`, коды 1/2 не считаются ошибкой.
+- Ревьюер: shell ограничен read-only allowlist, тесты не гоняет.
+- README, подкомандная справка и флаги в `help`.
+- `init --no-git`: доска без git, карточки без мержа, doctor без веток.
+- `take` требует план при `reviewRequired`; `--no-plan` фиксирует отказ от плана; doctor видит долг.
+- Лицензия MIT, метаданные пакета, Windows-джоба в CI, актуальный lockfile.
+- Границы продукта: local-only; `sync push/pull` — копия базы в приватном git.
+- `lock` снимается по возрасту и мёртвому PID; ротация `backup` (10 копий); `card list --limit`.
+- Находка по owner-карточке — `dev`-задача; `reorder` чистит позиции owner; `amend` owner возвращает в `new`.
+- `defer` перенумеровывает очередь; severity `other` вместо `minor` в текстах.
+
 ## v1.4.4 — 23.11.2026
 
 Ревью и проверки дешевле, установка — с подсказкой.
