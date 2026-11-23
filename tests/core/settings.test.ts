@@ -85,6 +85,26 @@ test('settings: v1 мигрирует в v2', (t) => {
   assert.equal(readSettings(root).runReview.mode, 'none')
 })
 
+test('settings: v2 без maxSpecChars получает 1500', (t) => {
+  const root = tempDir(t)
+  ensureSettings(root)
+  writeFileSync(
+    settingsPath(root),
+    JSON.stringify({
+      version: 2,
+      reviewer: { model: null },
+      specReview: { mode: 'auto', largeSpecChars: 4000 },
+      runReview: { mode: 'none' },
+      setupAt: null,
+    }),
+    'utf8',
+  )
+
+  const settings = readSettings(root)
+  assert.equal(settings.specReview.maxSpecChars, 1500)
+  assert.equal(settings.specReview.largeSpecChars, 4000)
+})
+
 test('settings: невалидные значения отклоняются', (t) => {
   const root = tempDir(t)
   ensureSettings(root)

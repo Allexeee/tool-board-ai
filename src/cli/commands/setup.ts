@@ -15,7 +15,9 @@ import { isJsonMode, ok } from '../output.ts'
 
 function human(settings: BoardSettings, effectiveModel: string | null): string {
   const lines = [
-    `Ревью spec: ${settings.specReview.mode} (порог max: ${settings.specReview.maxSpecChars}, остальные: ${settings.specReview.largeSpecChars} символов)`,
+    `Ревью spec: ${settings.specReview.mode}`,
+    `Порог max: ${settings.specReview.maxSpecChars} символов`,
+    `Порог остальных: ${settings.specReview.largeSpecChars} символов`,
     `Ветки: ${settings.branches.main ?? 'авто'} / ${settings.branches.dev ?? 'авто'}`,
     `Синхронизация базы: ${settings.sync.remote ?? 'не настроена'}`,
     `Ревью в конце забега: ${settings.runReview.mode}`,
