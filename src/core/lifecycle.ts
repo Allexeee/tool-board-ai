@@ -329,14 +329,23 @@ export function amendCard(
 
     const now = new Date()
     const at = now.toISOString()
-    const leaseUntil = new Date(now.getTime() + SHAPING_LEASE_MS).toISOString()
-    db.prepare(
-      `update cards set phase = 'request', status = 'shaping', holder = ?, lease_until = ?,
-       approved_at = null, spec_rev = spec_rev + 1, position = null, shaped_at = ?,
-       updated_at = ? where id = ?`,
-    ).run(actor, leaseUntil, at, at, card.id)
-    // Возвращённый в разбор запрос снова стоит в очереди запросов.
-    insertIntoQueue(db, card.id)
+    if (card.skill === 'owner') {
+      // Owner-карточку не держит shaping-lease: владелец сам решит, когда брать.
+      db.prepare(
+        `update cards set phase = 'request', status = 'new', holder = null, lease_until = null,
+         approved_at = null, spec_rev = spec_rev + 1, position = null, shaped_at = null,
+         updated_at = ? where id = ?`,
+      ).run(at, card.id)
+    } else {
+      const leaseUntil = new Date(now.getTime() + SHAPING_LEASE_MS).toISOString()
+      db.prepare(
+        `update cards set phase = 'request', status = 'shaping', holder = ?, lease_until = ?,
+         approved_at = null, spec_rev = spec_rev + 1, position = null, shaped_at = ?,
+         updated_at = ? where id = ?`,
+      ).run(actor, leaseUntil, at, at, card.id)
+      // Возвращённый в разбор запрос снова стоит в очереди запросов.
+      insertIntoQueue(db, card.id)
+    }
 
     comment(db, {
       cardId: card.id,

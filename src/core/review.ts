@@ -83,7 +83,9 @@ export function addFinding(db: DatabaseSync, input: AddFindingInput): Card {
       group: origin.group,
       title: `Находка ревью ${origin.id}`,
       body: text,
-      skill: input.skill ?? origin.skill ?? 'dev',
+      skill:
+        input.skill ??
+        (origin.skill === 'owner' ? 'dev' : (origin.skill ?? 'dev')),
       author: reviewer,
       tags: ['review'],
     })
