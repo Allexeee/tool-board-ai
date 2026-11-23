@@ -292,13 +292,20 @@ function compactCard(value) {
 }
 
 function compactNow(value) {
+  return stripHeavy(value)
+}
+
+// Тяжёлые поля карточки встречаются в любом вложенном месте now: approvals,
+// queue, requests, executors[].cards, probableRuns[].cards[].card.
+function stripHeavy(value) {
+  const heavy = ['body', 'acceptance', 'scope', 'steps']
+  if (Array.isArray(value)) return value.map(stripHeavy)
   if (!value || typeof value !== 'object') return value
-  const out = { ...value }
-  if (out.header && Array.isArray(out.header.lastDone)) {
-    out.header = { ...out.header, lastDone: out.header.lastDone.map(cardRow) }
+  const out = {}
+  for (const key of Object.keys(value)) {
+    if (heavy.includes(key)) continue
+    out[key] = stripHeavy(value[key])
   }
-  if (Array.isArray(out.cards)) out.cards = out.cards.map(cardRow)
-  if (Array.isArray(out.ownerCards)) out.ownerCards = out.ownerCards.map(cardRow)
   return out
 }
 

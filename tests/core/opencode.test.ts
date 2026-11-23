@@ -505,22 +505,39 @@ test('плагин сокращает now и list, show остаётся пол�
   writeOpenCodeFiles(root)
   const source = pluginSource(root)
   const compactNow = new Function(
-    `${extractFunction(source, 'cardRow')}\n${extractFunction(source, 'compactNow')}\nreturn compactNow`,
+    `${extractFunction(source, 'cardRow')}\n${extractFunction(source, 'stripHeavy')}\n${extractFunction(source, 'compactNow')}\nreturn compactNow`,
   )()
-  const big = { id: 'CORE-21', status: 'done', title: 't', body: 'big', acceptance: 'a' }
+  const big = {
+    id: 'CORE-21',
+    status: 'done',
+    title: 't',
+    body: 'big',
+    acceptance: 'a',
+    scope: ['src/**'],
+    steps: [{ seq: 1, text: 's' }],
+  }
   const now = {
     view: 1,
     header: { doneToday: 2, lastDone: [big] },
     cards: [big],
+    approvals: [big],
+    queue: [big],
+    requests: [big],
+    executors: [{ id: 'developer', cards: [big] }],
+    probableRuns: [{ id: 'RUN-1', cards: [{ card: big, status: 'planned' }] }],
     deferredCount: 1,
   }
   const compacted = compactNow(now)
   assert.equal(compacted.view, 1)
   assert.equal(compacted.header.doneToday, 2)
-  assert.equal(compacted.header.lastDone[0].body, undefined)
   assert.equal(compacted.header.lastDone[0].id, 'CORE-21')
-  assert.equal(compacted.cards[0].body, undefined)
   assert.equal(compacted.deferredCount, 1)
+
+  const serialized = JSON.stringify(compacted)
+  for (const heavy of ['"body"', '"acceptance"', '"scope"', '"steps"']) {
+    assert.equal(serialized.includes(heavy), false, heavy)
+  }
+  assert.equal(serialized.includes('"title"'), true)
 
   assert.match(source, /withJson/)
   assert.match(source, /if \(input\.action === 'show'\) return result/)
