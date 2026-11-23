@@ -228,7 +228,7 @@ test('плагин передаёт в card add приоритеты, scope, т�
     as: 'owner',
   })
 
-  for (const pair of [
+  const pairs: Array<[string, string | null]> = [
     ['--tag', 'new'],
     ['--importance', '2'],
     ['--urgency', '3'],
@@ -236,11 +236,12 @@ test('плагин передаёт в card add приоритеты, scope, т�
     ['--no-needs-merge', null],
     ['--review', null],
     ['--note', 'n'],
-  ]) {
-    if (pair[1] === null) {
-      assert.ok(args.includes(pair[0]), pair[0])
+  ]
+  for (const [flagName, expected] of pairs) {
+    if (expected === null) {
+      assert.ok(args.includes(flagName), flagName)
     } else {
-      assert.equal(args[args.indexOf(pair[0]) + 1], pair[1], pair[0])
+      assert.equal(args[args.indexOf(flagName) + 1], expected, flagName)
     }
   }
 })
