@@ -4,7 +4,7 @@ import { getCard } from '../../src/core/cards.ts'
 import { listDeps } from '../../src/core/deps.ts'
 import { listRefs } from '../../src/core/refs.ts'
 import { listSteps } from '../../src/core/steps.ts'
-import { applyShapeFile, shapeCard } from '../../src/core/lifecycle.ts'
+import { applyShapeFile, shapeCard, type ShapeFile } from '../../src/core/lifecycle.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 
 type Board = ReturnType<typeof makeBoard>
@@ -15,7 +15,7 @@ function board(t: { after: (fn: () => void) => void }): Board {
   return fixture
 }
 
-const planJson = {
+const planJson: ShapeFile = {
   spec: 'Форма входа с валидацией',
   acceptance: ['Форма отправляется', 'Ошибки показываются'],
   skill: 'dev',
@@ -113,7 +113,7 @@ test('applyShapeFile атомарен: ошибка не оставляет ча
         file: {
           importance: 3,
           new_cards: [{ key: 'gen', title: 'без группы', skill: 'dev' }],
-        },
+        } as unknown as ShapeFile,
       }),
     /групп/,
   )

@@ -78,7 +78,7 @@ export function recordSpecReview(db: DatabaseSync, input: SpecReviewInput): Revi
       )
       .run(card.id, reviewer, input.verdict, note, at, input.mode, card.specRev)
     const id = Number(result.lastInsertRowid)
-    const row = db.prepare('select * from reviews where id = ?').get(id) as ReviewRow
+    const row = db.prepare('select * from reviews where id = ?').get(id) as unknown as ReviewRow
     const review = toReview(row)
 
     appendEvent(db, {
@@ -97,7 +97,7 @@ export function latestSpecReview(db: DatabaseSync, cardId: string): Review | nul
     .prepare(
       "select * from reviews where card_id = ? and kind = 'spec' order by id desc limit 1",
     )
-    .get(cardId) as ReviewRow | undefined
+    .get(cardId) as unknown as ReviewRow | undefined
   return row ? toReview(row) : null
 }
 
