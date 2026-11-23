@@ -118,6 +118,7 @@ test('setup: конфликтующие флаги — код 3', (t) => {
   assert.equal(run(fixture.root, ['setup', '--show', '--review-after-run']).code, 3)
   assert.equal(run(fixture.root, ['setup', '--run-review', 'subagent', '--review-after-run']).code, 3)
   assert.equal(run(fixture.root, ['setup', '--spec-review', 'sometimes']).code, 3)
+  assert.equal(run(fixture.root, ['setup', '--max-spec']).code, 3)
   assert.equal(run(fixture.root, ['setup', '--reviewer-model', 'provider/model#max']).code, 3)
 })
 

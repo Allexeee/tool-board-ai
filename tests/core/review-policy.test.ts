@@ -78,7 +78,7 @@ test('auto: 0 отключает порог своего уровня', () => {
     'self',
   )
   assert.equal(
-    resolveSpecReviewMode({ settings: offMax, specLength: 6000, context: context('null') }).mode,
+    resolveSpecReviewMode({ settings: offMax, specLength: 6000, context: context(null) }).mode,
     'subagent',
   )
 })
