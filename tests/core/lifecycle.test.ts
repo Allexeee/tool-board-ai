@@ -25,6 +25,7 @@ import {
 } from '../../src/core/lifecycle.ts'
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
+import { addStep } from '../../src/core/steps.ts'
 import { insertIntoQueue } from '../../src/core/queue.ts'
 import { recordSpecReview } from '../../src/core/spec-review.ts'
 import { nowData } from '../../src/core/now.ts'
@@ -491,6 +492,7 @@ test('reopen очищает run_id/lease: карточка из finish снов�
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
   const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
   editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false, reviewRequired: true } })
+  addStep(db, { cardId: card.id, text: 'переделать' })
   const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
   takeCard(db, { id: card.id, actor: 'developer', root: '' })
   finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root: '' })

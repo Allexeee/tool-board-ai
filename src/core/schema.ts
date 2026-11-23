@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -37,6 +37,7 @@ create table cards (
   position integer,
   needs_merge integer not null default 1,
   review_required integer not null default 0,
+  plan_waived integer not null default 0,
   scope text not null default '[]',
   tags text not null default '[]',
   severity text,
@@ -202,6 +203,11 @@ create table run_notes (
 create index idx_run_notes_run on run_notes(run_id, id);
 `
 
+/** Осознанный отказ от плана: маленькая задача без шагов. */
+const MIGRATE_V4_TO_V5 = `
+alter table cards add column plan_waived integer not null default 0;
+`
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -226,10 +232,15 @@ export function migrate(db: DatabaseSync): number {
       db.exec(MIGRATE_V1_TO_V2)
       db.exec(MIGRATE_V2_TO_V3)
       db.exec(MIGRATE_V3_TO_V4)
+      db.exec(MIGRATE_V4_TO_V5)
     } else if (from === 2) {
       db.exec(MIGRATE_V2_TO_V3)
       db.exec(MIGRATE_V3_TO_V4)
-    } else if (from === 3) db.exec(MIGRATE_V3_TO_V4)
+      db.exec(MIGRATE_V4_TO_V5)
+    } else if (from === 3) {
+      db.exec(MIGRATE_V3_TO_V4)
+      db.exec(MIGRATE_V4_TO_V5)
+    } else if (from === 4) db.exec(MIGRATE_V4_TO_V5)
     else throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
 
     if (from === 1 || from === 2) {

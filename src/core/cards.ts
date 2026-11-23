@@ -82,6 +82,7 @@ interface Row {
   position: number | null
   needs_merge: number
   review_required: number
+  plan_waived: number
   scope: string
   tags: string
   severity: string | null
@@ -125,6 +126,7 @@ const toCard = (row: Row): Card => ({
   position: row.position,
   needsMerge: row.needs_merge === 1,
   reviewRequired: row.review_required === 1,
+  planWaived: row.plan_waived === 1,
   scope: JSON.parse(row.scope) as string[],
   tags: JSON.parse(row.tags) as string[],
   severity: row.severity as Card['severity'],

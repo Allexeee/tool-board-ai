@@ -7,6 +7,7 @@ import { addDep, isSatisfied, listDeps, refreshReadiness } from './deps.ts'
 import { comment, openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
+import { listSteps } from './steps.ts'
 import {
   currentBranch,
   ensureWorktree,
@@ -872,6 +873,8 @@ export function takeCard(
     actor: string
     root: string
     requiredSpecReview?: SpecReviewGate
+    /** Маленькая задача: план осознанно не нужен. */
+    noPlan?: boolean
   },
 ): Card {
   return tx(db, () => {
@@ -879,13 +882,13 @@ export function takeCard(
     const actor = requireActor(input.actor)
 
     if (card.phase === 'request') {
-      return takeRequest(db, card, actor, input.root, input.requiredSpecReview)
+      return takeRequest(db, card, actor, input.root, input.requiredSpecReview, input.noPlan)
     }
 
     // Одиночная карточка: без брони и забега, если она готова к работе.
     if (card.status === 'ready' || card.status === 'waiting') {
       const standalone = requireStandaloneCard(db, actor, card.id)
-      return startWork(db, standalone, actor, input.root, null)
+      return startWork(db, standalone, actor, input.root, null, input.noPlan)
     }
 
     if (card.status !== 'booked') {
@@ -906,7 +909,7 @@ export function takeCard(
       throw new UserError(3, `у исполнителя ${actor} нет активного забега с карточкой ${card.id}`)
     }
 
-    return startWork(db, card, actor, input.root, run)
+    return startWork(db, card, actor, input.root, run, input.noPlan)
   })
 }
 
@@ -920,6 +923,7 @@ function takeRequest(
   actor: string,
   root: string,
   requiredSpecReview: SpecReviewGate = { mode: 'none', reviewerModel: null },
+  noPlan = false,
 ): Card {
   const run = getActiveRun(db, actor)
   if (!run || run.id !== card.runId) {
@@ -952,7 +956,7 @@ function takeRequest(
   // Spec review — тот же гейт, что у submitCard: promotion не обходит настройку.
   assertSpecReview(db, card, requiredSpecReview)
 
-  const promoted = startWork(db, card, actor, root, run)
+  const promoted = startWork(db, card, actor, root, run, noPlan)
   // Правило забега — авторизация вместо approve: фиксируем её, чтобы resume
   // вернул карточку в работу, а не в approval.
   if (promoted.approvedAt === null || promoted.position !== null) {
@@ -978,6 +982,7 @@ function startWork(
   actor: string,
   root: string,
   run: Run | null,
+  noPlan = false,
 ): Card {
   // Одна карточка в работе на держателя: worktree один, две ветки не живут.
   if (run) {
@@ -1006,12 +1011,22 @@ function startWork(
     branch = startCardBranch(root, actor, card).branch
   }
 
+  // План — часть контракта для ревьюируемых карточек. Молча пропустить нельзя:
+  // либо шаг, либо осознанный --no-plan для маленькой задачи.
+  const hasPlan = listSteps(db, card.id).length > 0
+  if (card.reviewRequired && !hasPlan && !noPlan) {
+    throw new UserError(
+      3,
+      `у карточки ${card.id} нет шагов плана: добавьте board card step add или возьмите с --no-plan, если задача маленькая`,
+    )
+  }
+
   const at = nowIso()
   const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
   db.prepare(
     `update cards set phase = 'task', status = 'in_progress', holder = ?, branch = ?, lease_until = ?,
-     updated_at = ? where id = ?`,
-  ).run(actor, branch, leaseUntil, at, card.id)
+     plan_waived = ?, updated_at = ? where id = ?`,
+  ).run(actor, branch, leaseUntil, card.reviewRequired && !hasPlan && noPlan ? 1 : card.planWaived ? 1 : 0, at, card.id)
   if (run) {
     db.prepare('update runs set lease_until = ? where id = ?').run(leaseUntil, run.id)
     db.prepare("update run_cards set status = 'in_progress' where run_id = ? and card_id = ?").run(
@@ -1028,6 +1043,15 @@ function startWork(
     before: card,
     after: updated,
   })
+  if (card.reviewRequired && !hasPlan && noPlan) {
+    appendEvent(db, {
+      type: 'card.plan_waived',
+      actor,
+      subject: card.id,
+      after: updated,
+      note: 'план не требуется: маленькая задача',
+    })
+  }
   return updated
 }
 

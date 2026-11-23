@@ -4,7 +4,7 @@ import { takeCard } from '../../core/lifecycle.ts'
 import { findProject } from '../../core/project.ts'
 import { modelContext, resolveSpecReviewMode } from '../../core/review-policy.ts'
 import { readSettings } from '../../core/settings.ts'
-import { stringFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { ok } from '../output.ts'
 
@@ -32,6 +32,7 @@ export default async function command(args: ParsedArgs) {
       id,
       actor,
       root: project.root,
+      noPlan: boolFlag(args, 'no-plan'),
       requiredSpecReview: {
         mode: resolution.mode,
         reviewerModel: resolution.reviewerModel,

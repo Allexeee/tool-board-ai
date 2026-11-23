@@ -150,6 +150,19 @@ function checkCards(db: DatabaseSync, warnings: string[]): void {
   if (review.length > 0) {
     warnings.push(`карточки на ревью: ${review.map((c) => c.id).join(', ')}`)
   }
+
+  // План пропущен молча: done-карточка с обязательным ревью без шагов и без --no-plan.
+  const noPlan = db
+    .prepare(
+      `select c.id from cards c
+       where c.status = 'done' and c.review_required = 1 and c.plan_waived = 0
+         and not exists (select 1 from steps s where s.card_id = c.id)
+       order by c.id`,
+    )
+    .all() as Array<{ id: string }>
+  if (noPlan.length > 0) {
+    warnings.push(`done без плана и без отметки --no-plan: ${noPlan.map((row) => row.id).join(', ')}`)
+  }
 }
 
 function normalizePath(path: string): string {
