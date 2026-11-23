@@ -341,6 +341,7 @@ test('reopen очищает run_id/lease: карточка из finish снов�
     cardId: card.id,
     reviewer: 'reviewer-1',
     verdict: 'reopen',
+    planCompliance: 'done',
     note: 'переделать',
   })
 

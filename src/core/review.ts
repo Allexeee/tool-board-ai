@@ -6,6 +6,7 @@ import { tx } from './db.ts'
 import { addDep, refreshReadiness } from './deps.ts'
 import { appendEvent } from './events.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
+import { listSteps } from './steps.ts'
 import type { Card, Severity } from './types.ts'
 
 /** Находка ревью §9.6: severity + текст; skill/scope перекрывают наследуемое. */
@@ -144,6 +145,10 @@ export function submitVerdict(
     const planCompliance = input.planCompliance ?? 'done'
     if (planCompliance === 'failed' && verdict !== 'reopen') {
       throw new UserError(3, 'plan failed требует verdict reopen')
+    }
+    // Если план есть, ревьюер обязан дать compliance: иначе сравнить нечего.
+    if (listSteps(db, card.id).length > 0 && input.planCompliance === undefined) {
+      throw new UserError(3, 'у карточки есть шаги плана: укажите --plan done|failed')
     }
     if (verdict === 'reopen' && card.reviewReopens >= 1 && reviewer !== OWNER) {
       throw new UserError(2, `карточка ${card.id}: один reopen уже был, нужно решение владельца`)

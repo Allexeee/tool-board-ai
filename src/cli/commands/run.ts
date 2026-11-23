@@ -87,7 +87,18 @@ export default async function command(args: ParsedArgs) {
       cardIds = cardFlags
     }
 
-    const reviewMode = resolveRunReviewMode({ settings, context }).mode
+    let reviewMode = resolveRunReviewMode({ settings, context }).mode
+    if (boolFlag(args, 'no-review')) {
+      reviewMode = 'none'
+    } else if (boolFlag(args, 'review')) {
+      const forced = {
+        ...settings,
+        runReview: {
+          mode: settings.runReview.mode === 'none' ? ('auto' as const) : settings.runReview.mode,
+        },
+      }
+      reviewMode = resolveRunReviewMode({ settings: forced, context }).mode
+    }
     const run = startRun(db, { executorId, cardIds, actor: executorId, reviewMode })
     ok(run, `${run.id} · ${run.executorId} · ${cardIds.join(', ')}`)
     return 0
