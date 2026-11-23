@@ -79,6 +79,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
       const next = argv[i + 1]
       if (next === undefined || next.startsWith('--') || BOOLEAN_FLAGS.has(name)) {
+        if (!BOOLEAN_FLAGS.has(name) && (next === undefined || next.startsWith('--'))) {
+          throw new UserError(3, `флагу --${name} нужно значение`)
+        }
         setFlag(name, true)
       } else {
         setFlag(name, next)

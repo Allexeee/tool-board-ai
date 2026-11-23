@@ -1,5 +1,6 @@
 ﻿import { writeReviewerAgent } from '../../core/opencode.ts'
 import { initProject } from '../../core/project.ts'
+import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
 import { ensureSettings, updateSettings, type BoardSettings } from '../../core/settings.ts'
 import { SUPERPOWERS_ADVICE, superpowersConfigured } from '../../core/superpowers.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
@@ -43,11 +44,12 @@ export default async function command(args: ParsedArgs) {
   }
   if (lines.length === 0) lines.push('Доска уже настроена, ничего не менялось.')
 
+  const effectiveReviewer = effectiveReviewerModel(settings, modelContext(process.env))
   lines.push(
     '',
     'Ревью spec: ' + settings.specReview.mode,
     'Ревью в конце забега: ' + settings.runReview.mode,
-    'Модель ревьюера: ' + (settings.reviewer.model ?? 'не задана'),
+    'Модель ревьюера: ' + (effectiveReviewer ?? 'не задана'),
     'Версия board: ' + (boardVersion ?? 'локальная'),
   )
   if (settings.setupAt === null) {
