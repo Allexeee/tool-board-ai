@@ -1,5 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { listCards } from './cards.ts'
 import { getExecutor } from './executors.ts'
@@ -20,10 +21,14 @@ export interface DoctorResult {
  * Git остаётся источником истины по мержу: кэш `in_dev`/`in_main` пересчитывается
  * для карточек с `merge_commit`, когда репозиторий доступен (§7.3).
  */
-export function doctorData(db: DatabaseSync, root: string): DoctorResult {
+export function doctorData(
+  db: DatabaseSync,
+  root: string,
+  home: string = homedir(),
+): DoctorResult {
   const errors: string[] = []
   const warnings: string[] = []
-  const recommendations: string[] = superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]
+  const recommendations: string[] = superpowersConfigured(root, home) ? [] : [SUPERPOWERS_ADVICE]
 
   if (!existsSync(join(root, '.board', 'board.db'))) {
     errors.push('.board/board.db не найден: выполните board init')

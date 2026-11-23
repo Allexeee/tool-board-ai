@@ -37,10 +37,12 @@ test('doctorData: чистая доска без ошибок и предупр�
   }
 })
 
-test('doctorData: советует superpowers, когда его нет в конфиге', () => {
+test('doctorData: советует superpowers, когда его нет в конфиге', (t) => {
   const board = makeBoardRepo()
+  const home = mkdtempSync(join(tmpdir(), 'board-home-'))
+  t.after(() => rmSync(home, { recursive: true, force: true }))
   try {
-    const without = doctorData(board.db, board.root)
+    const without = doctorData(board.db, board.root, home)
     assert.ok(
       without.recommendations.some((item) => item.includes('superpowers')),
       without.recommendations.join(' | '),
@@ -52,7 +54,7 @@ test('doctorData: советует superpowers, когда его нет в ко
       JSON.stringify({ plugins: ['superpowers'] }),
       'utf8',
     )
-    assert.deepEqual(doctorData(board.db, board.root).recommendations, [])
+    assert.deepEqual(doctorData(board.db, board.root, home).recommendations, [])
   } finally {
     board.close()
   }
