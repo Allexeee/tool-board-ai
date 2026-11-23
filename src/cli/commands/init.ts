@@ -1,6 +1,7 @@
 ﻿import { writeReviewerAgent } from '../../core/opencode.ts'
 import { initProject } from '../../core/project.ts'
 import { ensureSettings, type BoardSettings } from '../../core/settings.ts'
+import { SUPERPOWERS_ADVICE, superpowersConfigured } from '../../core/superpowers.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok, isJsonMode } from '../output.ts'
@@ -47,9 +48,16 @@ export default async function command(args: ParsedArgs) {
   if (settings.setupAt === null) {
     lines.push('Мастер настроек: запустите board setup (или /setup в OpenCode)')
   }
+  const recommendations = superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]
+  if (recommendations.length > 0) {
+    lines.push('', ...recommendations.map((item) => '*   ' + item))
+  }
   lines.push('', 'Проект: ' + root)
 
   const setupRequired = settings.setupAt === null
-  ok({ root, created, updated, boardVersion, settings, setupRequired }, lines.join('\n'))
+  ok(
+    { root, created, updated, boardVersion, settings, setupRequired, recommendations },
+    lines.join('\n'),
+  )
   return 0
 }

@@ -93,7 +93,7 @@ test('doctor --json возвращает { errors, warnings }', (t) => {
   const result = run(dir, ['doctor', '--json'])
   assert.equal(result.status, 3)
   const data = JSON.parse(result.stdout) as { errors: string[]; warnings: string[] }
-  assert.deepEqual(Object.keys(data).sort(), ['errors', 'warnings'])
+  assert.deepEqual(Object.keys(data).sort(), ['errors', 'recommendations', 'warnings'])
   assert.ok(Array.isArray(data.errors))
   assert.ok(Array.isArray(data.warnings))
   assert.ok(data.errors.some((e) => /git|репозиторий/.test(e)), data.errors.join(' | '))
@@ -147,7 +147,7 @@ test('doctor --json: устаревшая схема — { errors } и без а
   const result = run(repo.root, ['doctor', '--json'])
   assert.equal(result.status, 3, result.stdout + result.stderr)
   const data = JSON.parse(result.stdout) as { errors: string[]; warnings: string[] }
-  assert.deepEqual(Object.keys(data).sort(), ['errors', 'warnings'])
+  assert.deepEqual(Object.keys(data).sort(), ['errors', 'recommendations', 'warnings'])
   assert.ok(data.errors.some((e) => e.includes('схем')), data.errors.join(' | '))
   // doctor не мигрирует устаревшую схему
   assert.equal(readSchemaVersion(repo.root), '0')
@@ -162,7 +162,7 @@ test('doctor --json: новее схема — { errors }, без raw-ошибк
   const result = run(repo.root, ['doctor', '--json'])
   assert.equal(result.status, 3, result.stdout + result.stderr)
   const data = JSON.parse(result.stdout) as { errors: string[]; warnings: string[] }
-  assert.deepEqual(Object.keys(data).sort(), ['errors', 'warnings'])
+  assert.deepEqual(Object.keys(data).sort(), ['errors', 'recommendations', 'warnings'])
   assert.ok(data.errors.some((e) => e.includes('схем')), data.errors.join(' | '))
   assert.equal(result.stderr, '')
 })

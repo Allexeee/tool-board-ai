@@ -161,6 +161,22 @@ test('init --json создаёт v2-настройки и просит запу�
   assert.equal(data.settings.setupAt, null)
   assert.ok(existsSync(join(root, '.opencode', 'command', 'setup.md')))
 
+  const recommendations = (data as unknown as { recommendations: string[] }).recommendations
+  assert.ok(
+    recommendations.some((item) => item.includes('superpowers')),
+    recommendations.join(' | '),
+  )
+
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+  const withPlugin = JSON.parse(run(root, ['init', '--json']).out) as {
+    recommendations: string[]
+  }
+  assert.deepEqual(withPlugin.recommendations, [])
+
   json(root, ['setup', '--run-review', 'subagent'])
   const again = JSON.parse(run(root, ['init', '--json']).out) as { setupRequired: boolean }
   assert.equal(again.setupRequired, false)

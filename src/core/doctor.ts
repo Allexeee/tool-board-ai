@@ -6,10 +6,12 @@ import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
+import { SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
 
 export interface DoctorResult {
   errors: string[]
   warnings: string[]
+  recommendations: string[]
 }
 
 /**
@@ -21,6 +23,7 @@ export interface DoctorResult {
 export function doctorData(db: DatabaseSync, root: string): DoctorResult {
   const errors: string[] = []
   const warnings: string[] = []
+  const recommendations: string[] = superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]
 
   if (!existsSync(join(root, '.board', 'board.db'))) {
     errors.push('.board/board.db не найден: выполните board init')
@@ -39,7 +42,7 @@ export function doctorData(db: DatabaseSync, root: string): DoctorResult {
   const version = schemaVersionOf(db)
   if (version !== SCHEMA_VERSION) {
     errors.push(`схема ${version} не совпадает с ожидаемой ${SCHEMA_VERSION}`)
-    return { errors, warnings }
+    return { errors, warnings, recommendations }
   }
 
   if (!getExecutor(db, 'owner')) {
@@ -58,7 +61,7 @@ export function doctorData(db: DatabaseSync, root: string): DoctorResult {
 
   checkCards(db, warnings)
 
-  return { errors, warnings }
+  return { errors, warnings, recommendations }
 }
 
 function branchExists(root: string, name: string): boolean {
