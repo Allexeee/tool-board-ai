@@ -26,6 +26,7 @@ import {
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { insertIntoQueue } from '../../src/core/queue.ts'
+import { recordSpecReview } from '../../src/core/spec-review.ts'
 import { nowData } from '../../src/core/now.ts'
 
 type Board = ReturnType<typeof makeBoard>
@@ -967,4 +968,43 @@ test('card scope add расширяет scope у карточки в работ�
     () => addScope(db, { id: done.id, actor: 'owner', paths: ['src/b.ts'] }),
     /сначала take/,
   )
+})
+
+test('promotion запроса проходит spec review по настройке', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const request = seedCard(db, {
+    phase: 'request',
+    status: 'new',
+    body: 'spec',
+    acceptance: ['ok'],
+    importance: 2,
+    urgency: 2,
+    scope: ['src/**'],
+    needsMerge: false,
+  })
+  startRun(db, { executorId: 'developer', cardIds: [request.id], actor: 'developer' })
+  takeCard(db, { id: request.id, actor: 'developer', root: '' })
+
+  const gate = { mode: 'subagent' as const, reviewerModel: 'acme/main' }
+  assert.throws(
+    () => takeCard(db, { id: request.id, actor: 'developer', root: '', requiredSpecReview: gate }),
+    /spec review/,
+  )
+
+  recordSpecReview(db, {
+    cardId: request.id,
+    reviewer: 'reviewer',
+    mode: 'subagent',
+    verdict: 'done',
+    note: 'ок',
+  })
+  const promoted = takeCard(db, {
+    id: request.id,
+    actor: 'developer',
+    root: '',
+    requiredSpecReview: gate,
+  })
+  assert.equal(promoted.status, 'in_progress')
+  assert.equal(promoted.phase, 'task')
 })
