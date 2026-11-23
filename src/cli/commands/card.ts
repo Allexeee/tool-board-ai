@@ -118,7 +118,9 @@ export default async function command(args: ParsedArgs) {
     const group = stringFlag(args, 'group')
     if (group !== undefined) filter.group = group
 
-    const cards = listCards(db, filter)
+    const all = listCards(db, filter)
+    const limit = numberFlag(args, 'limit')
+    const cards = limit !== undefined && limit >= 0 ? all.slice(0, limit) : all
     ok(cards, cards.length === 0 ? 'карточек нет' : formatList(cards))
     return 0
   }
