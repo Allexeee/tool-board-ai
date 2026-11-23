@@ -72,7 +72,7 @@ board now
 - `.board/board.db` — базу (истина доски) и исполнителя `owner`;
 - `.board/settings.json` — локальные настройки (в git не попадает);
 - `docs/board/terminology.md` — термины и команды владельца;
-- `.opencode/skills/board/SKILL.md`, `.opencode/plugins/board/index.ts`,
+- `.opencode/skills/board-spec|board-work|board-run|board-now/SKILL.md`, `.opencode/plugins/board/index.ts`,
   `.opencode/command/review.md`, `.opencode/command/spec-review.md`,
   `.opencode/command/setup.md` — интеграция с OpenCode;
 - `.opencode/agents/board-reviewer.md` — локальный read-only ревьюер на
@@ -89,7 +89,7 @@ board now
 board init --refresh
 ```
 
-Команда перезапишет `.opencode/skills/board/SKILL.md`, плагин и команды
+Команда перезапишет четыре навыка в `.opencode/skills/`, плагин и команды
 `/review`/`/spec-review`/`/setup` текущими шаблонами, сохранив остальной
 `AGENTS.md`. Если вы правили эти файлы руками, изменения будут потеряны.
 
@@ -116,33 +116,36 @@ board card add --group UI --title "Форма входа" --skill dev
 
 ## Очередь и забег
 
-После утверждения карточка встаёт в очередь задач по оценке. `now 2` (по умолчанию) показывает задачи по всем агентам, `now 1` — задачи указанного `--as`, `now 3` — открытые запросы и очередь.
+После утверждения карточка встаёт в очередь задач по оценке. `now 0` (по умолчанию) показывает владельцу утверждения, owner-задачи и вопросы; `now 1` — задачи указанного `--as`; `now 2` — других агентов; `now 3` — открытые запросы и очередь.
 
 ```bash
 board run start --as developer --cards UI-1,UI-7   # или --suggest 1
 board take UI-1 --as developer
 board card step add UI-1 "Написать форму + тест"   # plan пишется при take
+board card scope add UI-1 src/extra.ts --as developer  # новый файл в работе
 board finish UI-1 --as developer --summary "готово"
 board run next --as developer
 board run end --as developer [--review|--no-review]
+board run note RUN-1 --text "итоги прохода" --as reviewer
 ```
 
-`take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` или `done`. Если `runReview.mode != none`, `finish` отправляет в review все карточки забега, включая `review_required=false`. Если plan требует нового scope, `card edit` после approve не поможет: нужен `block`/`ask`, затем `card amend` и повторное утверждение.
+`take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` или `done`. Если `runReview.mode != none`, `finish` отправляет в review все карточки забега, включая `review_required=false`. Если plan требует нового файла, `card scope add` расширяет scope у карточки в работе; если нового поведения или acceptance — `block`/`ask`, затем `card amend` и повторное утверждение.
 
 Если нужен владелец — `block UI-1 --as developer --reason needs_decision --note "..."` или `ask UI-1 "вопрос" --as developer [--block]`. Ответ — `answer UI-1 "ответ"`.
 
 ## Ревью
 
-`board review list --json` отдаёт карточки на ревью: spec, acceptance, plan/steps, scope и diff. `/spec-review` проверяет полноту spec до approve, `/review` проверяет plan и код:
+`board review list --json` отдаёт пакет: карточки в `review` с spec, acceptance, plan, scope и diff. `/spec-review` проверяет полноту spec до approve, `/review` — проход по пакету:
 
 ```bash
-board review submit UI-1 --plan done --verdict done --note "..." --reviewer review
-board review finding UI-1 --severity critical --text "..."
+board run note RUN-1 --text "ИТОГИ: покрытые карточки, вердикты, находки" --as reviewer
+board review submit UI-1 --plan done --verdict done --note "итоги: RUN-1" --reviewer reviewer
+board card ref add UI-1 --kind review --value RUN-1 --title "итоги прохода"
 ```
 
-`--plan` обязателен. `plan failed` требует `reopen`; `done` с findings разрешён. Ревью идёт одним циклом: findings становятся отдельными карточками, исходная карточка закрывается; `critical` блокирует `release`, `important`/`other` идут в backlog. Второй `reopen` — только решение владельца.
+Ревьюер только читает: карточек не создаёт. Итоги прохода — `run note` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка. Бюджет прохода: critical и регрессии этого diff чинятся сразу, до 3 important по рангу, остальное — сборник `review notes` в `deferred`. Больше 7 находок на проход не перечисляют.
 
-CLI субагентов не порождает — он готовит пакет и принимает вердикты. Finding-карточки после approve могут собраться в отдельный fix run. Субагент `board-reviewer` работает на default-варианте `reviewer.model`, не в Max; `self` использует модель основной сессии.
+CLI субагентов не порождает — он готовит пакет и принимает вердикты. Субагент `board-reviewer` работает на default-варианте `reviewer.model`, не в Max; `self` использует модель основной сессии.
 
 ## Настройки
 

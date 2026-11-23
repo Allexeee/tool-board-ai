@@ -24,12 +24,14 @@ const HELP = `board — доска карточек для людей и аге�
 
   executor add|list|edit|remove
   card add|list|show|edit  карточки
-  card shape|submit|approve|reject|verdict|done|cancel|reopen
+  card shape|submit|spec-review|approve|amend|reject|verdict
+  card done|cancel|reopen|defer|resume
+  card scope add <ID> <path>
   card step add|done|remove|list
   card ref add|remove|list
   card dep add|remove|list
   queue move|reorder
-  run start|add|drop|next|end|release|list
+  run start|add|drop|next|end|release|note|list
   take / finish / block / touch
   ask / answer
   decision add|list|supersede|obsolete
