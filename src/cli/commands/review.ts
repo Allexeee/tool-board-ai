@@ -21,7 +21,6 @@ import { ok } from '../output.ts'
 interface ReviewItem {
   id: string
   title: string
-  body: string
   spec: string
   acceptance: string
   plan: Step[]
@@ -30,8 +29,8 @@ interface ReviewItem {
   needsMerge: boolean
   scope: string[]
   branch: string | null
+  runId: string | null
   mergeCommit: string | null
-  steps: Step[]
   reviewReopens: number
   reviews: Array<{
     verdict: string
@@ -80,7 +79,6 @@ export default async function command(args: ParsedArgs) {
       return {
         id: card.id,
         title: card.title,
-        body: card.body,
         spec: card.body,
         acceptance: card.acceptance,
         plan: steps,
@@ -89,8 +87,8 @@ export default async function command(args: ParsedArgs) {
         needsMerge: card.needsMerge,
         scope: card.scope,
         branch: card.branch,
+        runId: card.runId,
         mergeCommit: card.mergeCommit,
-        steps,
         reviewReopens: card.reviewReopens,
         reviews: reviews.map((row) => ({
           verdict: row.verdict,
@@ -230,7 +228,7 @@ function formatReviewList(items: ReviewItem[]): string {
         `  ветка: ${value(item.branch)} · merge: ${value(item.mergeCommit)}`,
         `  diff: ${item.diff ?? '—'}`,
       ]
-      if (item.body !== '') lines.push(`  spec: ${item.spec}`)
+      if (item.spec !== '') lines.push(`  spec: ${item.spec}`)
       if (item.acceptance !== '') {
         lines.push(`  acceptance: ${item.acceptance.split('\n').join(' | ')}`)
       }
@@ -241,7 +239,7 @@ function formatReviewList(items: ReviewItem[]): string {
       for (const finding of item.findings) {
         lines.push(`  finding: ${finding.id} · ${finding.severity ?? '—'} · ${finding.status}`)
       }
-      for (const step of item.steps) {
+      for (const step of item.plan) {
         lines.push(`  [${step.done ? 'x' : ' '}] ${step.seq}. ${step.text}`)
       }
       for (const ref of item.refs) {
