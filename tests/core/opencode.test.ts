@@ -454,6 +454,7 @@ test('команда ревью описывает пакет, бюджет и �
   assert.match(command, /--reviewer/)
   assert.match(command, /7 находок/)
   assert.match(command, /--kind review/)
+  assert.match(command, /только дельта/)
 })
 
 test('AGENTS и board-work описывают ревью пакетом', () => {
@@ -464,11 +465,14 @@ test('AGENTS и board-work описывают ревью пакетом', () => 
 
   assert.match(agents, /Ревью идёт пакетом/)
   assert.match(agents, /сборник в `deferred`/)
+  assert.match(agents, /finding-карточка/)
   assert.doesNotMatch(agents, /findings становятся карточками/)
 
   assert.match(work, /только читает/)
   assert.match(work, /сборник/)
-  assert.match(work, /до 3 important/)
+  assert.match(work, /только дельта/)
+  assert.match(work, /important — finding-карточка/)
+  assert.doesNotMatch(work, /до 3 important/)
 })
 
 

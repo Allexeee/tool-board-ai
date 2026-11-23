@@ -33,8 +33,10 @@ description: Доска: исполнить карточку — take, план 
 
 - `/spec-review` — полнота spec до approve; self или субагент по настройке.
 - `/review` — проход по пакету (`board review list --json`): все карточки в `review` с прошлого прохода. Субагент `board-reviewer` только читает: карточек не создаёт, итоги прохода пишет в `run note`.
-- Бюджет прохода: critical и регрессии этого diff — всегда, до 3 important по рангу ревьюера, остальное — сборник `review notes` в deferred.
-- Находки оформляет агент: critical и до 3 important — `board review finding <ID> --severity ... --text "..."`; в карточке — вердикт и ссылка `card ref add --kind review`.
+- Первый проход полный. Повторный — только дельта: исправлены ли перечисленные находки и нет ли регрессий от фикса; новых находок он не ищет, полный `node --test` не перезапускает — верит прогону исполнителя и гоняет целевые тесты.
+- critical и регрессии этого diff — чинятся сразу, карточка reopen.
+- important — finding-карточка `board review finding <ID> --severity important --text "..."` встаёт в очередь; release не блокирует, берётся следующим раном по приоритету.
+- minor — один сборник `review notes` в `deferred`.
 - Свою карточку не ревьюй: вердикт даёт свежий субагент. `critical` блокирует release.
 
 ## Правила
