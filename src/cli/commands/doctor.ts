@@ -23,11 +23,14 @@ export default async function command(_args: ParsedArgs) {
 
 function renderDoctor(result: DoctorResult): string {
   if (result.errors.length === 0 && result.warnings.length === 0) {
-    return 'всё в порядке'
+    const head = ['всё в порядке']
+    for (const advice of result.recommendations) head.push(`*   ${advice}`)
+    return head.join('\n')
   }
   const lines: string[] = []
   for (const error of result.errors) lines.push(`!   ${error}`)
   for (const warning of result.warnings) lines.push(`~   ${warning}`)
+  for (const advice of result.recommendations) lines.push(`*   ${advice}`)
   lines.push('')
   lines.push(
     result.errors.length > 0

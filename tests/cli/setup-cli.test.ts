@@ -132,9 +132,14 @@ test('setup без TTY не спрашивает и подсказывает т�
 
 test('init --json создаёт v2-настройки и просит запустить мастер', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'board-init-settings-'))
-  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const home = mkdtempSync(join(tmpdir(), 'board-init-home-'))
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(home, { recursive: true, force: true })
+  })
+  const env = { HOME: home, USERPROFILE: home }
 
-  const result = run(root, ['init', '--json'])
+  const result = run(root, ['init', '--json'], env)
   assert.equal(result.code, 0, result.err)
 
   const data = JSON.parse(result.out) as {
@@ -161,8 +166,24 @@ test('init --json создаёт v2-настройки и просит запу�
   assert.equal(data.settings.setupAt, null)
   assert.ok(existsSync(join(root, '.opencode', 'command', 'setup.md')))
 
+  const recommendations = (data as unknown as { recommendations: string[] }).recommendations
+  assert.ok(
+    recommendations.some((item) => item.includes('superpowers')),
+    recommendations.join(' | '),
+  )
+
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+  const withPlugin = JSON.parse(run(root, ['init', '--json'], env).out) as {
+    recommendations: string[]
+  }
+  assert.deepEqual(withPlugin.recommendations, [])
+
   json(root, ['setup', '--run-review', 'subagent'])
-  const again = JSON.parse(run(root, ['init', '--json']).out) as { setupRequired: boolean }
+  const again = JSON.parse(run(root, ['init', '--json'], env).out) as { setupRequired: boolean }
   assert.equal(again.setupRequired, false)
 })
 

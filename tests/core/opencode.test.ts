@@ -94,6 +94,8 @@ test('плагин держит правила отчёта в системно�
     'если в review что-то есть',
     'Ревью сейчас или до релиза?',
     'если очередь не пуста',
+    'до следующего вызова инструмента',
+    'не заменяет',
     'не пиши',
   ]) {
     assert.ok(hook.includes(rule), rule)
@@ -445,6 +447,22 @@ test('ревьюер не создаёт карточки и пишет итог
   assert.match(source, /--verdict done\|reopen/)
 })
 
+test('board-work: целевые тесты на карточке, полный прогон перед релизом', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const work = readFileSync(join(root, '.opencode', 'skills', 'board-work', 'SKILL.md'), 'utf8')
+  assert.match(work, /целевые тесты/)
+  assert.match(work, /bump-карточки перед релизом/)
+  assert.match(work, /настройки, жизненный цикл, git-слой/)
+  assert.doesNotMatch(work, /перед `run end`/)
+  assert.doesNotMatch(work, /node --test` и `tsc/)
+
+  const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8')
+  assert.match(readme, /повторный — только дельта/)
+  assert.match(readme, /finding-карточка/)
+  assert.doesNotMatch(readme, /до 3 important/)
+})
+
 test('команда ревью описывает пакет, бюджет и итоги прохода', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
@@ -454,6 +472,7 @@ test('команда ревью описывает пакет, бюджет и �
   assert.match(command, /--reviewer/)
   assert.match(command, /7 находок/)
   assert.match(command, /--kind review/)
+  assert.match(command, /только дельта/)
 })
 
 test('AGENTS и board-work описывают ревью пакетом', () => {
@@ -464,11 +483,14 @@ test('AGENTS и board-work описывают ревью пакетом', () => 
 
   assert.match(agents, /Ревью идёт пакетом/)
   assert.match(agents, /сборник в `deferred`/)
+  assert.match(agents, /finding-карточка/)
   assert.doesNotMatch(agents, /findings становятся карточками/)
 
   assert.match(work, /только читает/)
   assert.match(work, /сборник/)
-  assert.match(work, /до 3 important/)
+  assert.match(work, /только дельта/)
+  assert.match(work, /important — finding-карточка/)
+  assert.doesNotMatch(work, /до 3 important/)
 })
 
 
