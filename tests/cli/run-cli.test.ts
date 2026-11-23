@@ -391,3 +391,11 @@ test('run note пишет итоги прохода и run list их отдаё�
   const list = json(fixture.root, ['run', 'list']) as Array<{ id: string; note: string | null }>
   assert.equal(list.find((item) => item.id === 'RUN-1')!.note, 'ИТОГИ: 3 находки')
 })
+
+test('run end --json отдаёт reviewReason', (t) => {
+  const fixture = project(t)
+  const card = fixture.cards[0]
+  run(fixture.root, ['run', 'start', '--as', 'developer', '--cards', card.id])
+  const ended = json(fixture.root, ['run', 'end', '--as', 'developer', '--no-review'])
+  assert.equal(ended.reviewReason, 'explicit')
+})
