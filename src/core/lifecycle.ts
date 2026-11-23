@@ -865,12 +865,22 @@ export function applyShapeFile(
  * worktree и ветка карточки от свежего `dev`; грязный worktree или ошибка
  * создания откатывают переход. Lease забега продлевается на два часа.
  */
-export function takeCard(db: DatabaseSync, input: { id: string; actor: string; root: string }): Card {
+export function takeCard(
+  db: DatabaseSync,
+  input: {
+    id: string
+    actor: string
+    root: string
+    requiredSpecReview?: SpecReviewGate
+  },
+): Card {
   return tx(db, () => {
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
 
-    if (card.phase === 'request') return takeRequest(db, card, actor, input.root)
+    if (card.phase === 'request') {
+      return takeRequest(db, card, actor, input.root, input.requiredSpecReview)
+    }
 
     // Одиночная карточка: без брони и забега, если она готова к работе.
     if (card.status === 'ready' || card.status === 'waiting') {
@@ -909,6 +919,7 @@ function takeRequest(
   card: Card,
   actor: string,
   root: string,
+  requiredSpecReview: SpecReviewGate = { mode: 'none', reviewerModel: null },
 ): Card {
   const run = getActiveRun(db, actor)
   if (!run || run.id !== card.runId) {
@@ -938,6 +949,8 @@ function takeRequest(
   if (card.needsMerge && card.scope.length === 0) {
     throw new UserError(3, `для needs_merge=true нужен непустой scope`)
   }
+  // Spec review — тот же гейт, что у submitCard: promotion не обходит настройку.
+  assertSpecReview(db, card, requiredSpecReview)
 
   const promoted = startWork(db, card, actor, root, run)
   // Правило забега — авторизация вместо approve: фиксируем её, чтобы resume
