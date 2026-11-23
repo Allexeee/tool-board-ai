@@ -74,6 +74,27 @@ test('плагин ищет tools/board раньше BOARD_CLI и не зовё�
   assert.match(plugin, /board не установлен/)
 })
 
+test('плагин держит правила отчёта в системном промпте', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = pluginSource(root)
+  const start = plugin.indexOf("ctx.session.hook('context'")
+  const end = plugin.indexOf('ctx.tool.transform')
+  assert.ok(start > 0 && end > start)
+  const hook = plugin.slice(start, end)
+
+  for (const rule of [
+    'Беру в работу',
+    'Сделал {ID}',
+    'Перехожу к {ID}',
+    'Завершил {RUN}',
+    'Ревью ожидают задачи',
+    'не пиши',
+  ]) {
+    assert.ok(hook.includes(rule), rule)
+  }
+})
+
 test('навыки говорят, когда продлевать lease', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
