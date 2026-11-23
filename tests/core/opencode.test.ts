@@ -505,21 +505,29 @@ test('плагин сокращает now и list, show остаётся пол�
   writeOpenCodeFiles(root)
   const source = pluginSource(root)
   const compactNow = new Function(
-    `${extractFunction(source, 'cardRow')}\n${extractFunction(source, 'stripHeavy')}\n${extractFunction(source, 'compactNow')}\nreturn compactNow`,
+    `${extractFunction(source, 'cardRow')}\n${extractFunction(source, 'isCard')}\n${extractFunction(source, 'stripHeavy')}\n${extractFunction(source, 'compactNow')}\nreturn compactNow`,
   )()
   const big = {
     id: 'CORE-21',
     status: 'done',
     title: 't',
+    skill: 'dev',
+    group: 'CORE',
+    holder: 'developer',
     body: 'big',
     acceptance: 'a',
     scope: ['src/**'],
     steps: [{ seq: 1, text: 's' }],
+    summary: 's',
+    branch: 'card/CORE-21',
+    createdAt: '2026-01-01T00:00:00.000Z',
   }
+  const row = { id: 'CORE-21', status: 'done', title: 't', skill: 'dev', group: 'CORE', holder: 'developer' }
   const now = {
     view: 1,
     header: { doneToday: 2, lastDone: [big] },
     cards: [big],
+    ownerCards: [big],
     approvals: [big],
     queue: [big],
     requests: [big],
@@ -530,14 +538,21 @@ test('плагин сокращает now и list, show остаётся пол�
   const compacted = compactNow(now)
   assert.equal(compacted.view, 1)
   assert.equal(compacted.header.doneToday, 2)
-  assert.equal(compacted.header.lastDone[0].id, 'CORE-21')
   assert.equal(compacted.deferredCount, 1)
+  assert.deepEqual(compacted.header.lastDone[0], row)
+  assert.deepEqual(compacted.cards[0], row)
+  assert.deepEqual(compacted.ownerCards[0], row)
+  assert.deepEqual(compacted.approvals[0], row)
+  assert.deepEqual(compacted.queue[0], row)
+  assert.deepEqual(compacted.requests[0], row)
+  assert.deepEqual(compacted.executors[0].cards[0], row)
+  assert.deepEqual(compacted.probableRuns[0].cards[0].card, row)
+  assert.equal(compacted.probableRuns[0].cards[0].status, 'planned')
 
   const serialized = JSON.stringify(compacted)
-  for (const heavy of ['"body"', '"acceptance"', '"scope"', '"steps"']) {
+  for (const heavy of ['"body"', '"acceptance"', '"scope"', '"steps"', '"summary"', '"branch"']) {
     assert.equal(serialized.includes(heavy), false, heavy)
   }
-  assert.equal(serialized.includes('"title"'), true)
 
   assert.match(source, /withJson/)
   assert.match(source, /if \(input\.action === 'show'\) return result/)
