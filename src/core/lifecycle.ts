@@ -15,6 +15,7 @@ import {
   mergeCommitFor,
   mergeToDev,
   outOfScope,
+  resolveBranches,
   revertMerge,
   runGit,
   startCardBranch,
@@ -1099,6 +1100,7 @@ function prepareFinish(db: DatabaseSync, input: FinishInput): FinishPlan {
   const card = requireCard(db, input.id)
   const actor = requireActor(input.actor)
   const summary = requireSummary(input.summary)
+  const { dev } = resolveBranches(input.root)
 
   if (card.holder !== actor) {
     throw new UserError(
@@ -1152,7 +1154,7 @@ function prepareFinish(db: DatabaseSync, input: FinishInput): FinishPlan {
       if (!mergeCommit) {
         throw new UserError(3, `merge-коммит ветки ${card.branch} не найден в dev`)
       }
-      inDev = isAncestor(input.root, mergeCommit, 'dev')
+      inDev = isAncestor(input.root, mergeCommit, dev)
       if (!inDev) {
         throw new UserError(3, `коммит ${mergeCommit} не является предком dev`)
       }
@@ -1161,10 +1163,10 @@ function prepareFinish(db: DatabaseSync, input: FinishInput): FinishPlan {
       // Сверяем кончик ветки, а не только записанный merge: после reopen в ветке
       // могут быть новые коммиты, и их надо влить.
       const tip = runGit(input.root, ['rev-parse', card.branch])
-      if (isAncestor(input.root, tip, 'dev')) {
+      if (isAncestor(input.root, tip, dev)) {
         mergeCommit = mergeCommitFor(input.root, card.branch) ?? card.mergeCommit
         inDev = true
-      } else if (card.mergeCommit !== null && !isAncestor(input.root, card.mergeCommit, 'dev')) {
+      } else if (card.mergeCommit !== null && !isAncestor(input.root, card.mergeCommit, dev)) {
         throw new UserError(
           2,
           `рассинхрон git и БД: merge-коммит ${card.mergeCommit} карточки ${card.id} не предок dev; проверьте board doctor`,
@@ -1176,7 +1178,7 @@ function prepareFinish(db: DatabaseSync, input: FinishInput): FinishPlan {
           throw new UserError(3, `файлы вне scope карточки ${card.id}: ${out.join(', ')}`)
         }
         mergeCommit = mergeToDev(input.root, card.branch, `merge ${card.id}: ${summary}`)
-        inDev = isAncestor(input.root, mergeCommit, 'dev')
+        inDev = isAncestor(input.root, mergeCommit, dev)
       }
     }
   }

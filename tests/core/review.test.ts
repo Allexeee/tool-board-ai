@@ -371,3 +371,14 @@ test('addFinding ставит тег review', (t) => {
   })
   assert.deepEqual(finding.tags, ['review'])
 })
+
+test('review submit: при наличии шагов план обязателен', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  addStep(db, { cardId: card.id, text: 'шаг' })
+
+  assert.throws(
+    () => submitVerdict(db, { cardId: card.id, reviewer: 'reviewer-1', verdict: 'done' }),
+    /--plan/,
+  )
+})

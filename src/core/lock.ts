@@ -49,6 +49,7 @@ export function withFileLock<T>(lockPath: string, fn: () => T): T {
       if (isStale(lockPath)) {
         try {
           rmSync(lockPath, { force: true })
+          process.stderr.write(`lock ${lockPath} устарел: снят\n`)
         } catch {
           // кто-то уже снял — повторим попытку
         }

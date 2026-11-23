@@ -441,8 +441,9 @@ export function isAncestor(root: string, commit: string, ref: string): boolean {
  * кэшируются в карточке; git остаётся источником истины.
  */
 export function refreshMergeState(db: DatabaseSync, root: string, card: Card): Card {
-  const inDev = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, 'dev')
-  const inMain = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, 'main')
+  const { main, dev } = resolveBranches(root)
+  const inDev = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, dev)
+  const inMain = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, main)
   const at = nowIso()
 
   db.prepare('update cards set in_dev = ?, in_main = ?, updated_at = ? where id = ?').run(
