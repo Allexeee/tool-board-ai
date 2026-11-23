@@ -57,6 +57,7 @@ async function call(ctx, args, context) {
       timeout: 120_000,
       maxBuffer: 8 * 1024 * 1024,
       env,
+      windowsHide: true,
     })
     return { content: stdout.trim() || '{}' }
   } catch (error) {
