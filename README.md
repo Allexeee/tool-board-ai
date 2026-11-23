@@ -135,7 +135,7 @@ board run note RUN-1 --text "итоги прохода" --as reviewer
 
 ## Ревью
 
-`board review list --json` отдаёт пакет: карточки в `review` с spec, acceptance, plan, scope и diff. `/spec-review` проверяет полноту spec до approve, `/review` — проход по пакету:
+`board review list --json` отдаёт пакет: карточки в `review` с spec, acceptance, plan, scope и **командой** `git diff <merge>^1 <merge>` — сам diff нужно выполнить. `/spec-review` проверяет полноту spec до approve, `/review` — проход по пакету:
 
 ```bash
 board run note RUN-1 --text "ИТОГИ: покрытые карточки, вердикты, находки" --as reviewer
@@ -143,7 +143,7 @@ board review submit UI-1 --plan done --verdict done --note "итоги: RUN-1" -
 board card ref add UI-1 --kind review --value RUN-1 --title "итоги прохода"
 ```
 
-Ревьюер только читает: карточек не создаёт. Итоги прохода — `run note` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка. Бюджет прохода: первый проход полный; повторный — только дельта (исправлены ли находки и нет ли регрессий от фикса), новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь и не блокирует релиз; minor — сборник `review notes` в `deferred`. Больше 7 находок на проход не перечисляют.
+Ревьюер только читает: карточек не создаёт. Итоги прохода — `run note` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка. Бюджет прохода: первый проход полный; повторный — только дельта (исправлены ли находки и нет ли регрессий от фикса), новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь и не блокирует релиз; other — сборник `review notes` в `deferred`. Больше 7 находок на проход не перечисляют.
 
 CLI субагентов не порождает — он готовит пакет и принимает вердикты. Субагент `board-reviewer` работает на default-варианте `reviewer.model`, не в Max; `self` использует модель основной сессии.
 
@@ -171,6 +171,14 @@ board setup --reviewer-model provider/model         # default-вариант р�
 
 Старые `--review-after-run`/`--no-review-after-run` остаются алиасами
 `runReview.mode=subagent|none`.
+
+## Границы продукта
+
+Доска — **local-only**: одна машина, один владелец. База `.board/board.db` живёт локально и не шарится; `--as owner` — маркер в журнале, а не аутентификация; ограничения ревьюера держатся на правах harness, а не на песочнице.
+
+Чего здесь нет и не планируется: синхронизации базы между машинами, ролей и доступа для команды, сервера. Копию базы для доступа с другого ПК держите в приватном git-репозитории (`sync push/pull`) или в облачной папке; публичный репозиторий проекта для данных не годится.
+
+Командный режим — общая база, аутентификация вместо `--as`, роли — отдельный проект.
 
 ## Релиз
 
@@ -248,6 +256,8 @@ board command add "RUN" "начать забег по очереди" --as owner
 | `command add\|list` | команды владельца |
 | `review list\|finding\|submit --plan done\|failed` | пакет и вердикты ревью |
 | `release` | слить `dev` в `main` |
+| `backup [path]` | копия `.board/board.db` |
+| `export [--format json\|md] [--out path]` | выгрузка карточек |
 | `now [0\|1\|2\|3]` | терминальная доска |
 | `doctor` | диагностика |
 
@@ -255,4 +265,4 @@ board command add "RUN" "начать забег по очереди" --as owner
 
 ## OpenCode
 
-`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_setup`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term`, команды `/review`, `/spec-review`, `/setup` и read-only агент `board-reviewer` (если задан `reviewer.model`). Плагин не содержит логики: он вызывает `board … --json` и передаёт модели сессии `BOARD_MODEL_VARIANT`/`BOARD_SESSION_MODEL`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.
+`init` создаёт скилл `board`, плагин с инструментами `board_now`, `board_setup`, `board_card`, `board_run`, `board_take`, `board_finish`, `board_block`, `board_ask`, `board_answer`, `board_review`, `board_decision`, `board_term`, `board_queue`, `board_touch`, `board_doctor`, `board_backup`, `board_release`, команды `/review`, `/spec-review`, `/setup` и read-only агент `board-reviewer` (если задан `reviewer.model`). Плагин не содержит логики: он вызывает `board … --json`, отдаёт записи компактно (`id`, `status`, `branch`, `position`; списки и `now` — строками) и передаёт модели сессии `BOARD_MODEL_VARIANT`/`BOARD_SESSION_MODEL`. Файлы исполнителей-агентов настраиваются руками в `.opencode/agents/<id>.md`.

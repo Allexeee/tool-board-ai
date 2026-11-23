@@ -15,6 +15,8 @@ export interface NewCardInput {
   skill: string
   author: string
   tags?: string[]
+  /** false — карточка без git-мержа (доска без git или контент). */
+  needsMerge?: boolean
 }
 
 export interface CardFilter {
@@ -80,6 +82,7 @@ interface Row {
   position: number | null
   needs_merge: number
   review_required: number
+  plan_waived: number
   scope: string
   tags: string
   severity: string | null
@@ -123,6 +126,7 @@ const toCard = (row: Row): Card => ({
   position: row.position,
   needsMerge: row.needs_merge === 1,
   reviewRequired: row.review_required === 1,
+  planWaived: row.plan_waived === 1,
   scope: JSON.parse(row.scope) as string[],
   tags: JSON.parse(row.tags) as string[],
   severity: row.severity as Card['severity'],
@@ -265,7 +269,7 @@ export function createCard(db: DatabaseSync, input: NewCardInput): Card {
       phase: isOwner ? 'task' : 'request',
       status: isOwner ? 'ready' : 'new',
       skill,
-      needsMerge: !isOwner,
+      needsMerge: input.needsMerge ?? !isOwner,
       tags: JSON.stringify(normalizeTags(input.tags ?? [])),
       createdAt,
     })

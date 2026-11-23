@@ -28,11 +28,11 @@ export const AGENTS_BLOCK = [
   '- Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.',
   '- Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.',
   '- После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.',
-  '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`.',
+  '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
-  '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`. Первый проход полный; повторный — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь; minor — сборник в `deferred`.',
+  '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`. Первый проход полный; повторный — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь; other — сборник в `deferred`.',
   '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
   '- После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.',
   '- Коммит делаешь сам в ветке карточки; мерж в `dev` делает `finish`. `main` меняется только `release` владельцем.',
@@ -105,6 +105,7 @@ description: Доска: исполнить карточку — take, план 
 - На карточке — целевые тесты затронутых файлов и проверка типов проекта; полный прогон после каждой карточки не нужен.
 - Полный прогон — один раз, при сдаче bump-карточки перед релизом: её acceptance требует зелёный suite, там же фиксируется результат.
 - Вне очереди полный прогон, если diff трогает общий каркас: настройки, жизненный цикл, git-слой, очередь, шаги.
+- Bump-карточка перед релизом обновляет и \`package-lock.json\`: версия в lockfile совпадает с \`package.json\`.
 
 ## Отчёт
 
@@ -124,7 +125,7 @@ description: Доска: исполнить карточку — take, план 
 - Первый проход полный. Повторный — только дельта: исправлены ли перечисленные находки и нет ли регрессий от фикса; новых находок он не ищет, полный \`node --test\` не перезапускает — верит прогону исполнителя и гоняет целевые тесты.
 - critical и регрессии этого diff — чинятся сразу, карточка reopen.
 - important — finding-карточка \`board review finding <ID> --severity important --text "..."\` встаёт в очередь; release не блокирует, берётся следующим раном по приоритету.
-- minor — один сборник \`review notes\` в \`deferred\`.
+- other — один сборник \`review notes\` в \`deferred\`.
 - Свою карточку не ревьюй: вердикт даёт свежий субагент. \`critical\` блокирует release.
 
 ## Правила
@@ -177,9 +178,9 @@ description: Доска: забег — «Ран», состав, порядок
 
 Пакет ревью — все карточки в \`review\` с прошлого прохода. Он не ограничен; проходов может быть несколько, вести их может один ревьюер подряд. Ревью запускается по слову владельца «Ревью», после накопления и обязательно перед release.
 
-Бюджет прохода: critical и регрессии этого diff — всегда; important — finding-карточка в очередь; minor — один сборник \`review notes: <пакет>\` в deferred. Больше 7 находок на проход не перечисляй. Повторный проход — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет и полный прогон тестов не перезапускает.
+Бюджет прохода: critical и регрессии этого diff — всегда; important — finding-карточка в очередь; other — один сборник \`review notes: <пакет>\` в deferred. Больше 7 находок на проход не перечисляй. Повторный проход — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет и полный прогон тестов не перезапускает.
 
-Ревьюер только читает: карточек не создаёт. Итоги прохода — \`board run note <RUN> --text "..." --as <ревьюер>\` (или \`board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\` для одиночной карточки), в карточке — вердикт и ссылка \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`. Оформляет находки агент: critical и important — через \`review finding\`, minor — в сборник.
+Ревьюер только читает: карточек не создаёт. Итоги прохода — \`board run note <RUN> --text "..." --as <ревьюер>\` (или \`board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\` для одиночной карточки), в карточке — вердикт и ссылка \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`. Оформляет находки агент: critical и important — через \`review finding\`, other — в сборник.
 `
 
 export const SKILL_NOW_SOURCE = `---
@@ -260,9 +261,11 @@ async function call(ctx, args, context) {
     if (error.code === 'ENOENT') {
       return { content: 'CLI board не найден: выполните board init', isError: true }
     }
+    // Код 1 — «делать нечего», 2 — «нужно решение владельца»: это не ошибки.
+    const status = typeof error.code === 'number' ? error.code : null
     return {
       content: error.stdout?.trim() || error.stderr?.trim() || error.message,
-      isError: true,
+      isError: status === null ? true : status >= 3,
     }
   }
 }
@@ -286,6 +289,14 @@ function cardRow(card) {
   if (card.skill) row.skill = card.skill
   if (card.group) row.group = card.group
   if (card.holder) row.holder = card.holder
+  return row
+}
+
+function runRow(run) {
+  const row = { id: run.id, status: run.status, executor: run.executorId }
+  if (run.createdAt) row.createdAt = run.createdAt
+  if (run.endedAt) row.endedAt = run.endedAt
+  if (Array.isArray(run.notes)) row.notes = run.notes.length
   return row
 }
 
@@ -371,6 +382,13 @@ function cardArgs(input) {
     flag(args, 'title', input.title)
     flag(args, 'spec', input.spec ?? input.body)
     if (Array.isArray(input.acceptance)) for (const item of input.acceptance) args.push('--acceptance', String(item))
+    if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
+    if (input.importance !== undefined) args.push('--importance', String(input.importance))
+    if (input.urgency !== undefined) args.push('--urgency', String(input.urgency))
+    if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
+    if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
+    if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
     flag(args, 'as', input.as)
   } else if (a === 'list') {
@@ -390,6 +408,8 @@ function cardArgs(input) {
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
+    if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
+    if (input.clear_tags) args.push('--clear-tags')
     flag(args, 'note', input.note)
     flag(args, 'as', input.as)
   } else if (a === 'defer' || a === 'resume') {
@@ -438,6 +458,8 @@ function runArgs(input) {
   if (a === 'start') {
     flag(args, 'cards', input.cards)
     if (input.suggest !== undefined) args.push('--suggest', String(input.suggest))
+    if (input.review === true) args.push('--review')
+    else if (input.review === false) args.push('--no-review')
     flag(args, 'as', input.as)
   } else if (a === 'add' || a === 'drop') {
     if (input.id) args.push(input.id)
@@ -479,7 +501,9 @@ function backupArgs(input) {
     if (input.md) args.push('--md')
     return args
   }
-  return ['backup']
+  const args = ['backup']
+  if (input.out) args.push(String(input.out))
+  return args
 }
 
 function reviewArgs(input) {
@@ -578,7 +602,7 @@ export default Plugin.define({
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'run-review'].includes(action)) {
+          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
           if (action === 'review-after-run' || action === 'no-review-after-run') {
@@ -617,6 +641,8 @@ export default Plugin.define({
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
           scope: { type: 'array', items: { type: 'string' } },
+          tags: { type: 'array', items: { type: 'string' } },
+          clear_tags: { type: 'boolean' },
           waive_dependents: { type: 'boolean' },
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
@@ -629,6 +655,30 @@ export default Plugin.define({
         execute: (input, context) => {
           if (input.action === 'approve' && input.as !== 'owner') {
             return { content: 'approve — только владелец: укажите as: owner', isError: true }
+          }
+          if (['step', 'ref', 'dep', 'scope'].includes(input.action) && !input.sub) {
+            return { content: 'нужен sub: add|done|remove|list', isError: true }
+          }
+          // shape со spec/acceptance/scope: сначала разбор, затем edit — одним действием.
+          if (
+            input.action === 'shape' &&
+            (input.spec || Array.isArray(input.acceptance) || Array.isArray(input.scope))
+          ) {
+            return (async () => {
+              const shaped = await call(ctx, cardArgs(input), context)
+              if (shaped.isError) return shaped
+              const edit = ['card', 'edit']
+              if (input.id) edit.push(input.id)
+              flag(edit, 'spec', input.spec)
+              if (Array.isArray(input.acceptance)) {
+                for (const item of input.acceptance) edit.push('--acceptance', String(item))
+              }
+              if (Array.isArray(input.scope)) {
+                for (const path of input.scope) edit.push('--scope', String(path))
+              }
+              flag(edit, 'as', input.as)
+              return call(ctx, edit, context)
+            })()
           }
           const result = call(ctx, cardArgs(input), context)
           if (input.action === 'show') return result
@@ -655,7 +705,13 @@ export default Plugin.define({
           },
           as: { type: 'string' },
         }, ['action']),
-        execute: (input, context) => call(ctx, runArgs(input), context),
+        execute: (input, context) => {
+          const result = call(ctx, runArgs(input), context)
+          if (input.action === 'list') {
+            return withJson(result, (value) => (Array.isArray(value) ? value.map(runRow) : value))
+          }
+          return result
+        },
       })
 
       editor.add({
@@ -674,7 +730,7 @@ export default Plugin.define({
       editor.add({
         name: 'touch',
         description: 'Продлить lease карточки в работе',
-        input: schema({ id: { type: 'string' }, as: { type: 'string' } }, ['id']),
+        input: schema({ id: { type: 'string' }, as: { type: 'string' } }, ['id', 'as']),
         execute: (input, context) =>
           call(ctx, ['touch', input.id, ...(input.as ? ['--as', input.as] : [])], context),
       })
@@ -853,7 +909,7 @@ subagent: false
    Critical или регрессия этого diff — \`reopen\`; \`plan failed\` требует \`reopen\`.
 5. В карточке — ссылка: \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`.
 6. Бюджет прохода: critical и регрессии — всегда; important — finding-карточка
-   в очередь; minor — сборник в deferred. Повторный проход — только дельта:
+   в очередь; other — сборник в deferred. Повторный проход — только дельта:
    исправлены ли находки и нет ли регрессий; новых не ищет, полный прогон
    тестов не перезапускает.
 7. Если карточек нет — сообщи, что ревьюить нечего.
@@ -872,9 +928,10 @@ subagent: false
    ограничения, зависимости, риски и возможность написать plan.
 4. \`subagent\` — запусти \`board-reviewer\` и передай ему spec и acceptance.
 5. Если spec неполный, сначала дополни его из контекста проекта, затем задай
-   вопрос владельцу (\`ask\`/\`block\`). Не делай submit.
+   вопрос владельцу (\`ask\`/\`block\`) и запиши \`--verdict reopen\`.
 6. Запиши результат: \`board card spec-review $1 --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."\`.
-7. Владелец утверждает spec через \`board card approve $1\`.
+7. При вердикте \`done\` отправь карточку на утверждение: \`board card submit $1 --as <исполнитель>\` — без этого владелец не сможет \`approve\`. При \`reopen\` submit не делай.
+8. Владелец утверждает spec через \`board card approve $1\`.
 `
 
 export const SETUP_COMMAND_SOURCE = `---
@@ -900,24 +957,38 @@ board setup --spec-review <mode> --max-spec <n> --large-spec <n> --run-review <m
 `
 
 export function reviewerAgentSource(model: string): string {
+  const shellAllow = [
+    'git diff*',
+    'git log*',
+    'git show*',
+    'git rev-parse*',
+    'git merge-base*',
+    'board review list*',
+    'board card show*',
+    'board run list*',
+    'board run note*',
+    'board review submit*',
+    'board card ref add*',
+  ]
+  const permissions = [
+    '  - action: edit\n    resource: "*"\n    effect: deny',
+    '  - action: read\n    resource: "*"\n    effect: allow',
+    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
+    '  - action: shell\n    resource: "*"\n    effect: deny',
+  ].join('\n')
+
   return `---
 description: Read-only reviewer for spec, plan and code
 mode: subagent
 model: ${model}
 permissions:
-  - action: edit
-    resource: "*"
-    effect: deny
-  - action: read
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "*"
-    effect: allow
+${permissions}
 ---
 
 Ты — свежий ревьюер. Не редактируй файлы и не создавай карточки:
-ни \`board review finding\`, ни \`board card add\`.
+ни \`board review finding\`, ни \`board card add\` — это отклоняется правами, а не просьбой.
+
+Тесты не гоняй: их прогнал исполнитель, полный suite идёт перед релизом, CI — после push. Твой инструмент — чтение файлов и \`git diff\`.
 
 Проверяй acceptance, plan и код. Итоги прохода пиши одним блоком:
 - для забега — \`board run note <RUN> --text "..." --as <твой id>\`;

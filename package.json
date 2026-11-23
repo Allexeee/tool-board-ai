@@ -1,7 +1,13 @@
 {
   "name": "tool-board-ai",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "private": true,
+  "license": "MIT",
+  "author": "Allexeee",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Allexeee/tool-board-ai.git"
+  },
   "description": "Доска карточек для владельца и ИИ-агентов",
   "type": "module",
   "files": [

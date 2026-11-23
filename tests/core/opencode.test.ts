@@ -203,6 +203,58 @@ test('плагин собирает аргументы run note, очереди 
     'export', '--format', 'md',
   ])
   assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'backup' }), ['backup'])
+  assert.deepEqual(buildArgs(source, 'backupArgs')({ action: 'backup', out: 'C:/x.db' }), [
+    'backup', 'C:/x.db',
+  ])
+})
+
+test('плагин передаёт в card add приоритеты, scope, теги и note', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const args = buildArgs(pluginSource(root), 'cardArgs')({
+    action: 'add',
+    group: 'UI',
+    title: 't',
+    spec: 's',
+    acceptance: ['a'],
+    tags: ['new'],
+    importance: 2,
+    urgency: 3,
+    scope: ['src/**'],
+    needs_merge: false,
+    review: true,
+    note: 'n',
+    skill: 'dev',
+    as: 'owner',
+  })
+
+  const pairs: Array<[string, string | null]> = [
+    ['--tag', 'new'],
+    ['--importance', '2'],
+    ['--urgency', '3'],
+    ['--scope', 'src/**'],
+    ['--no-needs-merge', null],
+    ['--review', null],
+    ['--note', 'n'],
+  ]
+  for (const [flagName, expected] of pairs) {
+    if (expected === null) {
+      assert.ok(args.includes(flagName), flagName)
+    } else {
+      assert.equal(args[args.indexOf(flagName) + 1], expected, flagName)
+    }
+  }
+})
+
+test('плагин: sub обязателен, run list компактен, код 1/2 не ошибка', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const source = pluginSource(root)
+
+  assert.match(source, /нужен sub: add\|done\|remove\|list/)
+  assert.match(source, /runRow/)
+  assert.match(source, /status >= 3/)
+  assert.match(source, /'touch'.*\[.id., .as.\]|schema\(\{ id: \{ type: 'string' \}, as: \{ type: 'string' \} \}, \['id', 'as'\]\)/)
 })
 
 test('плагин объявляет tool-ы touch, doctor, backup, release, queue', () => {
@@ -216,6 +268,21 @@ test('плагин объявляет tool-ы touch, doctor, backup, release, qu
   assert.match(plugin, /name: 'run'/)
   assert.match(plugin, /a === 'note'/)
   assert.match(plugin, /input\.as !== 'owner'/)
+})
+
+test('ревьюер: shell только read-only, мутации отклонены', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root, {
+    settings: { ...DEFAULT_SETTINGS, reviewer: { model: 'acme/reviewer' } },
+  })
+  const agent = readFileSync(join(root, '.opencode', 'agents', 'board-reviewer.md'), 'utf8')
+
+  assert.match(agent, /resource: "git diff\*"/)
+  assert.match(agent, /resource: "board review list\*"/)
+  assert.match(agent, /resource: "board run note\*"/)
+  assert.doesNotMatch(agent, /- action: shell\n {4}resource: "\*"\n {4}effect: allow/)
+  assert.match(agent, /Тесты не гоняй/)
+  assert.match(agent, /это отклоняется правами/)
 })
 
 test('reviewer agent берёт effective-модель сессии, если настройка пуста', () => {
@@ -254,6 +321,8 @@ test('spec-review и review команды — оркестраторы с plan/
   assert.match(spec, /subagent: false/)
   assert.match(spec, /card spec-review/)
   assert.match(spec, /specReview\.mode/)
+  assert.match(spec, /board card submit/)
+  assert.match(spec, /При `reopen` submit не делай/)
   assert.match(review, /subagent: false/)
   assert.match(review, /--plan done\|failed/)
   assert.match(review, /acceptance|критери/)
@@ -482,6 +551,7 @@ test('AGENTS и board-work описывают ревью пакетом', () => 
   const work = readFileSync(join(root, '.opencode', 'skills', 'board-work', 'SKILL.md'), 'utf8')
 
   assert.match(agents, /Ревью идёт пакетом/)
+  assert.match(agents, /одиночный `take` без забега/)
   assert.match(agents, /сборник в `deferred`/)
   assert.match(agents, /finding-карточка/)
   assert.doesNotMatch(agents, /findings становятся карточками/)

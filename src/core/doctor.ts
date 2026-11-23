@@ -7,6 +7,7 @@ import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
+import { readSettings } from './settings.ts'
 import { SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
 
 export interface DoctorResult {
@@ -34,8 +35,11 @@ export function doctorData(
     errors.push('.board/board.db не найден: выполните board init')
   }
 
-  const repo = isRepo(root)
-  if (!repo) {
+  const settings = readSettings(root)
+  const repo = settings.git && isRepo(root)
+  if (!settings.git) {
+    // Доска без git: ветки и мержи не нужны, это осознанный режим.
+  } else if (!repo) {
     errors.push('не git-репозиторий: ветки и коммиты недоступны')
   } else {
     const { main, dev } = resolveBranches(root)
@@ -145,6 +149,19 @@ function checkCards(db: DatabaseSync, warnings: string[]): void {
   const review = cards.filter((card) => card.status === 'review')
   if (review.length > 0) {
     warnings.push(`карточки на ревью: ${review.map((c) => c.id).join(', ')}`)
+  }
+
+  // План пропущен молча: done-карточка с обязательным ревью без шагов и без --no-plan.
+  const noPlan = db
+    .prepare(
+      `select c.id from cards c
+       where c.status = 'done' and c.review_required = 1 and c.plan_waived = 0
+         and not exists (select 1 from steps s where s.card_id = c.id)
+       order by c.id`,
+    )
+    .all() as Array<{ id: string }>
+  if (noPlan.length > 0) {
+    warnings.push(`done без плана и без отметки --no-plan: ${noPlan.map((row) => row.id).join(', ')}`)
   }
 }
 

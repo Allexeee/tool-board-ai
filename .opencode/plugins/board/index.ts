@@ -64,9 +64,11 @@ async function call(ctx, args, context) {
     if (error.code === 'ENOENT') {
       return { content: 'CLI board не найден: выполните board init', isError: true }
     }
+    // Код 1 — «делать нечего», 2 — «нужно решение владельца»: это не ошибки.
+    const status = typeof error.code === 'number' ? error.code : null
     return {
       content: error.stdout?.trim() || error.stderr?.trim() || error.message,
-      isError: true,
+      isError: status === null ? true : status >= 3,
     }
   }
 }
@@ -90,6 +92,14 @@ function cardRow(card) {
   if (card.skill) row.skill = card.skill
   if (card.group) row.group = card.group
   if (card.holder) row.holder = card.holder
+  return row
+}
+
+function runRow(run) {
+  const row = { id: run.id, status: run.status, executor: run.executorId }
+  if (run.createdAt) row.createdAt = run.createdAt
+  if (run.endedAt) row.endedAt = run.endedAt
+  if (Array.isArray(run.notes)) row.notes = run.notes.length
   return row
 }
 
@@ -175,6 +185,13 @@ function cardArgs(input) {
     flag(args, 'title', input.title)
     flag(args, 'spec', input.spec ?? input.body)
     if (Array.isArray(input.acceptance)) for (const item of input.acceptance) args.push('--acceptance', String(item))
+    if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
+    if (input.importance !== undefined) args.push('--importance', String(input.importance))
+    if (input.urgency !== undefined) args.push('--urgency', String(input.urgency))
+    if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
+    if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
+    if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
     flag(args, 'as', input.as)
   } else if (a === 'list') {
@@ -194,6 +211,8 @@ function cardArgs(input) {
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
+    if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
+    if (input.clear_tags) args.push('--clear-tags')
     flag(args, 'note', input.note)
     flag(args, 'as', input.as)
   } else if (a === 'defer' || a === 'resume') {
@@ -242,6 +261,8 @@ function runArgs(input) {
   if (a === 'start') {
     flag(args, 'cards', input.cards)
     if (input.suggest !== undefined) args.push('--suggest', String(input.suggest))
+    if (input.review === true) args.push('--review')
+    else if (input.review === false) args.push('--no-review')
     flag(args, 'as', input.as)
   } else if (a === 'add' || a === 'drop') {
     if (input.id) args.push(input.id)
@@ -283,7 +304,9 @@ function backupArgs(input) {
     if (input.md) args.push('--md')
     return args
   }
-  return ['backup']
+  const args = ['backup']
+  if (input.out) args.push(String(input.out))
+  return args
 }
 
 function reviewArgs(input) {
@@ -382,7 +405,7 @@ export default Plugin.define({
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'run-review'].includes(action)) {
+          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
           if (action === 'review-after-run' || action === 'no-review-after-run') {
@@ -421,6 +444,8 @@ export default Plugin.define({
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
           scope: { type: 'array', items: { type: 'string' } },
+          tags: { type: 'array', items: { type: 'string' } },
+          clear_tags: { type: 'boolean' },
           waive_dependents: { type: 'boolean' },
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
@@ -433,6 +458,30 @@ export default Plugin.define({
         execute: (input, context) => {
           if (input.action === 'approve' && input.as !== 'owner') {
             return { content: 'approve — только владелец: укажите as: owner', isError: true }
+          }
+          if (['step', 'ref', 'dep', 'scope'].includes(input.action) && !input.sub) {
+            return { content: 'нужен sub: add|done|remove|list', isError: true }
+          }
+          // shape со spec/acceptance/scope: сначала разбор, затем edit — одним действием.
+          if (
+            input.action === 'shape' &&
+            (input.spec || Array.isArray(input.acceptance) || Array.isArray(input.scope))
+          ) {
+            return (async () => {
+              const shaped = await call(ctx, cardArgs(input), context)
+              if (shaped.isError) return shaped
+              const edit = ['card', 'edit']
+              if (input.id) edit.push(input.id)
+              flag(edit, 'spec', input.spec)
+              if (Array.isArray(input.acceptance)) {
+                for (const item of input.acceptance) edit.push('--acceptance', String(item))
+              }
+              if (Array.isArray(input.scope)) {
+                for (const path of input.scope) edit.push('--scope', String(path))
+              }
+              flag(edit, 'as', input.as)
+              return call(ctx, edit, context)
+            })()
           }
           const result = call(ctx, cardArgs(input), context)
           if (input.action === 'show') return result
@@ -459,7 +508,13 @@ export default Plugin.define({
           },
           as: { type: 'string' },
         }, ['action']),
-        execute: (input, context) => call(ctx, runArgs(input), context),
+        execute: (input, context) => {
+          const result = call(ctx, runArgs(input), context)
+          if (input.action === 'list') {
+            return withJson(result, (value) => (Array.isArray(value) ? value.map(runRow) : value))
+          }
+          return result
+        },
       })
 
       editor.add({
@@ -478,7 +533,7 @@ export default Plugin.define({
       editor.add({
         name: 'touch',
         description: 'Продлить lease карточки в работе',
-        input: schema({ id: { type: 'string' }, as: { type: 'string' } }, ['id']),
+        input: schema({ id: { type: 'string' }, as: { type: 'string' } }, ['id', 'as']),
         execute: (input, context) =>
           call(ctx, ['touch', input.id, ...(input.as ? ['--as', input.as] : [])], context),
       })

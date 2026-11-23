@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 5
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -37,6 +37,7 @@ create table cards (
   position integer,
   needs_merge integer not null default 1,
   review_required integer not null default 0,
+  plan_waived integer not null default 0,
   scope text not null default '[]',
   tags text not null default '[]',
   severity text,
@@ -138,6 +139,15 @@ create table run_cards (
   primary key (run_id, card_id)
 );
 
+create table run_notes (
+  id integer primary key autoincrement,
+  run_id text not null,
+  actor text not null,
+  text text not null,
+  at text not null
+);
+create index idx_run_notes_run on run_notes(run_id, id);
+
 create table decisions (
   id text primary key,
   card_id text,
@@ -181,6 +191,23 @@ const MIGRATE_V2_TO_V3 = `
 alter table cards add column tags text not null default '[]';
 `
 
+/** История проходов ревью: старый runs.note переезжает первой записью. */
+const MIGRATE_V3_TO_V4 = `
+create table run_notes (
+  id integer primary key autoincrement,
+  run_id text not null,
+  actor text not null,
+  text text not null,
+  at text not null
+);
+create index idx_run_notes_run on run_notes(run_id, id);
+`
+
+/** Осознанный отказ от плана: маленькая задача без шагов. */
+const MIGRATE_V4_TO_V5 = `
+alter table cards add column plan_waived integer not null default 0;
+`
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -204,7 +231,16 @@ export function migrate(db: DatabaseSync): number {
     else if (from === 1) {
       db.exec(MIGRATE_V1_TO_V2)
       db.exec(MIGRATE_V2_TO_V3)
-    } else if (from === 2) db.exec(MIGRATE_V2_TO_V3)
+      db.exec(MIGRATE_V3_TO_V4)
+      db.exec(MIGRATE_V4_TO_V5)
+    } else if (from === 2) {
+      db.exec(MIGRATE_V2_TO_V3)
+      db.exec(MIGRATE_V3_TO_V4)
+      db.exec(MIGRATE_V4_TO_V5)
+    } else if (from === 3) {
+      db.exec(MIGRATE_V3_TO_V4)
+      db.exec(MIGRATE_V4_TO_V5)
+    } else if (from === 4) db.exec(MIGRATE_V4_TO_V5)
     else throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
 
     if (from === 1 || from === 2) {
@@ -213,6 +249,21 @@ export function migrate(db: DatabaseSync): number {
       )
       if (hasOrigin) {
         db.exec(`update cards set tags = '["review"]' where origin_card_id is not null`)
+      }
+    }
+
+    // Старый runs.note — первая запись истории. Таблицы runs может не быть
+    // в синтетических базах тестов: тогда переносить нечего.
+    if (from < 4) {
+      const hasRuns = db
+        .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'runs'")
+        .get()
+      if (hasRuns) {
+        db.exec(
+          `insert into run_notes (run_id, actor, text, at)
+           select id, 'system', note, coalesce(ended_at, started_at, created_at)
+           from runs where note is not null and trim(note) != ''`,
+        )
       }
     }
     db.prepare(

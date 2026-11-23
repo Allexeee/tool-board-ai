@@ -99,6 +99,21 @@ test('doctor --json возвращает { errors, warnings }', (t) => {
   assert.ok(data.errors.some((e) => /git|репозиторий/.test(e)), data.errors.join(' | '))
 })
 
+test('help: общая справка перечисляет флаги и подкомандную справку', () => {
+  const result = runCli(['help'])
+  assert.equal(result.status, 0)
+  assert.match(result.stdout, /--scope/)
+  assert.match(result.stdout, /--acceptance/)
+  assert.match(result.stdout, /backup \/ export/)
+
+  const add = runCli(['card', 'add', '--help'])
+  assert.equal(add.status, 0)
+  assert.match(add.stdout, /board card add --group/)
+
+  const setup = runCli(['setup', '--help'])
+  assert.match(setup.stdout, /--branch-main/)
+})
+
 test('doctor: чистая доска — код 0', (t) => {
   const repo = makeRepo()
   t.after(() => repo.close())

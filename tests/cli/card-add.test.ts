@@ -262,3 +262,17 @@ test('card scope add расширяет scope у карточки в работ�
   }
   assert.deepEqual(updated.scope, ['src/a.ts'])
 })
+
+test('card add сохраняет scope, review, note и needs_merge', (t) => {
+  const dir = project(t)
+  const added = run(dir, [
+    'card', 'add', '--group', 'UI', '--title', 't', '--skill', 'dev', '--as', 'owner',
+    '--scope', 'src/**', '--review', '--no-needs-merge', '--note', 'n', '--json',
+  ])
+  assert.equal(added.code, 0, added.err)
+  const card = JSON.parse(added.out)
+  assert.deepEqual(card.scope, ['src/**'])
+  assert.equal(card.reviewRequired, true)
+  assert.equal(card.needsMerge, false)
+  assert.equal(card.note, 'n')
+})

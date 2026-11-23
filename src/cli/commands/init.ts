@@ -1,6 +1,7 @@
 ﻿import { writeReviewerAgent } from '../../core/opencode.ts'
 import { initProject } from '../../core/project.ts'
-import { ensureSettings, type BoardSettings } from '../../core/settings.ts'
+import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
+import { ensureSettings, updateSettings, type BoardSettings } from '../../core/settings.ts'
 import { SUPERPOWERS_ADVICE, superpowersConfigured } from '../../core/superpowers.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
@@ -13,9 +14,14 @@ export default async function command(args: ParsedArgs) {
     boardVersion: stringFlag(args, 'board-version'),
     boardSource: stringFlag(args, 'board-source'),
     allowDowngrade: boolFlag(args, 'allow-downgrade'),
+    noGit: boolFlag(args, 'no-git') || boolFlag(args, 'standalone'),
   })
 
   let settings: BoardSettings = ensureSettings(root).settings
+  const noGit = boolFlag(args, 'no-git') || boolFlag(args, 'standalone')
+  if (noGit && settings.git) {
+    settings = updateSettings(root, { git: false })
+  }
   if (
     shouldRunSetup({
       settings,
@@ -38,11 +44,12 @@ export default async function command(args: ParsedArgs) {
   }
   if (lines.length === 0) lines.push('Доска уже настроена, ничего не менялось.')
 
+  const effectiveReviewer = effectiveReviewerModel(settings, modelContext(process.env))
   lines.push(
     '',
     'Ревью spec: ' + settings.specReview.mode,
     'Ревью в конце забега: ' + settings.runReview.mode,
-    'Модель ревьюера: ' + (settings.reviewer.model ?? 'не задана'),
+    'Модель ревьюера: ' + (effectiveReviewer ?? 'не задана'),
     'Версия board: ' + (boardVersion ?? 'локальная'),
   )
   if (settings.setupAt === null) {

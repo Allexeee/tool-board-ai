@@ -13,6 +13,9 @@ const base: BoardSettings = {
   reviewer: { model: 'opencode-go/deepseek-v4.1-flash' },
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
+  branches: { main: null, dev: null },
+  git: true,
+  sync: { remote: null },
   setupAt: null,
 }
 
@@ -75,7 +78,7 @@ test('auto: 0 отключает порог своего уровня', () => {
     'self',
   )
   assert.equal(
-    resolveSpecReviewMode({ settings: offMax, specLength: 6000, context: context('null') }).mode,
+    resolveSpecReviewMode({ settings: offMax, specLength: 6000, context: context(null) }).mode,
     'subagent',
   )
 })

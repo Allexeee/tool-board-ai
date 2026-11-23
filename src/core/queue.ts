@@ -174,6 +174,9 @@ export function moveCard(db: DatabaseSync, id: string, target: MoveTarget): void
  */
 export function reorderQueue(db: DatabaseSync): void {
   tx(db, () => {
+    // Owner-карточки не стоят в очереди: снимаем застрявшие позиции.
+    db.prepare("update cards set position = null where skill = 'owner' and position is not null").run()
+
     const tasks = listQueue(db).sort(
       (left, right) =>
         score(right) - score(left) ||

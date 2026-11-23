@@ -90,12 +90,21 @@ export default async function command(args: ParsedArgs) {
       tags: stringsFlag(args, 'tag'),
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
+      needsMerge: settings.git ? undefined : false,
     })
-    const score: CardPatch = {}
-    if (importance !== undefined) score.importance = importance
-    if (urgency !== undefined) score.urgency = urgency
-    if (Object.keys(score).length > 0) {
-      editCard(db, { id: card.id, actor: stringFlag(args, 'as') ?? 'owner', patch: score })
+    const patch: CardPatch = {}
+    if (importance !== undefined) patch.importance = importance
+    if (urgency !== undefined) patch.urgency = urgency
+    const scope = stringsFlag(args, 'scope')
+    if (scope.length > 0) patch.scope = scope
+    const reviewFlag = switchFlag(args, 'review', 'no-review')
+    if (reviewFlag !== undefined) patch.reviewRequired = reviewFlag
+    const needsMergeFlag = switchFlag(args, 'needs-merge', 'no-needs-merge')
+    if (needsMergeFlag !== undefined) patch.needsMerge = needsMergeFlag
+    const note = stringFlag(args, 'note')
+    if (note !== undefined) patch.note = note
+    if (Object.keys(patch).length > 0) {
+      editCard(db, { id: card.id, actor: stringFlag(args, 'as') ?? 'owner', patch })
     }
     insertIntoQueue(db, card.id)
     const created = getCard(db, card.id)!
@@ -117,7 +126,9 @@ export default async function command(args: ParsedArgs) {
     const group = stringFlag(args, 'group')
     if (group !== undefined) filter.group = group
 
-    const cards = listCards(db, filter)
+    const all = listCards(db, filter)
+    const limit = numberFlag(args, 'limit')
+    const cards = limit !== undefined && limit >= 0 ? all.slice(0, limit) : all
     ok(cards, cards.length === 0 ? 'карточек нет' : formatList(cards))
     return 0
   }
@@ -658,8 +669,26 @@ function parseShapeFile(path: string): ShapeFile {
   // Минимальная проверка до изменения карточки: новая карточка без группы
   // не должна оставлять карточку в shaping.
   for (const item of file.new_cards ?? []) {
-    if (typeof item !== 'object' || item === null || !item.group?.trim()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new UserError(3, 'new_cards: каждая запись — объект')
+    }
+    if (typeof item.group !== 'string' || !item.group.trim()) {
       throw new UserError(3, 'у новой карточки нет группы')
+    }
+    if (typeof item.title !== 'string' || !item.title.trim()) {
+      throw new UserError(3, `новая карточка в ${item.group}: нет title`)
+    }
+    for (const field of ['acceptance', 'scope', 'tags'] as const) {
+      const value = item[field]
+      if (value !== undefined && (!Array.isArray(value) || value.some((row) => typeof row !== 'string'))) {
+        throw new UserError(3, `новая карточка ${item.key ?? item.group}: ${field} — массив строк`)
+      }
+    }
+    for (const field of ['spec', 'body', 'skill'] as const) {
+      const value = item[field]
+      if (value !== undefined && typeof value !== 'string') {
+        throw new UserError(3, `новая карточка ${item.key ?? item.group}: ${field} — строка`)
+      }
     }
   }
   return file

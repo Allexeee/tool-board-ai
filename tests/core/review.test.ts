@@ -6,6 +6,7 @@ import { editCard, getCard } from '../../src/core/cards.ts'
 import { openDb } from '../../src/core/db.ts'
 import { addDep, listDeps } from '../../src/core/deps.ts'
 import { finishCard, takeCard } from '../../src/core/lifecycle.ts'
+import { addStep } from '../../src/core/steps.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import {
@@ -326,6 +327,7 @@ test('reopen очищает run_id/lease: карточка из finish снов�
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
   const card = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
   editCard(db, { id: card.id, actor: 'owner', patch: { needsMerge: false, reviewRequired: true } })
+  addStep(db, { cardId: card.id, text: 'переделать' })
   const run = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
   takeCard(db, { id: card.id, actor: 'developer', root: '' })
   finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root: '' })
@@ -339,6 +341,7 @@ test('reopen очищает run_id/lease: карточка из finish снов�
     cardId: card.id,
     reviewer: 'reviewer-1',
     verdict: 'reopen',
+    planCompliance: 'done',
     note: 'переделать',
   })
 
@@ -367,4 +370,15 @@ test('addFinding ставит тег review', (t) => {
     reviewer: 'reviewer',
   })
   assert.deepEqual(finding.tags, ['review'])
+})
+
+test('review submit: при наличии шагов план обязателен', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  addStep(db, { cardId: card.id, text: 'шаг' })
+
+  assert.throws(
+    () => submitVerdict(db, { cardId: card.id, reviewer: 'reviewer-1', verdict: 'done' }),
+    /--plan/,
+  )
 })

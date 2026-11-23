@@ -7,6 +7,51 @@ export { migrate } from './schema.ts'
 
 const depth = new WeakMap<DatabaseSync, number>()
 
+/** busy_timeout можно сократить в тестах: BOARD_BUSY_TIMEOUT_MS. */
+function busyTimeoutMs(): number {
+  return Number(process.env.BOARD_BUSY_TIMEOUT_MS ?? 5000)
+}
+
+function isBusy(error: unknown): boolean {
+  const err = error as { code?: string; message?: string } | null
+  return /SQLITE_BUSY|database is locked/i.test(`${err?.code ?? ''} ${err?.message ?? ''}`)
+}
+
+function sleep(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/** SQLITE_BUSY — не приговор: короткий backoff и повтор. */
+export function retryOnBusy<T>(fn: () => T, attempts = 6): T {
+  let delay = 20
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn()
+    } catch (error) {
+      if (!isBusy(error) || attempt >= attempts) throw error
+      sleep(delay)
+      delay = Math.min(delay * 2, 400)
+    }
+  }
+}
+
+function openConnection(path: string): DatabaseSync {
+  return retryOnBusy(() => {
+    const db = new DatabaseSync(path)
+    try {
+      // busy_timeout — до journal_mode: иначе переключение WAL падает сырым busy
+      // при параллельных стартах агентов.
+      db.exec(`pragma busy_timeout = ${busyTimeoutMs()}`)
+      db.exec('pragma journal_mode = wal')
+      db.exec('pragma foreign_keys = on')
+      return db
+    } catch (error) {
+      db.close()
+      throw error
+    }
+  })
+}
+
 export interface OpenDbOptions {
   /** Не мигрировать устаревшую схему: открыть как есть (нужно doctor). */
   allowOutdated?: boolean
@@ -15,10 +60,18 @@ export interface OpenDbOptions {
 }
 
 export function openDb(path: string, options: OpenDbOptions = {}): DatabaseSync {
-  const db = new DatabaseSync(path)
-  db.exec('pragma journal_mode = wal')
-  db.exec('pragma busy_timeout = 5000')
-  db.exec('pragma foreign_keys = on')
+  let db: DatabaseSync
+  try {
+    db = openConnection(path)
+  } catch (error) {
+    if (isBusy(error)) {
+      throw new UserError(
+        2,
+        `база ${path} занята другим процессом: подождите немного и повторите команду`,
+      )
+    }
+    throw error
+  }
 
   const version = schemaVersionOf(db)
   if (version > SCHEMA_VERSION && !options.allowNewer) {

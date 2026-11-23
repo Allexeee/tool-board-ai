@@ -42,6 +42,16 @@ export interface Run {
   review: boolean
   reviewMode: RunReviewMode | null
   note: string | null
+  notes?: RunNote[]
+}
+
+/** Один проход ревью по забегу: append-only история. */
+export interface RunNote {
+  id: number
+  runId: string
+  actor: string
+  text: string
+  at: string
 }
 
 export interface RunCard {
@@ -92,6 +102,8 @@ export interface Card {
   position: number | null
   needsMerge: boolean
   reviewRequired: boolean
+  /** Осознанно без плана: маленькая задача, шаги не нужны. */
+  planWaived: boolean
   scope: string[]
   tags: string[]
   severity: Severity | null

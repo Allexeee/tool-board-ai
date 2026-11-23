@@ -38,21 +38,59 @@ const HELP = `board — доска карточек для людей и аге�
   term add|list|show
   command add|list
   review list|finding|submit
-  release / now / doctor / backup / export
+  release / now / doctor / backup / export / sync
 
   --json                  машинный вывод
   --version               версия инструмента
   --as <id>               кто действует (журнал и проверки)
+  --scope <path>          файлы, которые карточке разрешено менять
+  --acceptance "..."      критерий приёмки (можно несколько)
+  --tag <tag>             тег карточки: new, improve, review
+  --review / --no-review  обязательное ревью после finish
+  --importance 0..3       важность
+  --urgency 0..3          срочность
+
+  «board card add --help» и подобные печатают справку по подкоманде.
 
   коды выхода: 0 — успех, 1 — делать нечего, 2 — нужно решение, 3 — ошибка ввода
 `
+
+const COMMAND_HELP: Record<string, string> = {
+  'card add':
+    'board card add --group <P> --title "<тип: заголовок>" --skill <s> [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review] [--no-needs-merge] [--as <id>]',
+  'card edit':
+    'board card edit <ID> [--title ...] [--spec ...] [--acceptance ...] [--scope <path>] [--importance 0..3] [--urgency 0..3] [--review|--no-review] [--needs-merge|--no-needs-merge] [--tag ...|--clear-tags] [--as <id>]',
+  'card shape': 'board card shape <ID> --as <исполнитель> [--from card.json]',
+  'card submit': 'board card submit <ID> --as <исполнитель>',
+  'card spec-review':
+    'board card spec-review <ID> --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."',
+  'card approve': 'board card approve <ID>',
+  'card reopen': 'board card reopen <ID> --reason "..."',
+  'card step': 'board card step add <ID> "текст" | done <ID> <n> | remove <ID> <n> | list <ID>',
+  'card scope': 'board card scope add <ID> <path> [<path>...] --as <исполнитель>',
+  'take': 'board take <ID> --as <исполнитель>',
+  'finish': 'board finish <ID> --as <исполнитель> --summary "..." [--no-merge] [--merge-commit <sha>]',
+  'run start': 'board run start --as <исполнитель> (--cards ID,ID | --suggest 1|2|3)',
+  'run note': 'board run note <RUN> --text "..." --as <ревьюер>',
+  'queue move': 'board queue move <ID> --before <ID> | --top | --bottom',
+  'review submit':
+    'board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <id> --note "..."',
+  setup:
+    'board setup [--show] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--run-review ...] [--reviewer-model provider/model]',
+  backup: 'board backup [path]',
+  export: 'board export [--format json|md] [--out path] [--md]',
+  'sync push': 'board sync push — копия базы в приватный git',
+  'sync pull': 'board sync pull — обновить базу из приватного git (с бэкапом .pre-pull)',
+}
 
 async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv)
   if (boolFlag(args, 'json')) setJsonMode(true)
 
   if (boolFlag(args, 'help') || args.command === 'help') {
-    process.stdout.write(HELP)
+    const key = args.sub ? `${args.command} ${args.sub}` : args.command
+    const text = COMMAND_HELP[key] ?? HELP
+    process.stdout.write(text.endsWith('\n') ? text : text + '\n')
     return 0
   }
 

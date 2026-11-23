@@ -77,6 +77,10 @@ test('полный цикл карточки через CLI: init → review →
   assert.equal(ready.status, 'ready')
 
   assert.equal(run(root, ['run', 'start', '--as', 'developer', '--cards', 'UI-1']).code, 0)
+  assert.equal(
+    run(root, ['card', 'step', 'add', 'UI-1', 'сделать форму', '--as', 'developer']).code,
+    0,
+  )
   assert.equal(run(root, ['take', 'UI-1', '--as', 'developer']).code, 0)
 
   // Работа в worktree исполнителя: коммит файла внутри scope src/**.

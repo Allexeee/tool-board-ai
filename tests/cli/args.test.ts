@@ -26,6 +26,11 @@ test('повторный --scope собирается в массив', () => {
   assert.equal(numberFlag(args, 'importance'), 3)
 })
 
+test('флаг со значением без значения — ошибка ввода', () => {
+  assert.throws(() => parseArgs(['card', 'list', '--limit']), /--limit нужно значение/)
+  assert.throws(() => parseArgs(['setup', '--max-spec', '--json']), /--max-spec нужно значение/)
+})
+
 test('подкоманды новых команд разбираются', () => {
   for (const command of ['card', 'executor', 'queue', 'run', 'decision', 'term', 'command', 'review']) {
     const args = parseArgs([command, 'list'])
