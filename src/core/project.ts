@@ -32,6 +32,8 @@ export interface InitProjectOptions {
   boardVersion?: string
   boardSource?: string
   allowDowngrade?: boolean
+  /** Доска без git: не требуем репозиторий и submodule. */
+  noGit?: boolean
 }
 
 export interface Project {
@@ -148,13 +150,22 @@ export function initProject(
 ): { created: string[]; updated: string[]; root: string; boardVersion: string | null } {
   const root = resolve(dir)
 
-  if (!isRepo(root) && !isBoardSourceRepo(root) && process.env.BOARD_ALLOW_GLOBAL !== '1') {
-    throw new UserError(2, 'нужен git: submodule tools/board ставится только в git-проект')
+  if (
+    !options.noGit &&
+    !isRepo(root) &&
+    !isBoardSourceRepo(root) &&
+    process.env.BOARD_ALLOW_GLOBAL !== '1'
+  ) {
+    throw new UserError(
+      2,
+      'нужен git: submodule tools/board ставится только в git-проект; для доски без git используйте board init --no-git',
+    )
   }
 
   // Проект с git получает свою версию board в tools/board. Пока она не
   // установлена, .board/board.db не создаём: схему задаёт версия из submodule.
   if (
+    !options.noGit &&
     isRepo(root) &&
     !isBoardSourceRepo(root) &&
     process.env.BOARD_DELEGATED !== '1' &&

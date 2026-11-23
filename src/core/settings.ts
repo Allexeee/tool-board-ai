@@ -14,6 +14,8 @@ export interface BoardSettings {
   runReview: { mode: RunReviewSetting }
   /** Имена веток; null — определить по git. */
   branches: { main: string | null; dev: string | null }
+  /** Ведётся ли проект в git; false — доска без мержа и веток. */
+  git: boolean
   /** Когда мастер настроек последний раз завершался; null — ещё не запускался. */
   setupAt: string | null
 }
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: BoardSettings = {
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
   branches: { main: null, dev: null },
+  git: true,
   setupAt: null,
 }
 
@@ -76,6 +79,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
       runReview: { mode: raw.reviewAfterRun === true ? 'subagent' : 'none' },
       branches: { main: null, dev: null },
+      git: true,
       setupAt: setupAtValue(raw.setupAt),
     }
   }
@@ -97,6 +101,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       main: branchValue(branches.main),
       dev: branchValue(branches.dev),
     },
+    git: raw.git === false ? false : true,
     setupAt: setupAtValue(raw.setupAt),
   }
 }
@@ -191,6 +196,7 @@ export function updateSettings(
     specReview?: { mode?: SpecReviewSetting; maxSpecChars?: number; largeSpecChars?: number }
     runReview?: { mode?: RunReviewSetting }
     branches?: { main?: string | null; dev?: string | null }
+    git?: boolean
   },
   now: () => string = nowIso,
 ): BoardSettings {
@@ -233,6 +239,7 @@ export function updateSettings(
           ? validateBranchInput(patch.branches.dev)
           : current.branches.dev,
     },
+    git: patch.git !== undefined ? patch.git : current.git,
     setupAt: now(),
   }
   writeSettings(root, next)

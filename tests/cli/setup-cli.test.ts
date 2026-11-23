@@ -187,6 +187,26 @@ test('init --json создаёт v2-настройки и просит запу�
   assert.equal(again.setupRequired, false)
 })
 
+test('init --no-git: доска без репозитория, карточки без мержа', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'board-nogit-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  const init = run(root, ['init', '--no-git', '--json'])
+  assert.equal(init.code, 0, init.err)
+  const data = JSON.parse(init.out) as { settings: { git: boolean } }
+  assert.equal(data.settings.git, false)
+
+  const add = run(root, [
+    'card', 'add', '--group', 'CNT', '--title', 'текст', '--skill', 'dev', '--as', 'owner', '--json',
+  ])
+  assert.equal(add.code, 0, add.err)
+  assert.equal((JSON.parse(add.out) as { needsMerge: boolean }).needsMerge, false)
+
+  const doctor = run(root, ['doctor', '--json'])
+  assert.equal(doctor.code, 0, doctor.err)
+  assert.deepEqual((JSON.parse(doctor.out) as { errors: string[] }).errors, [])
+})
+
 test('init --refresh обновляет старый плагин и навык', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'board-init-refresh-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))

@@ -90,6 +90,7 @@ export default async function command(args: ParsedArgs) {
       tags: stringsFlag(args, 'tag'),
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
+      needsMerge: settings.git ? undefined : false,
     })
     const score: CardPatch = {}
     if (importance !== undefined) score.importance = importance
