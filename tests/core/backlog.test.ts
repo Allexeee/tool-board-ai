@@ -1,10 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { addDep } from '../../src/core/deps.ts'
-import { renderBacklog, writeBacklog } from '../../src/core/backlog.ts'
-import { readSettings } from '../../src/core/settings.ts'
+import {
+  backlogStatePath,
+  flushBacklog,
+  renderBacklog,
+  writeBacklog,
+} from '../../src/core/backlog.ts'
+import { readSettings, updateSettings } from '../../src/core/settings.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 function card(
@@ -54,7 +59,7 @@ test('renderBacklog: статусы, группы, отложенные и го�
   assert.match(md, /ждёт другие карточки/)
   assert.match(md, /\| Ждёт \|.*ждёт: /)
   assert.match(md, /в работе/)
-  assert.match(md, /на ревью у агента/)
+  assert.match(md, /ждет финального ревью/)
   assert.match(md, /заблокирована/)
   assert.match(md, /## Отложенные/)
   assert.match(md, /позже/)
@@ -73,4 +78,33 @@ test('writeBacklog: путь из настроек, файл создаётся'
 
   assert.equal(path, join(board.root, 'docs/board/BACKLOG.md'))
   assert.match(readFileSync(path, 'utf8'), /Одна/)
+})
+
+test('flushBacklog: флаг по ревизии, без изменений файлы не трогает', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  card(board, 'ready', { title: 'Первая' })
+
+  const first = flushBacklog(board.db, board.root)
+  assert.equal(first.path, join(board.root, 'docs/board/BACKLOG.md'))
+  assert.ok(existsSync(backlogStatePath(board.root)))
+  assert.match(readFileSync(first.path!, 'utf8'), /Первая/)
+
+  const second = flushBacklog(board.db, board.root)
+  assert.equal(second.path, null)
+
+  card(board, 'ready', { title: 'Вторая' })
+  const third = flushBacklog(board.db, board.root)
+  assert.equal(third.path, join(board.root, 'docs/board/BACKLOG.md'))
+  assert.match(readFileSync(third.path!, 'utf8'), /Вторая/)
+
+  updateSettings(board.root, { backlog: { refreshSeconds: 10 } })
+  const changed = flushBacklog(board.db, board.root)
+  assert.ok(changed.path)
+  const changedHtml = readFileSync(changed.path!.replace(/\.md$/, '.html'), 'utf8')
+  assert.match(changedHtml, /Вторая/)
+  assert.match(changedHtml, /авто 10 с/)
+
+  updateSettings(board.root, { backlog: { auto: false } })
+  assert.equal(flushBacklog(board.db, board.root).path, null)
 })

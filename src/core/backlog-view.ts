@@ -15,21 +15,34 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.55 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font: 16px/1.6 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
-.wrap { max-width: 980px; margin: 0 auto; padding: 28px 24px 64px; }
-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-h1 { font-size: 26px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.01em; }
-.updated { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.hint { color: var(--muted); font-size: 12px; margin: 0 0 22px; }
-.hint code { font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
-section { margin-top: 26px; }
-h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; color: var(--text); }
-table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-th { text-align: left; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 9px 14px; border-bottom: 1px solid var(--line); }
-td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 32px 28px 72px; }
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+h1 { font-size: 30px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.01em; }
+.meta { display: flex; align-items: center; gap: 14px; }
+.updated { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.refresh {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.refresh:hover { border-color: var(--accent); color: var(--accent); }
+.refresh:active { transform: translateY(1px); }
+.hint { color: var(--muted); font-size: 13px; margin: 6px 0 24px; }
+.hint code { font-family: "SF Mono", Consolas, monospace; font-size: 13px; }
+section { margin-top: 28px; }
+h2 { font-size: 17px; font-weight: 600; margin: 0 0 10px; color: var(--text); }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 15px; }
+th { text-align: left; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
 tr:last-child td { border-bottom: none; }
-td.id { font-family: "SF Mono", Consolas, monospace; font-size: 13px; color: var(--text); white-space: nowrap; }
+td.id { font-family: "SF Mono", Consolas, monospace; font-size: 14px; color: var(--text); white-space: nowrap; }
 td.status { white-space: nowrap; }
 td.note { color: var(--muted); }
 .empty { color: var(--muted); }
@@ -72,24 +85,26 @@ function rowsFor(rows: BacklogRow[]): string[][] {
 /** Самодостаточный HTML-снимок бэклога. refreshSeconds > 0 — страница сама перезагружается. */
 export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string {
   const auto = refreshSeconds > 0
-  const ticker = auto
-    ? `<script>
+  const scripts =
+    `<script>
 (function () {
-  var seconds = ${Math.round(refreshSeconds)}
   var key = 'board-backlog-scroll'
   function save() { try { sessionStorage.setItem(key, String(window.scrollY)) } catch (e) {} }
   function restore() { try { var y = sessionStorage.getItem(key); if (y !== null) window.scrollTo(0, Number(y)) } catch (e) {} }
+  window.boardReload = function () { save(); location.reload() }
   window.addEventListener('scroll', save, { passive: true })
   window.addEventListener('pagehide', save)
   restore()
-  setInterval(function () {
-    if (document.visibilityState !== 'visible') return
-    save()
-    location.reload()
-  }, seconds * 1000)
 })()
+</script>` +
+    (auto
+      ? `<script>
+setInterval(function () {
+  if (document.visibilityState !== 'visible') return
+  window.boardReload()
+}, ${Math.round(refreshSeconds) * 1000})
 </script>`
-    : ''
+      : '')
   const parts: string[] = []
   for (const section of data.skills) {
     parts.push(
@@ -132,15 +147,21 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
 </head>
 <body>
 <div class="wrap">
-<header><h1>Бэклог</h1><span class="updated">обновлено ${fmt(data.generatedAt)} · ${
-    auto ? `авто ${Math.round(refreshSeconds)} с` : 'F5'
-  }</span></header>
-<p class="hint">Собрано из <code>.board/board.db</code>. ${
-    auto ? 'Страница перезагружается сама' : 'Обновить вручную'
-  }: пересобрать <code>board backlog --html</code>${auto ? '' : ' и нажать F5'}.</p>
+<header>
+  <h1>Бэклог</h1>
+  <div class="meta">
+    <span class="updated">обновлено ${fmt(data.generatedAt)} · ${
+      auto ? `авто ${Math.round(refreshSeconds)} с` : 'F5'
+    }</span>
+    <button class="refresh" type="button" onclick="boardReload()">Обновить</button>
+  </div>
+</header>
+<p class="hint">Собрано из <code>.board/board.db</code>. Доска пересобирает файл после каждой команды. ${
+    auto ? 'Страница обновляется сама' : 'Обновить вручную'
+  } — кнопка «Обновить»${auto ? '' : ' или F5'}.</p>
 ${parts.join('\n')}
 </div>
-${ticker}
+${scripts}
 </body>
 </html>
 `

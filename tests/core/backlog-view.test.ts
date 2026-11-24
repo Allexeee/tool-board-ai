@@ -20,7 +20,7 @@ test('buildBacklog: группы по навыку и человеческие �
   assert.equal(data.skills[0].rows[0].status, 'разбор')
 })
 
-test('renderBacklogPage: статический HTML в тёмной теме для F5', (t) => {
+test('renderBacklogPage: автообновление, кнопка и крупный шрифт', (t) => {
   const board = makeBoard()
   t.after(board.close)
   seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev' })
@@ -28,14 +28,19 @@ test('renderBacklogPage: статический HTML в тёмной теме д
   const html = renderBacklogPage(buildBacklog(board.db))
   assert.match(html, /<html lang="ru">/)
   assert.match(html, /--bg: #0f0f10/)
+  assert.match(html, /font: 16px\/1\.6/)
   assert.match(html, /готов к работе/)
   assert.match(html, /location\.reload\(\)/)
   assert.match(html, /sessionStorage/)
+  assert.match(html, /setInterval\(/)
+  assert.match(html, /boardReload/)
+  assert.match(html, /Обновить/)
   assert.match(html, /авто 5 с/)
   assert.doesNotMatch(html, /fetch\(/)
-  assert.doesNotMatch(html, /setInterval\(tick/)
 
   const staticHtml = renderBacklogPage(buildBacklog(board.db), 0)
-  assert.doesNotMatch(staticHtml, /location\.reload\(\)/)
+  assert.doesNotMatch(staticHtml, /setInterval\(/)
+  assert.match(staticHtml, /boardReload/)
+  assert.match(staticHtml, /Обновить/)
   assert.match(staticHtml, /F5/)
 })
