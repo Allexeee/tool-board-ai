@@ -63,7 +63,7 @@ const COMMAND_HELP: Record<string, string> = {
   'card edit':
     'board card edit <ID> [--title ...] [--spec ...] [--acceptance ...] [--scope <path>] [--importance 0..3] [--urgency 0..3] [--review|--no-review] [--needs-merge|--no-needs-merge] [--tag ...|--clear-tags] [--as <id>]',
   'card shape': 'board card shape <ID> --as <исполнитель> [--from card.json]',
-  'card submit': 'board card submit <ID> --as <исполнитель>',
+  'card submit': 'board card submit <ID> --as <исполнитель> [--no-decisions]',
   'card spec-review':
     'board card spec-review <ID> --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."',
   'card approve': 'board card approve <ID>',

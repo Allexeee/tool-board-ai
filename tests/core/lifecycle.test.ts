@@ -1010,3 +1010,26 @@ test('promotion запроса проходит spec review по настрой�
   assert.equal(promoted.status, 'in_progress')
   assert.equal(promoted.phase, 'task')
 })
+
+test('submit --no-decisions: без решений сразу в очередь, с открытым вопросом — ошибка', (t) => {
+  const { db } = board(t)
+
+  const card = shapedRequest(t, db)
+  const submitted = submitCard(db, { id: card.id, actor: 'developer', noDecisions: true })
+  assert.equal(submitted.status, 'ready')
+  assert.ok(submitted.approvedAt !== null)
+  const event = db
+    .prepare(
+      "select note from events where subject = ? and type = 'card.approved' order by id desc limit 1",
+    )
+    .get(card.id) as { note: string }
+  assert.match(event.note, /решений владельца нет/)
+
+  const second = shapedRequest(t, db)
+  ask(db, { cardId: second.id, author: 'developer', text: 'Какой формат?' })
+  assert.throws(
+    () => submitCard(db, { id: second.id, actor: 'developer', noDecisions: true }),
+    /открытых вопросов/,
+  )
+  assert.equal(getCard(db, second.id)!.status, 'shaping')
+})
