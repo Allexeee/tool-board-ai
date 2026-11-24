@@ -30,6 +30,7 @@ export const AGENTS_BLOCK = [
   '- Префикс — область проекта (Сайт, Контент, CORE), не ярлык задачи: сначала `board group list`, новый — только с `--new-group`; в пустом проекте — CARD.',
   '- После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.',
   '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
+  '- «Открой/покажи бэклог» — `board backlog --open`; если доступен инструмент браузера, открой `docs/board/BACKLOG.html` в панели Review (`browser.preview`). В чат HTML не вставляй.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
@@ -203,6 +204,8 @@ description: Доска: посмотреть состояние — now 0/1/2/3
 \`board now\` (инструмент \`board_now\`): \`now 0\` — владельцу (по умолчанию), \`now 1\` — текущий агент, \`now 2\` — другие агенты, \`now 3\` — запросы и очередь. Варианты забега задаются тегами карточки: \`new\`, \`improve\`, \`review\`.
 
 Показывает статусы, держателей и вероятные забеги; ничего не меняет.
+
+Показать бэклог: \`board backlog --open\` (системный браузер); при наличии \`browser.preview\` — открыть \`docs/board/BACKLOG.html\` в панели Review.
 `
 
 export const PLUGIN_SOURCE = `// Инструменты: board_now, board_setup, board_card, board_run, board_take,
