@@ -27,12 +27,14 @@ export const AGENTS_BLOCK = [
   '- Разговор ведёт brainstorming; spec и критерии приёмки пишутся в карточку, не в `docs/superpowers`.',
   '- Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.',
   '- Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.',
+  '- Префикс — область проекта (Сайт, Контент, CORE), не ярлык задачи: сначала `board group list`, новый — только с `--new-group`; в пустом проекте — CARD.',
   '- После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.',
   '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
   '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`. Первый проход полный; повторный — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь; other — сборник в `deferred`.',
+  '- Ревьюер не гоняет тесты и не пишет в доску; его shell ограничен read-only командами, каждая команда — отдельный вызов.',
   '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
   '- После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.',
   '- Коммит делаешь сам в ветке карточки; мерж в `dev` делает `finish`. `main` меняется только `release` владельцем.',
@@ -57,6 +59,14 @@ description: Доска: разобрать запрос в spec и утверд
 ## Тип карточки
 
 Заголовок начинается с типа: \`feat:\` — новая возможность, \`fix:\` — дефект, \`perf:\` — производительность или размер, \`sec:\` — безопасность и права, \`docs:\` — документация, \`test:\` — тесты и покрытие, \`chore:\` — CI и инфраструктура, \`review:\` — работа после ревью. Теги вариантов (\`new\`/\`improve\`/\`review\`) остаются для очереди: префикс про суть, тег про порядок.
+
+## Префикс
+
+Префикс — это **область проекта** (Сайт, Контент, Мобильное, CORE), а не ярлык задачи; набор у каждого проекта свой.
+
+1. Сначала \`board group list\` — посмотри, какие области уже есть, и выбери подходящую.
+2. Новый префикс — только \`card add --group <P> --new-group\`, и только если ни одна существующая область не подходит; решение попадёт в журнал.
+3. Если областей ещё нет, \`card add\` без \`--group\` берёт \`CARD\`.
 
 ## Разбор
 
@@ -388,6 +398,7 @@ function cardArgs(input) {
     if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.new_group) args.push('--new-group')
     flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
     flag(args, 'as', input.as)
@@ -602,10 +613,10 @@ export default Plugin.define({
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'run-review'].includes(action)) {
+          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'backlog-path', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
-          if (action === 'review-after-run' || action === 'no-review-after-run') {
+          if (action === 'review-after-run' || action === 'no-review-after-run' || action === 'backlog-auto' || action === 'no-backlog-auto') {
             return call(ctx, ['setup', '--' + action], context)
           }
           return { content: 'неизвестное действие setup: ' + action, isError: true }
@@ -643,6 +654,7 @@ export default Plugin.define({
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
           clear_tags: { type: 'boolean' },
+          new_group: { type: 'boolean', description: 'Префикс — новая область проекта' },
           waive_dependents: { type: 'boolean' },
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
@@ -764,6 +776,13 @@ export default Plugin.define({
           }
           return call(ctx, ['release', '--as', 'owner'], context)
         },
+      })
+
+      editor.add({
+        name: 'group',
+        description: 'Области проекта: список префиксов',
+        input: schema({ action: { type: 'string' } }),
+        execute: (input, context) => call(ctx, ['group', input.action ?? 'list'], context),
       })
 
       editor.add({
@@ -989,6 +1008,7 @@ ${permissions}
 ни \`board review finding\`, ни \`board card add\` — это отклоняется правами, а не просьбой.
 
 Тесты не гоняй: их прогнал исполнитель, полный suite идёт перед релизом, CI — после push. Твой инструмент — чтение файлов и \`git diff\`.
+Каждая команда — отдельный вызов: \`;\`, \`&&\` и \`|\` запрещены политикой.
 
 Проверяй acceptance, plan и код. Итоги прохода пиши одним блоком:
 - для забега — \`board run note <RUN> --text "..." --as <твой id>\`;

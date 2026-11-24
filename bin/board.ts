@@ -23,6 +23,7 @@ const HELP = `board — доска карточек для людей и аге�
                           --no-review-after-run
 
   executor add|list|edit|remove
+  group list                области проекта (префиксы карточек)
   card add|list|show|edit  карточки
   card shape|submit|spec-review|approve|amend|reject|verdict
   card done|cancel|reopen|defer|resume
@@ -39,6 +40,7 @@ const HELP = `board — доска карточек для людей и аге�
   command add|list
   review list|finding|submit
   release / now / doctor / backup / export / sync
+  backlog [--out <path>] [--html]  md- или html-бэклог из доски
 
   --json                  машинный вывод
   --version               версия инструмента
@@ -57,7 +59,7 @@ const HELP = `board — доска карточек для людей и аге�
 
 const COMMAND_HELP: Record<string, string> = {
   'card add':
-    'board card add --group <P> --title "<тип: заголовок>" --skill <s> [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review] [--no-needs-merge] [--as <id>]',
+    'board card add [--group <P>] --title "<тип: заголовок>" --skill <s> [--new-group] [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review] [--no-needs-merge] [--as <id>]',
   'card edit':
     'board card edit <ID> [--title ...] [--spec ...] [--acceptance ...] [--scope <path>] [--importance 0..3] [--urgency 0..3] [--review|--no-review] [--needs-merge|--no-needs-merge] [--tag ...|--clear-tags] [--as <id>]',
   'card shape': 'board card shape <ID> --as <исполнитель> [--from card.json]',
@@ -76,11 +78,12 @@ const COMMAND_HELP: Record<string, string> = {
   'review submit':
     'board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <id> --note "..."',
   setup:
-    'board setup [--show] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--run-review ...] [--reviewer-model provider/model]',
+    'board setup [--show] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
   export: 'board export [--format json|md] [--out path] [--md]',
   'sync push': 'board sync push — копия базы в приватный git',
   'sync pull': 'board sync pull — обновить базу из приватного git (с бэкапом .pre-pull)',
+  backlog: 'board backlog [--out <path>] [--html] — md или HTML-снимок для браузера',
 }
 
 async function main(argv: string[]): Promise<number> {

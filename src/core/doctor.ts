@@ -161,7 +161,9 @@ function checkCards(db: DatabaseSync, warnings: string[]): void {
     )
     .all() as Array<{ id: string }>
   if (noPlan.length > 0) {
-    warnings.push(`done без плана и без отметки --no-plan: ${noPlan.map((row) => row.id).join(', ')}`)
+    const shown = noPlan.slice(0, 5).map((row) => row.id).join(', ')
+    const rest = noPlan.length > 5 ? ` и ещё ${noPlan.length - 5}` : ''
+    warnings.push(`done без плана и без отметки --no-plan: ${noPlan.length} (${shown}${rest})`)
   }
 }
 

@@ -1,3 +1,4 @@
+import { refreshBacklogIfAuto } from '../../core/backlog.ts'
 import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { finishCard } from '../../core/lifecycle.ts'
@@ -9,8 +10,7 @@ import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { ok } from '../output.ts'
 
-export default async function command(args: ParsedArgs) {
-  const project = findProject(process.cwd())
+export default async function command(args: ParsedArgs) {  const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   const db = openDb(project.dbPath)
 
@@ -40,6 +40,11 @@ export default async function command(args: ParsedArgs) {
       forceReview,
     })
     ok(card, `${card.id} ${card.status === 'review' ? 'на ревью' : 'закрыта'}: ${card.title}`)
+    try {
+      refreshBacklogIfAuto(db, project.root)
+    } catch (error) {
+      process.stderr.write(`бэклог не обновлён: ${(error as Error).message}\n`)
+    }
     return 0
   } finally {
     db.close()

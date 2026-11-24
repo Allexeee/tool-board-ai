@@ -191,6 +191,7 @@ function cardArgs(input) {
     if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.new_group) args.push('--new-group')
     flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
     flag(args, 'as', input.as)
@@ -405,10 +406,10 @@ export default Plugin.define({
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'run-review'].includes(action)) {
+          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'backlog-path', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
-          if (action === 'review-after-run' || action === 'no-review-after-run') {
+          if (action === 'review-after-run' || action === 'no-review-after-run' || action === 'backlog-auto' || action === 'no-backlog-auto') {
             return call(ctx, ['setup', '--' + action], context)
           }
           return { content: 'неизвестное действие setup: ' + action, isError: true }
@@ -446,6 +447,7 @@ export default Plugin.define({
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
           clear_tags: { type: 'boolean' },
+          new_group: { type: 'boolean', description: 'Префикс — новая область проекта' },
           waive_dependents: { type: 'boolean' },
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
@@ -567,6 +569,13 @@ export default Plugin.define({
           }
           return call(ctx, ['release', '--as', 'owner'], context)
         },
+      })
+
+      editor.add({
+        name: 'group',
+        description: 'Области проекта: список префиксов',
+        input: schema({ action: { type: 'string' } }),
+        execute: (input, context) => call(ctx, ['group', input.action ?? 'list'], context),
       })
 
       editor.add({
