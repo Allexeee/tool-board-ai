@@ -96,3 +96,35 @@ test('shape --from с ошибкой внутри разбора откатыв�
 
   assertUntouched(dir, 'UI-1')
 })
+
+test('submit --no-decisions ставит карточку в очередь без approve', (t) => {
+  const dir = project(t)
+  assert.equal(run(dir, ['executor', 'add', 'developer', '--kind', 'agent', '--skills', 'dev']).code, 0)
+  const add = run(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'x', '--skill', 'dev',
+    '--spec', 'spec', '--acceptance', 'готово', '--importance', '2', '--urgency', '2',
+    '--scope', 'src/**',
+  ])
+  assert.equal(add.code, 0, add.err)
+  assert.equal(run(dir, ['card', 'shape', 'UI-1', '--as', 'developer']).code, 0)
+  assert.equal(
+    run(dir, [
+      'card', 'spec-review', 'UI-1', '--as', 'developer',
+      '--mode', 'self', '--verdict', 'done', '--note', 'ok',
+    ]).code,
+    0,
+  )
+
+  const submitted = run(dir, ['card', 'submit', 'UI-1', '--as', 'developer', '--no-decisions'])
+  assert.equal(submitted.code, 0, submitted.err)
+  assert.match(submitted.out, /без утверждения/)
+
+  const db = openDb(join(dir, '.board', 'board.db'))
+  try {
+    const card = getCard(db, 'UI-1')!
+    assert.equal(card.status, 'ready')
+    assert.ok(card.approvedAt !== null)
+  } finally {
+    db.close()
+  }
+})

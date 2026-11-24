@@ -414,8 +414,14 @@ export default async function command(args: ParsedArgs) {
 
     const existing = requireCard(id, 'board card submit UI-1 --as developer')
     const { gate } = specGate(existing)
-    const card = submitCard(db, { id, actor, requiredSpecReview: gate })
-    ok(card, `${card.id} на утверждении: ${card.title}`)
+    const noDecisions = boolFlag(args, 'no-decisions')
+    const card = submitCard(db, { id, actor, requiredSpecReview: gate, noDecisions })
+    ok(
+      card,
+      noDecisions
+        ? `${card.id} в очереди без утверждения: решений владельца нет`
+        : `${card.id} на утверждении: ${card.title}`,
+    )
     return 0
   }
 
