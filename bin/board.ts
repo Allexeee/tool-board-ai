@@ -40,6 +40,7 @@ const HELP = `board — доска карточек для людей и аге�
   command add|list
   review list|finding|submit
   release / now / doctor / backup / export / sync
+  backlog [--out <path>]    md-бэклог из доски
 
   --json                  машинный вывод
   --version               версия инструмента
@@ -77,11 +78,12 @@ const COMMAND_HELP: Record<string, string> = {
   'review submit':
     'board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <id> --note "..."',
   setup:
-    'board setup [--show] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--run-review ...] [--reviewer-model provider/model]',
+    'board setup [--show] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
   export: 'board export [--format json|md] [--out path] [--md]',
   'sync push': 'board sync push — копия базы в приватный git',
   'sync pull': 'board sync pull — обновить базу из приватного git (с бэкапом .pre-pull)',
+  backlog: 'board backlog [--out <path>] — md-бэклог из доски',
 }
 
 async function main(argv: string[]): Promise<number> {

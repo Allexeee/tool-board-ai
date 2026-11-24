@@ -6,3 +6,4 @@ node_modules/
 .superpowers/
 *.log
 .opencode/agents/board-reviewer.md
+docs/board/BACKLOG.md

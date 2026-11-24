@@ -1,4 +1,5 @@
-﻿import {
+﻿import { refreshBacklogIfAuto } from '../../core/backlog.ts'
+import {
   addToRun,
   dropFromRun,
   endRun,
@@ -202,6 +203,11 @@ export default async function command(args: ParsedArgs) {
         : 'ревью после забега выключено',
     ].join('\n')
     ok({ ...ended, reviewCards, reviewReason }, human)
+    try {
+      refreshBacklogIfAuto(db, project.root)
+    } catch (error) {
+      process.stderr.write(`бэклог не обновлён: ${(error as Error).message}\n`)
+    }
     return 0
   }
 
