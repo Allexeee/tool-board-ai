@@ -45,15 +45,6 @@ function score(card: Card): number {
   return (card.importance ?? 0) * 4 + (card.urgency ?? 0)
 }
 
-function startedAt(db: DatabaseSync): Map<string, string> {
-  const rows = db
-    .prepare(
-      "select subject, max(at) as at from events where type = 'card.taken' group by subject",
-    )
-    .all() as Array<{ subject: string; at: string }>
-  return new Map(rows.map((row) => [row.subject, row.at]))
-}
-
 function noteFor(db: DatabaseSync, card: Card): string {
   if (card.status === 'waiting') {
     const deps = listDeps(db, card.id)
@@ -65,15 +56,11 @@ function noteFor(db: DatabaseSync, card: Card): string {
   return ''
 }
 
-function table(rows: Card[], started: Map<string, string>, db: DatabaseSync): string[] {
-  const lines = ['| ID | Заголовок | Статус | Начато | Заметка |', '|---|---|---|---|---|']
+function table(rows: Card[], db: DatabaseSync): string[] {
+  const lines = ['| ID | Заголовок | Статус | Заметка |', '|---|---|---|---|']
   for (const card of rows) {
-    const showStarted = card.status === 'in_progress' || card.status === 'review'
-    const at = started.get(card.id)
     lines.push(
-      `| ${card.id} | ${cell(card.title)} | ${STATUS_LABEL[card.status]} | ${
-        showStarted && at ? shortTime(at) : ''
-      } | ${noteFor(db, card)} |`,
+      `| ${card.id} | ${cell(card.title)} | ${STATUS_LABEL[card.status]} | ${noteFor(db, card)} |`,
     )
   }
   return lines
@@ -92,7 +79,6 @@ function sortCards(cards: Card[]): Card[] {
 /** md-бэклог: таблицы по навыкам, отложенные и недавно готовые. */
 export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): string {
   const cards = listCards(db).filter((card) => !HIDDEN.includes(card.status))
-  const started = startedAt(db)
 
   const bySkill = new Map<string, Card[]>()
   for (const card of cards) {
@@ -119,7 +105,7 @@ export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): s
   for (const skill of skills) {
     const label = SKILL_LABEL[skill] ?? skill
     lines.push(`## Задачи для ${label}`, '')
-    lines.push(...table(sortCards(bySkill.get(skill)!), started, db))
+    lines.push(...table(sortCards(bySkill.get(skill)!), db))
     lines.push('')
   }
 
