@@ -83,6 +83,7 @@ const GITIGNORE_ENTRIES = [
   '.worktrees/',
   '.opencode/agents/board-reviewer.md',
   'docs/board/BACKLOG.md',
+  'docs/board/BACKLOG.html',
 ]
 
 function updateGitignore(root: string): boolean {

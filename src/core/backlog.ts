@@ -4,10 +4,11 @@ import { dirname, join } from 'node:path'
 import { listCards } from './cards.ts'
 import { listDeps } from './deps.ts'
 import { readSettings, type BoardSettings } from './settings.ts'
+import { renderBacklogPage } from './backlog-view.ts'
 import type { Card, CardStatus } from './types.ts'
 
-/** Человеческие статусы: реальный статус карточки → строка в бэклоге. */
-const STATUS_LABEL: Record<CardStatus, string> = {
+/** Человеческие статусы */
+export const STATUS_LABEL: Record<CardStatus, string> = {
   new: 'новый запрос',
   shaping: 'разбор',
   approval: 'ждёт утверждения владельцем',
@@ -188,6 +189,11 @@ export function backlogPath(root: string, settings: BoardSettings): string {
   return join(root, settings.backlog.path)
 }
 
+/** HTML-бэклог лежит рядом с md: BACKLOG.md → BACKLOG.html. */
+export function backlogHtmlPath(root: string, settings: BoardSettings): string {
+  return backlogPath(root, settings).replace(/\.md$/i, '.html')
+}
+
 export function writeBacklog(
   db: DatabaseSync,
   root: string,
@@ -199,9 +205,23 @@ export function writeBacklog(
   return path
 }
 
+/** HTML-снимок рядом с md: открывается в браузере, обновляется по F5. */
+export function writeBacklogHtml(
+  db: DatabaseSync,
+  root: string,
+  settings: BoardSettings,
+): string {
+  const path = backlogHtmlPath(root, settings)
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, renderBacklogPage(buildBacklog(db)), 'utf8')
+  return path
+}
+
 /** Автосборка после finish/run end: только если включена в настройках. */
 export function refreshBacklogIfAuto(db: DatabaseSync, root: string): string | null {
   const settings = readSettings(root)
   if (!settings.backlog.auto) return null
-  return writeBacklog(db, root, settings)
+  const md = writeBacklog(db, root, settings)
+  writeBacklogHtml(db, root, settings)
+  return md
 }

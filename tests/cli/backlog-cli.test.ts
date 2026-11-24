@@ -51,3 +51,16 @@ test('board backlog --out пишет по указанному пути', (t) =>
   assert.equal(built.code, 0, built.err)
   assert.ok(existsSync(join(dir, 'custom/BOARD.md')))
 })
+
+test('board backlog --html пишет HTML рядом с md', (t) => {
+  const dir = project(t)
+  run(dir, ['card', 'add', '--group', 'SITE', '--title', 'Одна', '--skill', 'dev'])
+
+  const built = run(dir, ['backlog', '--html', '--json'])
+  assert.equal(built.code, 0, built.err)
+  const path = (JSON.parse(built.out) as { path: string }).path
+  assert.equal(path, join(dir, 'docs/board/BACKLOG.html'))
+  const html = readFileSync(path, 'utf8')
+  assert.match(html, /Одна/)
+  assert.match(html, /F5/)
+})
