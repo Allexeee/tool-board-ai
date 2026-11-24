@@ -29,7 +29,7 @@ table { width: 100%; border-collapse: collapse; background: var(--panel); border
 th { text-align: left; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 9px 14px; border-bottom: 1px solid var(--line); }
 td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
 tr:last-child td { border-bottom: none; }
-td.id { font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: var(--accent); white-space: nowrap; }
+td.id { font-family: "SF Mono", Consolas, monospace; font-size: 13px; color: var(--text); white-space: nowrap; }
 td.status { white-space: nowrap; }
 td.note { color: var(--muted); }
 .empty { color: var(--muted); }
