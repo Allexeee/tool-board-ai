@@ -19,7 +19,7 @@ export interface BoardSettings {
   /** Приватный git-репозиторий для копии базы; null — sync выключен. */
   sync: { remote: string | null }
   /** md-бэклог: путь относительно корня и автосборка после finish/run end. */
-  backlog: { path: string; auto: boolean }
+  backlog: { path: string; auto: boolean; refreshSeconds: number }
   /** Когда мастер настроек последний раз завершался; null — ещё не запускался. */
   setupAt: string | null
 }
@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: BoardSettings = {
   branches: { main: null, dev: null },
   git: true,
   sync: { remote: null },
-  backlog: { path: 'docs/board/BACKLOG.md', auto: true },
+  backlog: { path: 'docs/board/BACKLOG.md', auto: true, refreshSeconds: 5 },
   setupAt: null,
 }
 
@@ -78,6 +78,12 @@ function backlogPathValue(raw: unknown): string {
   return value === '' ? 'docs/board/BACKLOG.md' : value
 }
 
+/** Интервал автообновления HTML: 0 — выключено, по умолчанию 5 секунд. */
+function refreshSecondsValue(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0 || raw > 3600) return 5
+  return raw
+}
+
 /** Читает модель без варианта; невалидное значение при чтении считается пустым. */
 function reviewerModelValue(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
@@ -99,7 +105,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       branches: { main: null, dev: null },
       git: true,
       sync: { remote: null },
-      backlog: { path: 'docs/board/BACKLOG.md', auto: true },
+      backlog: { path: 'docs/board/BACKLOG.md', auto: true, refreshSeconds: 5 },
       setupAt: setupAtValue(raw.setupAt),
     }
   }
@@ -126,6 +132,9 @@ function normalizeSettings(raw: unknown): BoardSettings {
     backlog: {
       path: backlogPathValue(isRecord(raw.backlog) ? raw.backlog.path : null),
       auto: isRecord(raw.backlog) && raw.backlog.auto === false ? false : true,
+      refreshSeconds: refreshSecondsValue(
+        isRecord(raw.backlog) ? raw.backlog.refreshSeconds : null,
+      ),
     },
     setupAt: setupAtValue(raw.setupAt),
   }
@@ -213,6 +222,13 @@ function validateBranchInput(raw: string | null): string | null {
   return value
 }
 
+function validateRefreshSeconds(raw: number): number {
+  if (!Number.isInteger(raw) || raw < 0 || raw > 3600) {
+    throw new UserError(3, 'backlog-refresh — целое число от 0 до 3600')
+  }
+  return raw
+}
+
 /** Меняет выбранные поля и отмечает, что мастер настроек завершён. */
 export function updateSettings(
   root: string,
@@ -223,7 +239,7 @@ export function updateSettings(
     branches?: { main?: string | null; dev?: string | null }
     git?: boolean
     sync?: { remote?: string | null }
-    backlog?: { path?: string; auto?: boolean }
+    backlog?: { path?: string; auto?: boolean; refreshSeconds?: number }
   },
   now: () => string = nowIso,
 ): BoardSettings {
@@ -277,6 +293,10 @@ export function updateSettings(
           ? backlogPathValue(patch.backlog.path)
           : current.backlog.path,
       auto: patch.backlog?.auto !== undefined ? patch.backlog.auto : current.backlog.auto,
+      refreshSeconds:
+        patch.backlog?.refreshSeconds !== undefined
+          ? validateRefreshSeconds(patch.backlog.refreshSeconds)
+          : current.backlog.refreshSeconds,
     },
     setupAt: now(),
   }
