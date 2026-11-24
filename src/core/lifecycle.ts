@@ -7,7 +7,9 @@ import { addDep, isSatisfied, listDeps, refreshReadiness } from './deps.ts'
 import { comment, openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
+import { withFileLock } from './lock.ts'
 import { listSteps } from './steps.ts'
+import { join } from 'node:path'
 import {
   currentBranch,
   ensureWorktree,
@@ -1127,6 +1129,8 @@ function prepareFinish(db: DatabaseSync, input: FinishInput): FinishPlan {
   let inDev = false
 
   if (card.needsMerge) {
+    // Два finish в одном корневом worktree не должны пересекаться на checkout/merge.
+    withFileLock(join(input.root, '.board', 'finish.lock'), () => {
     if (!card.branch) {
       throw new UserError(3, `у карточки ${card.id} нет ветки: сначала board take`)
     }
@@ -1181,6 +1185,7 @@ function prepareFinish(db: DatabaseSync, input: FinishInput): FinishPlan {
         inDev = isAncestor(input.root, mergeCommit, dev)
       }
     }
+    })
   }
 
   return { card, actor, summary, mergeCommit, inDev }
