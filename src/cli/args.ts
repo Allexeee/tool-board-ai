@@ -20,7 +20,7 @@ const KNOWN_FLAGS = new Set([
   'summary', 'waive-dependents', 'done', 'reopen', 'severity', 'text', 'verdict',
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge', 'no-plan', 'new-group',
-  'backlog-path', 'backlog-auto', 'no-backlog-auto', 'html',
+  'backlog-path', 'backlog-auto', 'no-backlog-auto', 'backlog-refresh', 'html',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
   'large-spec', 'max-spec', 'branch-main', 'branch-dev', 'no-git', 'standalone', 'sync', 'run-review', 'board-version', 'board-source', 'allow-downgrade',

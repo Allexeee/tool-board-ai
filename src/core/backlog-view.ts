@@ -69,8 +69,27 @@ function rowsFor(rows: BacklogRow[]): string[][] {
   ])
 }
 
-/** Самодостаточный HTML-снимок бэклога: открыть в браузере, F5 — обновить. */
-export function renderBacklogPage(data: BacklogData): string {
+/** Самодостаточный HTML-снимок бэклога. refreshSeconds > 0 — страница сама перезагружается. */
+export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string {
+  const auto = refreshSeconds > 0
+  const ticker = auto
+    ? `<script>
+(function () {
+  var seconds = ${Math.round(refreshSeconds)}
+  var key = 'board-backlog-scroll'
+  function save() { try { sessionStorage.setItem(key, String(window.scrollY)) } catch (e) {} }
+  function restore() { try { var y = sessionStorage.getItem(key); if (y !== null) window.scrollTo(0, Number(y)) } catch (e) {} }
+  window.addEventListener('scroll', save, { passive: true })
+  window.addEventListener('pagehide', save)
+  restore()
+  setInterval(function () {
+    if (document.visibilityState !== 'visible') return
+    save()
+    location.reload()
+  }, seconds * 1000)
+})()
+</script>`
+    : ''
   const parts: string[] = []
   for (const section of data.skills) {
     parts.push(
@@ -113,10 +132,15 @@ export function renderBacklogPage(data: BacklogData): string {
 </head>
 <body>
 <div class="wrap">
-<header><h1>Бэклог</h1><span class="updated">обновлено ${fmt(data.generatedAt)} · F5</span></header>
-<p class="hint">Собрано из <code>.board/board.db</code>. Обновить: пересобрать файл и нажать F5.</p>
+<header><h1>Бэклог</h1><span class="updated">обновлено ${fmt(data.generatedAt)} · ${
+    auto ? `авто ${Math.round(refreshSeconds)} с` : 'F5'
+  }</span></header>
+<p class="hint">Собрано из <code>.board/board.db</code>. ${
+    auto ? 'Страница перезагружается сама' : 'Обновить вручную'
+  }: пересобрать <code>board backlog --html</code>${auto ? '' : ' и нажать F5'}.</p>
 ${parts.join('\n')}
 </div>
+${ticker}
 </body>
 </html>
 `

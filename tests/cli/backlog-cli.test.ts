@@ -62,5 +62,17 @@ test('board backlog --html пишет HTML рядом с md', (t) => {
   assert.equal(path, join(dir, 'docs/board/BACKLOG.html'))
   const html = readFileSync(path, 'utf8')
   assert.match(html, /Одна/)
-  assert.match(html, /F5/)
+  assert.match(html, /авто 5 с/)
+})
+
+test('setup --backlog-refresh меняет интервал, --show печатает', (t) => {
+  const dir = project(t)
+  const updated = run(dir, ['setup', '--backlog-refresh', '10', '--json'])
+  assert.equal(updated.code, 0, updated.err)
+  assert.equal((JSON.parse(updated.out) as { backlog: { refreshSeconds: number } }).backlog.refreshSeconds, 10)
+
+  const shown = run(dir, ['setup', '--show'])
+  assert.match(shown.out, /обновление 10 с/)
+
+  assert.equal(run(dir, ['setup', '--backlog-refresh', '3601']).code, 3)
 })

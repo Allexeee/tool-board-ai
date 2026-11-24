@@ -213,7 +213,11 @@ export function writeBacklogHtml(
 ): string {
   const path = backlogHtmlPath(root, settings)
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, renderBacklogPage(buildBacklog(db)), 'utf8')
+  writeFileSync(
+    path,
+    renderBacklogPage(buildBacklog(db), settings.backlog.refreshSeconds),
+    'utf8',
+  )
   return path
 }
 

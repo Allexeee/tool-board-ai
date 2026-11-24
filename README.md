@@ -160,6 +160,8 @@ board setup --large-spec 6000                       # порог большог�
 board setup --max-spec 1500                         # порог для max-модели
 board setup --run-review none|self|subagent|auto    # run review: plan + код
 board setup --reviewer-model provider/model         # default-вариант ревьюера
+board setup --backlog-path docs/board/BACKLOG.md    # путь md-бэклога
+board setup --backlog-refresh 5                     # автообновление HTML, сек (0 — выкл.)
 ```
 
 `specReview.mode=auto` (по умолчанию) выбирает субагента по длине spec:
@@ -258,6 +260,7 @@ board command add "RUN" "начать забег по очереди" --as owner
 | `release` | слить `dev` в `main` |
 | `backup [path]` | копия `.board/board.db` |
 | `export [--format json\|md] [--out path]` | выгрузка карточек |
+| `backlog [--out path] [--html]` | md- или HTML-бэклог (HTML сам перезагружается) |
 | `now [0\|1\|2\|3]` | терминальная доска |
 | `doctor` | диагностика |
 
