@@ -57,15 +57,17 @@ git checkout -b dev          # если ветки dev ещё нет
 board init                   # добавит tools/board (submodule) и .opencode
 git add -A                   # .gitmodules, tools/board, .opencode
 git commit -m "chore: board init"
-board executor add developer --kind agent --skills dev
+board setup --defaults       # бэклог, ревью, исполнитель developer
+board group add SITE --name Сайт
+board backlog --open         # показать бэклог в браузере
 board doctor
 board now
 ```
 
-Первый `init` в терминале запускает мастер настроек: спрашивает, включать ли
-ревью после каждого забега. По умолчанию выключено. Если `init` запускал агент
-(не-TTY), мастер не спрашивает — вызовите `/setup` в OpenCode или `board setup`
-в терминале.
+`init` в любом режиме печатает предложение мастера: бэклог, ревью, исполнитель
+`developer`, области. Агент показывает его окном выбора «Оставить умолчания /
+Поменять / Не сейчас». `board setup --defaults` применяет умолчания разом;
+`/setup` и флаги `board setup` меняют отдельные настройки.
 
 `init` создаёт:
 

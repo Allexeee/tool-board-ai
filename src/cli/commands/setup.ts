@@ -1,6 +1,8 @@
 import { writeReviewerAgent } from '../../core/opencode.ts'
+import { openDb } from '../../core/db.ts'
 import { findProject } from '../../core/project.ts'
 import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
+import { applySetupDefaults } from '../../core/setup.ts'
 import {
   readSettings,
   updateSettings,
@@ -42,6 +44,7 @@ export default async function command(args: ParsedArgs) {
   const context = modelContext(process.env)
   const currentReviewer = effectiveReviewerModel(current, context)
   const show = boolFlag(args, 'show')
+  const defaults = boolFlag(args, 'defaults')
 
   const reviewAfterRun = boolFlag(args, 'review-after-run')
   const noReviewAfterRun = boolFlag(args, 'no-review-after-run')
@@ -65,11 +68,52 @@ export default async function command(args: ParsedArgs) {
   if (runMode !== undefined && (reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, 'не сочетайте --run-review с устаревшими --review-after-run/--no-review-after-run')
   }
-  if (show && (specMode !== undefined || runMode !== undefined || largeSpec !== undefined || maxSpec !== undefined || branchMain !== undefined || branchDev !== undefined || syncRemote !== undefined || backlogPath !== undefined || backlogRefresh !== undefined || backlogAuto || noBacklogAuto || reviewerModel !== undefined || reviewAfterRun || noReviewAfterRun)) {
+
+  const changes =
+    specMode !== undefined ||
+    runMode !== undefined ||
+    largeSpec !== undefined ||
+    maxSpec !== undefined ||
+    branchMain !== undefined ||
+    branchDev !== undefined ||
+    syncRemote !== undefined ||
+    backlogPath !== undefined ||
+    backlogRefresh !== undefined ||
+    backlogAuto ||
+    noBacklogAuto ||
+    reviewerModel !== undefined ||
+    reviewAfterRun ||
+    noReviewAfterRun
+
+  if (defaults && (show || changes)) {
+    throw new UserError(3, '--defaults не сочетается с другими флагами')
+  }
+  if (defaults) {
+    const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
+    try {
+      const result = applySetupDefaults(db, project.root)
+      const effective = effectiveReviewerModel(result.settings, context)
+      const lines = [
+        'Умолчания применены:',
+        `  бэклог: ${result.path ?? result.settings.backlog.path}${
+          result.error ? ` (ошибка пересборки: ${result.error})` : ''
+        }`,
+        `  исполнитель developer: ${result.executorCreated ? 'создан' : 'уже был'}`,
+        `  ревью spec: ${result.settings.specReview.mode}, ревью забега: ${result.settings.runReview.mode}`,
+        `  модель ревьюера: ${effective ?? 'не задана'}`,
+      ]
+      ok({ ...result, effectiveReviewerModel: effective }, lines.join('\n'))
+      return 0
+    } finally {
+      db.close()
+    }
+  }
+
+  if (show && changes) {
     throw new UserError(3, '--show не сочетается с изменением настроек')
   }
 
-  if (show || (!specMode && runMode === undefined && largeSpec === undefined && maxSpec === undefined && branchMain === undefined && branchDev === undefined && syncRemote === undefined && backlogPath === undefined && backlogRefresh === undefined && !backlogAuto && !noBacklogAuto && reviewerModel === undefined && !reviewAfterRun && !noReviewAfterRun && isJsonMode())) {
+  if (show || (!changes && isJsonMode())) {
     ok({ ...current, effectiveReviewerModel: currentReviewer }, human(current, currentReviewer))
     return 0
   }

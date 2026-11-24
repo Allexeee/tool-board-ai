@@ -23,7 +23,7 @@ const HELP = `board — доска карточек для людей и аге�
                           --no-review-after-run
 
   executor add|list|edit|remove
-  group list                области проекта (префиксы карточек)
+  group list|add             области проекта (префиксы карточек)
   card add|list|show|edit  карточки
   card shape|submit|spec-review|approve|amend|reject|verdict
   card done|cancel|reopen|defer|resume
@@ -75,10 +75,11 @@ const COMMAND_HELP: Record<string, string> = {
   'run start': 'board run start --as <исполнитель> (--cards ID,ID | --suggest 1|2|3)',
   'run note': 'board run note <RUN> --text "..." --as <ревьюер>',
   'queue move': 'board queue move <ID> --before <ID> | --top | --bottom',
+  'group add': 'board group add <PREFIX> [--name <название>] [--as <id>]',
   'review submit':
     'board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <id> --note "..."',
   setup:
-    'board setup [--show] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
+    'board setup [--show] [--defaults] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
   export: 'board export [--format json|md] [--out path] [--md]',
   'sync push': 'board sync push — копия базы в приватный git',

@@ -1,19 +1,33 @@
 import { openDb } from '../../core/db.ts'
-import { listGroups } from '../../core/groups.ts'
+import { addGroup, listGroups } from '../../core/groups.ts'
 import { findProject } from '../../core/project.ts'
-import type { ParsedArgs } from '../args.ts'
+import { stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { ok } from '../output.ts'
 
-const USAGE = 'board group list'
+const USAGE = 'board group list | board group add <PREFIX> [--name <название>] [--as <id>]'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
-  if (args.sub !== null && args.sub !== 'list') throw new UserError(3, USAGE)
+  if (args.sub !== null && args.sub !== 'list' && args.sub !== 'add') {
+    throw new UserError(3, USAGE)
+  }
 
   const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
   try {
+    if (args.sub === 'add') {
+      const prefix = args.positionals[0]
+      if (!prefix) throw new UserError(3, USAGE)
+      const group = addGroup(db, {
+        prefix,
+        name: stringFlag(args, 'name'),
+        actor: stringFlag(args, 'as') ?? 'owner',
+      })
+      ok(group, `${group.prefix} добавлен${group.name ? ': ' + group.name : ''}`)
+      return 0
+    }
+
     const groups = listGroups(db)
     const human =
       groups.length === 0
