@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildBacklog } from '../../src/core/backlog.ts'
-import { renderBacklogHtml } from '../../src/core/backlog-view.ts'
+import { renderBacklogPage } from '../../src/core/backlog-view.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 
 test('buildBacklog: группы по навыку и человеческие статусы', (t) => {
@@ -20,11 +20,16 @@ test('buildBacklog: группы по навыку и человеческие �
   assert.equal(data.skills[0].rows[0].status, 'разбор')
 })
 
-test('renderBacklogHtml: тёмная страница с опросом /data.json', () => {
-  const html = renderBacklogHtml()
+test('renderBacklogPage: статический HTML в тёмной теме для F5', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev' })
+
+  const html = renderBacklogPage(buildBacklog(board.db))
   assert.match(html, /<html lang="ru">/)
   assert.match(html, /--bg: #0f0f10/)
-  assert.match(html, /fetch\('\/data\.json'/)
-  assert.match(html, /setInterval\(tick, 2000\)/)
-  assert.match(html, /Бэклог/)
+  assert.match(html, /готов к работе/)
+  assert.match(html, /F5/)
+  assert.doesNotMatch(html, /fetch\(/)
+  assert.doesNotMatch(html, /setInterval/)
 })

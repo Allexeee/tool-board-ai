@@ -1,4 +1,4 @@
-import type { BacklogData } from './backlog.ts'
+import type { BacklogData, BacklogRow } from './backlog.ts'
 
 /** Тёмная тема в духе панели OpenCode: фон, моноширинные ID, спокойные таблицы. */
 const STYLE = `
@@ -22,7 +22,7 @@ header { display: flex; align-items: baseline; justify-content: space-between; g
 h1 { font-size: 26px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.01em; }
 .updated { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .hint { color: var(--muted); font-size: 12px; margin: 0 0 22px; }
-.hint code, td code { font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
+.hint code { font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
 section { margin-top: 26px; }
 h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; color: var(--text); }
 table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -35,57 +35,74 @@ td.note { color: var(--muted); }
 .empty { color: var(--muted); }
 `
 
-const SCRIPT = `
-const fmt = (iso) => {
-  const d = new Date(iso)
-  const p = (n) => String(n).padStart(2, '0')
-  return p(d.getDate()) + '.' + p(d.getMonth() + 1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+function esc(value: string): string {
+  return value.replace(/[&<>"]/g, (ch) => {
+    const map: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+    }
+    return map[ch]
+  })
 }
 
-function esc(value) {
-  return String(value).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
+function fmt(iso: string): string {
+  const date = new Date(iso)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-function table(headers, rows, cls) {
+function table(headers: string[], rows: string[][]): string {
   if (rows.length === 0) return '<p class="empty">пусто</p>'
-  const head = headers.map((h) => '<th>' + esc(h) + '</th>').join('')
-  const body = rows.map((cells) => '<tr>' + cells.map((c, i) => '<td class="' + (cls[i] || '') + '">' + esc(c) + '</td>').join('') + '</tr>').join('')
-  return '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
+  const head = headers.map((header) => `<th>${esc(header)}</th>`).join('')
+  const body = rows.map((cells) => `<tr>${cells.join('')}</tr>`).join('')
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
 }
 
-function render(data) {
-  const parts = ['<h1>Бэклог</h1><p class="hint">Живая сборка из <code>.board/board.db</code>. Обновляется сама.</p>']
+function rowsFor(rows: BacklogRow[]): string[][] {
+  return rows.map((item) => [
+    `<td class="id">${esc(item.id)}</td>`,
+    `<td>${esc(item.title)}</td>`,
+    `<td class="status">${esc(item.status)}</td>`,
+    `<td class="note">${esc(item.note)}</td>`,
+  ])
+}
+
+/** Самодостаточный HTML-снимок бэклога: открыть в браузере, F5 — обновить. */
+export function renderBacklogPage(data: BacklogData): string {
+  const parts: string[] = []
   for (const section of data.skills) {
-    parts.push('<section><h2>Задачи для ' + esc(section.label) + '</h2>' +
-      table(['ID', 'Заголовок', 'Статус', 'Заметка'], section.rows.map((r) => [r.id, r.title, r.status, r.note]), ['id', '', 'status', 'note']) + '</section>')
+    parts.push(
+      `<section><h2>Задачи для ${esc(section.label)}</h2>` +
+        table(['ID', 'Заголовок', 'Статус', 'Заметка'], rowsFor(section.rows)) +
+        '</section>',
+    )
   }
   if (data.skills.length === 0) parts.push('<p class="empty">Открытых карточек нет.</p>')
+
   if (data.deferred.length > 0) {
-    parts.push('<section><h2>Отложенные</h2>' +
-      table(['ID', 'Заголовок', 'Причина'], data.deferred.map((r) => [r.id, r.title, r.note]), ['id', '', 'note']) + '</section>')
+    const rows = data.deferred.map((item) => [
+      `<td class="id">${esc(item.id)}</td>`,
+      `<td>${esc(item.title)}</td>`,
+      `<td class="note">${esc(item.note)}</td>`,
+    ])
+    parts.push(
+      `<section><h2>Отложенные</h2>${table(['ID', 'Заголовок', 'Причина'], rows)}</section>`,
+    )
   }
+
   if (data.done.length > 0) {
-    parts.push('<section><h2>Готово за последние 12 часов</h2>' +
-      table(['ID', 'Заголовок', 'Завершено'], data.done.map((r) => [r.id, r.title, fmt(r.doneAt)]), ['id', '', 'note']) + '</section>')
+    const rows = data.done.map((item) => [
+      `<td class="id">${esc(item.id)}</td>`,
+      `<td>${esc(item.title)}</td>`,
+      `<td class="note">${fmt(item.doneAt)}</td>`,
+    ])
+    parts.push(
+      `<section><h2>Готово за последние 12 часов</h2>${table(['ID', 'Заголовок', 'Завершено'], rows)}</section>`,
+    )
   }
-  document.getElementById('content').innerHTML = parts.join('')
-  document.getElementById('updated').textContent = 'обновлено ' + fmt(data.generatedAt)
-  document.title = 'Бэклог'
-}
 
-async function tick() {
-  try {
-    const response = await fetch('/data.json', { cache: 'no-store' })
-    if (response.ok) render(await response.json())
-  } catch {}
-}
-
-tick()
-setInterval(tick, 2000)
-`
-
-/** HTML страницы бэклога: контент перерисовывается опросом /data.json. */
-export function renderBacklogHtml(): string {
   return `<!doctype html>
 <html lang="ru">
 <head>
@@ -96,15 +113,11 @@ export function renderBacklogHtml(): string {
 </head>
 <body>
 <div class="wrap">
-<header><h1>Бэклог</h1><span class="updated" id="updated"></span></header>
-<div id="content"></div>
+<header><h1>Бэклог</h1><span class="updated">обновлено ${fmt(data.generatedAt)} · F5</span></header>
+<p class="hint">Собрано из <code>.board/board.db</code>. Обновить: пересобрать файл и нажать F5.</p>
+${parts.join('\n')}
 </div>
-<script>${SCRIPT}</script>
 </body>
 </html>
 `
-}
-
-export function backlogJson(data: BacklogData): string {
-  return JSON.stringify(data)
 }

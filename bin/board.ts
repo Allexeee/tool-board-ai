@@ -40,7 +40,7 @@ const HELP = `board — доска карточек для людей и аге�
   command add|list
   review list|finding|submit
   release / now / doctor / backup / export / sync
-  backlog [--out <path>]    md-бэклог из доски
+  backlog [--out <path>] [--html]  md- или html-бэклог из доски
 
   --json                  машинный вывод
   --version               версия инструмента
@@ -83,7 +83,7 @@ const COMMAND_HELP: Record<string, string> = {
   export: 'board export [--format json|md] [--out path] [--md]',
   'sync push': 'board sync push — копия базы в приватный git',
   'sync pull': 'board sync pull — обновить базу из приватного git (с бэкапом .pre-pull)',
-  backlog: 'board backlog [--out <path>] | --serve [--port N] [--open] — md или живая страница',
+  backlog: 'board backlog [--out <path>] [--html] — md или HTML-снимок для браузера',
 }
 
 async function main(argv: string[]): Promise<number> {
