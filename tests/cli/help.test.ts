@@ -108,7 +108,7 @@ test('help: общая справка перечисляет флаги и по�
 
   const add = runCli(['card', 'add', '--help'])
   assert.equal(add.status, 0)
-  assert.match(add.stdout, /board card add --group/)
+  assert.match(add.stdout, /board card add \[--group <P>\]/)
 
   const setup = runCli(['setup', '--help'])
   assert.match(setup.stdout, /--branch-main/)

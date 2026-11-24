@@ -109,18 +109,18 @@ test('card add пишет --as в журнал, по умолчанию owner', 
   }
 })
 
-test('card add требует --group, --title и --skill', (t) => {
+test('card add требует --title и --skill, без --group берёт CARD', (t) => {
   const dir = project(t)
 
-  const noGroup = run(dir, ['card', 'add', '--title', 'x', '--skill', 'dev'])
-  assert.equal(noGroup.code, 3)
-  assert.match(noGroup.err, /--group/)
+  const noGroup = run(dir, ['card', 'add', '--title', 'x', '--skill', 'dev', '--json'])
+  assert.equal(noGroup.code, 0)
+  assert.equal(JSON.parse(noGroup.out).id, 'CARD-1')
 
-  const noTitle = run(dir, ['card', 'add', '--group', 'UI', '--skill', 'dev'])
+  const noTitle = run(dir, ['card', 'add', '--group', 'CARD', '--skill', 'dev'])
   assert.equal(noTitle.code, 3)
   assert.match(noTitle.err, /--title/)
 
-  const noSkill = run(dir, ['card', 'add', '--group', 'UI', '--title', 'x'])
+  const noSkill = run(dir, ['card', 'add', '--group', 'CARD', '--title', 'x'])
   assert.equal(noSkill.code, 3)
   assert.match(noSkill.err, /--skill/)
 })
@@ -190,7 +190,7 @@ test('card list фильтрует и печатает карточки', (t) =>
   const dir = project(t)
   json(dir, ['card', 'add', '--group', 'UI', '--title', 'Форма', '--skill', 'dev'])
   json(dir, ['card', 'add', '--group', 'UI', '--title', 'Валидация', '--skill', 'dev'])
-  json(dir, ['card', 'add', '--group', 'OPS', '--title', 'Группа', '--skill', 'owner'])
+  json(dir, ['card', 'add', '--group', 'OPS', '--title', 'Группа', '--skill', 'owner', '--new-group'])
 
   const requests = json(dir, ['card', 'list', '--status', 'new'])
   assert.deepEqual(

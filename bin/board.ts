@@ -23,6 +23,7 @@ const HELP = `board — доска карточек для людей и аге�
                           --no-review-after-run
 
   executor add|list|edit|remove
+  group list                области проекта (префиксы карточек)
   card add|list|show|edit  карточки
   card shape|submit|spec-review|approve|amend|reject|verdict
   card done|cancel|reopen|defer|resume
@@ -57,7 +58,7 @@ const HELP = `board — доска карточек для людей и аге�
 
 const COMMAND_HELP: Record<string, string> = {
   'card add':
-    'board card add --group <P> --title "<тип: заголовок>" --skill <s> [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review] [--no-needs-merge] [--as <id>]',
+    'board card add [--group <P>] --title "<тип: заголовок>" --skill <s> [--new-group] [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review] [--no-needs-merge] [--as <id>]',
   'card edit':
     'board card edit <ID> [--title ...] [--spec ...] [--acceptance ...] [--scope <path>] [--importance 0..3] [--urgency 0..3] [--review|--no-review] [--needs-merge|--no-needs-merge] [--tag ...|--clear-tags] [--as <id>]',
   'card shape': 'board card shape <ID> --as <исполнитель> [--from card.json]',
