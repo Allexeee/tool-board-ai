@@ -191,6 +191,7 @@ function cardArgs(input) {
     if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.new_group) args.push('--new-group')
     flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
     flag(args, 'as', input.as)
@@ -446,6 +447,7 @@ export default Plugin.define({
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
           clear_tags: { type: 'boolean' },
+          new_group: { type: 'boolean', description: 'Префикс — новая область проекта' },
           waive_dependents: { type: 'boolean' },
           done: { type: 'boolean' },
           reopen: { type: 'boolean' },
@@ -567,6 +569,13 @@ export default Plugin.define({
           }
           return call(ctx, ['release', '--as', 'owner'], context)
         },
+      })
+
+      editor.add({
+        name: 'group',
+        description: 'Области проекта: список префиксов',
+        input: schema({ action: { type: 'string' } }),
+        execute: (input, context) => call(ctx, ['group', input.action ?? 'list'], context),
       })
 
       editor.add({

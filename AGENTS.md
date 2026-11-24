@@ -6,6 +6,7 @@
 - Разговор ведёт brainstorming; spec и критерии приёмки пишутся в карточку, не в `docs/superpowers`.
 - Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.
 - Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.
+- Префикс — область проекта (Сайт, Контент, CORE), не ярлык задачи: сначала `board group list`, новый — только с `--new-group`; в пустом проекте — CARD.
 - После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.
 - Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.
 - Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.

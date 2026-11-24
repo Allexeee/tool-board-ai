@@ -21,6 +21,7 @@ import {
   type ShapeFile,
 } from '../../core/lifecycle.ts'
 import { findProject } from '../../core/project.ts'
+import { listGroups, normalizeGroupPrefix } from '../../core/groups.ts'
 import { insertIntoQueue } from '../../core/queue.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
 import { submitVerdict } from '../../core/review.ts'
@@ -65,8 +66,32 @@ export default async function command(args: ParsedArgs) {
   }
 
   const add = (args: ParsedArgs): number => {
-    const group = stringFlag(args, 'group')
-    if (!group) throw new UserError(3, 'нужен --group, например --group UI')
+    const groups = listGroups(db)
+    const known = groups.map((item) => item.prefix)
+    const groupFlag = stringFlag(args, 'group')
+    const newGroup = boolFlag(args, 'new-group')
+
+    let group: string
+    if (!groupFlag) {
+      // Пока областей нет, общий префикс — CARD.
+      if (groups.length > 0) {
+        throw new UserError(
+          3,
+          `нужен --group: в проекте уже есть ${known.join(', ')}; новая область — --group <P> --new-group`,
+        )
+      }
+      group = 'CARD'
+    } else {
+      group = normalizeGroupPrefix(groupFlag)
+      // Первый префикс в пустом проекте — это и есть определение области.
+      if (!known.includes(group) && !newGroup && groups.length > 0) {
+        throw new UserError(
+          3,
+          `префикс ${group} не заведён: есть ${known.join(', ')}; если это новая область — --new-group`,
+        )
+      }
+    }
+
     const title = stringFlag(args, 'title')
     if (!title) throw new UserError(3, 'нужен --title «короткое название»')
     const skill = stringFlag(args, 'skill')
