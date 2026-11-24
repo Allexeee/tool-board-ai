@@ -31,6 +31,32 @@ const SKILL_LABEL: Record<string, string> = {
   owner: 'владельца',
 }
 
+export interface BacklogRow {
+  id: string
+  title: string
+  status: string
+  note: string
+}
+
+export interface BacklogDone {
+  id: string
+  title: string
+  doneAt: string
+}
+
+export interface BacklogSkill {
+  skill: string
+  label: string
+  rows: BacklogRow[]
+}
+
+export interface BacklogData {
+  generatedAt: string
+  skills: BacklogSkill[]
+  deferred: BacklogRow[]
+  done: BacklogDone[]
+}
+
 function cell(value: string): string {
   return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim()
 }
@@ -56,14 +82,13 @@ function noteFor(db: DatabaseSync, card: Card): string {
   return ''
 }
 
-function table(rows: Card[], db: DatabaseSync): string[] {
-  const lines = ['| ID | Заголовок | Статус | Заметка |', '|---|---|---|---|']
-  for (const card of rows) {
-    lines.push(
-      `| ${card.id} | ${cell(card.title)} | ${STATUS_LABEL[card.status]} | ${noteFor(db, card)} |`,
-    )
+function row(db: DatabaseSync, card: Card): BacklogRow {
+  return {
+    id: card.id,
+    title: card.title,
+    status: STATUS_LABEL[card.status],
+    note: noteFor(db, card),
   }
-  return lines
 }
 
 function sortCards(cards: Card[]): Card[] {
@@ -76,8 +101,8 @@ function sortCards(cards: Card[]): Card[] {
   )
 }
 
-/** md-бэклог: таблицы по навыкам, отложенные и недавно готовые. */
-export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): string {
+/** Данные бэклога: таблицы по навыкам, отложенные и недавно готовые. */
+export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): BacklogData {
   const cards = listCards(db).filter((card) => !HIDDEN.includes(card.status))
 
   const bySkill = new Map<string, Card[]>()
@@ -92,6 +117,29 @@ export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): s
     left === 'owner' ? -1 : right === 'owner' ? 1 : left.localeCompare(right),
   )
 
+  const cut = reference.getTime() - DONE_WINDOW_HOURS * 60 * 60 * 1000
+  const done = listCards(db, { status: 'done' }).filter((card) => {
+    if (card.doneAt === null) return false
+    return new Date(card.doneAt).getTime() >= cut
+  })
+
+  return {
+    generatedAt: reference.toISOString(),
+    skills: skills.map((skill) => ({
+      skill,
+      label: SKILL_LABEL[skill] ?? skill,
+      rows: sortCards(bySkill.get(skill)!).map((card) => row(db, card)),
+    })),
+    deferred: sortCards(listCards(db, { status: 'deferred' })).map((card) => row(db, card)),
+    done: done
+      .sort((left, right) => (right.doneAt ?? '').localeCompare(left.doneAt ?? ''))
+      .map((card) => ({ id: card.id, title: card.title, doneAt: card.doneAt! })),
+  }
+}
+
+/** md-бэклог: таблицы по навыкам, отложенные и недавно готовые. */
+export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): string {
+  const data = buildBacklog(db, reference)
   const lines = [
     '# Бэклог',
     '',
@@ -100,38 +148,34 @@ export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): s
     '',
   ]
 
-  if (skills.length === 0) lines.push('Открытых карточек нет.', '')
+  if (data.skills.length === 0) lines.push('Открытых карточек нет.', '')
 
-  for (const skill of skills) {
-    const label = SKILL_LABEL[skill] ?? skill
-    lines.push(`## Задачи для ${label}`, '')
-    lines.push(...table(sortCards(bySkill.get(skill)!), db))
-    lines.push('')
-  }
-
-  const deferred = sortCards(listCards(db, { status: 'deferred' }))
-  if (deferred.length > 0) {
-    lines.push('## Отложенные', '', '| ID | Заголовок | Причина |', '|---|---|---|')
-    for (const card of deferred) {
-      lines.push(`| ${card.id} | ${cell(card.title)} | ${cell(card.note ?? '')} |`)
+  for (const section of data.skills) {
+    lines.push(`## Задачи для ${section.label}`, '')
+    lines.push('| ID | Заголовок | Статус | Заметка |', '|---|---|---|---|')
+    for (const item of section.rows) {
+      lines.push(`| ${item.id} | ${cell(item.title)} | ${item.status} | ${item.note} |`)
     }
     lines.push('')
   }
 
-  const cut = reference.getTime() - DONE_WINDOW_HOURS * 60 * 60 * 1000
-  const done = listCards(db, { status: 'done' }).filter((card) => {
-    if (card.doneAt === null) return false
-    return new Date(card.doneAt).getTime() >= cut
-  })
-  if (done.length > 0) {
+  if (data.deferred.length > 0) {
+    lines.push('## Отложенные', '', '| ID | Заголовок | Причина |', '|---|---|---|')
+    for (const item of data.deferred) {
+      lines.push(`| ${item.id} | ${cell(item.title)} | ${cell(item.note)} |`)
+    }
+    lines.push('')
+  }
+
+  if (data.done.length > 0) {
     lines.push(
       `## Готово за последние ${DONE_WINDOW_HOURS} часов`,
       '',
       '| ID | Заголовок | Завершено |',
       '|---|---|---|',
     )
-    for (const card of done.sort((left, right) => (right.doneAt ?? '').localeCompare(left.doneAt ?? ''))) {
-      lines.push(`| ${card.id} | ${cell(card.title)} | ${shortTime(card.doneAt!)} |`)
+    for (const item of data.done) {
+      lines.push(`| ${item.id} | ${cell(item.title)} | ${shortTime(item.doneAt)} |`)
     }
     lines.push('')
   }
@@ -161,4 +205,3 @@ export function refreshBacklogIfAuto(db: DatabaseSync, root: string): string | n
   if (!settings.backlog.auto) return null
   return writeBacklog(db, root, settings)
 }
-
