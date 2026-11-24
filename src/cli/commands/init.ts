@@ -9,7 +9,7 @@ import { ok, isJsonMode } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const dir = args.positionals[0] ?? process.cwd()
-  const { created, updated, root, boardVersion } = initProject(dir, {
+  const { created, updated, warnings, root, boardVersion } = initProject(dir, {
     refresh: boolFlag(args, 'refresh'),
     boardVersion: stringFlag(args, 'board-version'),
     boardSource: stringFlag(args, 'board-source'),
@@ -55,7 +55,10 @@ export default async function command(args: ParsedArgs) {
   if (settings.setupAt === null) {
     lines.push('Мастер настроек: запустите board setup (или /setup в OpenCode)')
   }
-  const recommendations = superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]
+  const recommendations = [
+    ...warnings,
+    ...(superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]),
+  ]
   if (recommendations.length > 0) {
     lines.push('', ...recommendations.map((item) => '*   ' + item))
   }

@@ -153,7 +153,13 @@ function stripToolboxHook(root: string): void {
 export function initProject(
   dir: string,
   options: InitProjectOptions = {},
-): { created: string[]; updated: string[]; root: string; boardVersion: string | null } {
+): {
+  created: string[]
+  updated: string[]
+  warnings: string[]
+  root: string
+  boardVersion: string | null
+} {
   const root = resolve(dir)
 
   if (
@@ -206,7 +212,7 @@ export function initProject(
     }
 
     const result = runLocalInit(root)
-    return { ...result, root, boardVersion: currentBoardVersion(root) }
+    return { ...result, warnings: [], root, boardVersion: currentBoardVersion(root) }
   }
 
   const created: string[] = []
@@ -250,11 +256,12 @@ export function initProject(
   const opencode = writeOpenCodeFiles(root, { ...options, settings })
   created.push(...opencode.created)
   updated.push(...opencode.updated)
+  const warnings = opencode.warnings ?? []
 
   // Новый хук не ставим: доска не защищает ветки.
   stripToolboxHook(root)
 
-  return { created, updated, root, boardVersion: currentBoardVersion(root) }
+  return { created, updated, warnings, root, boardVersion: currentBoardVersion(root) }
 }
 
 /** Генерирует .opencode из уже установленной версии tools/board. */
