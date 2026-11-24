@@ -20,6 +20,7 @@ function human(settings: BoardSettings, effectiveModel: string | null): string {
     `Порог остальных: ${settings.specReview.largeSpecChars} символов`,
     `Ветки: ${settings.branches.main ?? 'авто'} / ${settings.branches.dev ?? 'авто'}`,
     `Синхронизация базы: ${settings.sync.remote ?? 'не настроена'}`,
+    `Бэклог: ${settings.backlog.path}${settings.backlog.auto ? ' (авто)' : ''}`,
     `Ревью в конце забега: ${settings.runReview.mode}`,
     `Модель ревьюера: ${effectiveModel ?? 'не задана'} (default-вариант)`,
     settings.setupAt
@@ -51,16 +52,19 @@ export default async function command(args: ParsedArgs) {
   const branchMain = stringFlag(args, 'branch-main')
   const branchDev = stringFlag(args, 'branch-dev')
   const syncRemote = stringFlag(args, 'sync')
+  const backlogPath = stringFlag(args, 'backlog-path')
+  const backlogAuto = boolFlag(args, 'backlog-auto')
+  const noBacklogAuto = boolFlag(args, 'no-backlog-auto')
   const reviewerModel = stringFlag(args, 'reviewer-model')
 
   if (runMode !== undefined && (reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, 'не сочетайте --run-review с устаревшими --review-after-run/--no-review-after-run')
   }
-  if (show && (specMode !== undefined || runMode !== undefined || largeSpec !== undefined || maxSpec !== undefined || branchMain !== undefined || branchDev !== undefined || syncRemote !== undefined || reviewerModel !== undefined || reviewAfterRun || noReviewAfterRun)) {
+  if (show && (specMode !== undefined || runMode !== undefined || largeSpec !== undefined || maxSpec !== undefined || branchMain !== undefined || branchDev !== undefined || syncRemote !== undefined || backlogPath !== undefined || backlogAuto || noBacklogAuto || reviewerModel !== undefined || reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, '--show не сочетается с изменением настроек')
   }
 
-  if (show || (!specMode && runMode === undefined && largeSpec === undefined && maxSpec === undefined && branchMain === undefined && branchDev === undefined && syncRemote === undefined && reviewerModel === undefined && !reviewAfterRun && !noReviewAfterRun && isJsonMode())) {
+  if (show || (!specMode && runMode === undefined && largeSpec === undefined && maxSpec === undefined && branchMain === undefined && branchDev === undefined && syncRemote === undefined && backlogPath === undefined && !backlogAuto && !noBacklogAuto && reviewerModel === undefined && !reviewAfterRun && !noReviewAfterRun && isJsonMode())) {
     ok({ ...current, effectiveReviewerModel: currentReviewer }, human(current, currentReviewer))
     return 0
   }
@@ -77,6 +81,10 @@ export default async function command(args: ParsedArgs) {
   if (branchMain !== undefined) patch.branches = { ...patch.branches, main: branchMain }
   if (branchDev !== undefined) patch.branches = { ...patch.branches, dev: branchDev }
   if (syncRemote !== undefined) patch.sync = { remote: syncRemote }
+  if (backlogPath !== undefined) patch.backlog = { ...patch.backlog, path: backlogPath }
+  if (backlogAuto || noBacklogAuto) {
+    patch.backlog = { ...patch.backlog, auto: backlogAuto }
+  }
   if (runMode !== undefined) patch.runReview = { mode: runMode as RunReviewSetting }
   if (reviewAfterRun) patch.runReview = { mode: 'subagent' }
   if (noReviewAfterRun) patch.runReview = { mode: 'none' }

@@ -18,6 +18,8 @@ export interface BoardSettings {
   git: boolean
   /** Приватный git-репозиторий для копии базы; null — sync выключен. */
   sync: { remote: string | null }
+  /** md-бэклог: путь относительно корня и автосборка после finish/run end. */
+  backlog: { path: string; auto: boolean }
   /** Когда мастер настроек последний раз завершался; null — ещё не запускался. */
   setupAt: string | null
 }
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: BoardSettings = {
   branches: { main: null, dev: null },
   git: true,
   sync: { remote: null },
+  backlog: { path: 'docs/board/BACKLOG.md', auto: true },
   setupAt: null,
 }
 
@@ -69,6 +72,12 @@ function syncRemoteValue(raw: unknown): string | null {
   return value === '' ? null : value
 }
 
+function backlogPathValue(raw: unknown): string {
+  if (typeof raw !== 'string') return 'docs/board/BACKLOG.md'
+  const value = raw.trim()
+  return value === '' ? 'docs/board/BACKLOG.md' : value
+}
+
 /** Читает модель без варианта; невалидное значение при чтении считается пустым. */
 function reviewerModelValue(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
@@ -90,6 +99,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       branches: { main: null, dev: null },
       git: true,
       sync: { remote: null },
+      backlog: { path: 'docs/board/BACKLOG.md', auto: true },
       setupAt: setupAtValue(raw.setupAt),
     }
   }
@@ -113,6 +123,10 @@ function normalizeSettings(raw: unknown): BoardSettings {
     },
     git: raw.git === false ? false : true,
     sync: { remote: syncRemoteValue(isRecord(raw.sync) ? raw.sync.remote : null) },
+    backlog: {
+      path: backlogPathValue(isRecord(raw.backlog) ? raw.backlog.path : null),
+      auto: isRecord(raw.backlog) && raw.backlog.auto === false ? false : true,
+    },
     setupAt: setupAtValue(raw.setupAt),
   }
 }
@@ -209,6 +223,7 @@ export function updateSettings(
     branches?: { main?: string | null; dev?: string | null }
     git?: boolean
     sync?: { remote?: string | null }
+    backlog?: { path?: string; auto?: boolean }
   },
   now: () => string = nowIso,
 ): BoardSettings {
@@ -255,6 +270,13 @@ export function updateSettings(
     sync: {
       remote:
         patch.sync?.remote !== undefined ? syncRemoteValue(patch.sync.remote) : current.sync.remote,
+    },
+    backlog: {
+      path:
+        patch.backlog?.path !== undefined
+          ? backlogPathValue(patch.backlog.path)
+          : current.backlog.path,
+      auto: patch.backlog?.auto !== undefined ? patch.backlog.auto : current.backlog.auto,
     },
     setupAt: now(),
   }

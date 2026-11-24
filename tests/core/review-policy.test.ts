@@ -16,6 +16,7 @@ const base: BoardSettings = {
   branches: { main: null, dev: null },
   git: true,
   sync: { remote: null },
+  backlog: { path: 'docs/board/BACKLOG.md', auto: true },
   setupAt: null,
 }
 

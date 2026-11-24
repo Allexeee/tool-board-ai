@@ -26,6 +26,7 @@ function decision(overrides: Partial<SetupDecision> = {}): SetupDecision {
     branches: { main: null, dev: null },
     git: true,
     sync: { remote: null },
+    backlog: { path: 'docs/board/BACKLOG.md', auto: true },
     setupAt: null,
   }
   return {
