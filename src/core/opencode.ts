@@ -6,6 +6,7 @@ import {
   type ModelContext,
 } from './review-policy.ts'
 import type { BoardSettings } from './settings.ts'
+import { writeSkillPermissions } from './superpowers.ts'
 
 /**
  * Файлы OpenCode, которые `board init` кладёт в проект: тонкий плагин, четыре
@@ -32,6 +33,7 @@ export const AGENTS_BLOCK = [
   '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
   '- «Открой/покажи бэклог» — `board backlog --open`; если доступен инструмент браузера, открой `docs/board/BACKLOG.html` в панели Review (`browser.preview`). В чат HTML не вставляй.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
+  '- `writing-plans`, `executing-plans` и другие конкурирующие навыки superpowers в проекте выключены правами OpenCode: план — steps карточки, отдельного plan-файла нет.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
   '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`. Первый проход полный; повторный — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь; other — сборник в `deferred`.',
@@ -1036,6 +1038,7 @@ export interface OpenCodeWriteOptions {
 export interface OpenCodeWriteResult {
   created: string[]
   updated: string[]
+  warnings?: string[]
 }
 
 /** Пишет или удаляет board-reviewer.md по reviewer.model. */
@@ -1143,5 +1146,12 @@ export function writeOpenCodeFiles(
     created.push('AGENTS.md (блок board)')
   }
 
-  return { created, updated }
+  const permissions = writeSkillPermissions(root)
+  const warnings: string[] = []
+  if (permissions.changed) {
+    ;(permissions.created ? created : updated).push('.opencode/opencode.json (права навыков)')
+  }
+  if (permissions.warning) warnings.push(permissions.warning)
+
+  return { created, updated, warnings }
 }

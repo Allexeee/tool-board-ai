@@ -8,7 +8,7 @@ import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 import { readSettings } from './settings.ts'
-import { SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
+import { CONFLICTING_SKILLS_ADVICE, conflictingSkillsDisabled, SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
 
 export interface DoctorResult {
   errors: string[]
@@ -30,6 +30,9 @@ export function doctorData(
   const errors: string[] = []
   const warnings: string[] = []
   const recommendations: string[] = superpowersConfigured(root, home) ? [] : [SUPERPOWERS_ADVICE]
+  if (superpowersConfigured(root, home) && !conflictingSkillsDisabled(root, home)) {
+    warnings.push(CONFLICTING_SKILLS_ADVICE)
+  }
 
   if (!existsSync(join(root, '.board', 'board.db'))) {
     errors.push('.board/board.db не найден: выполните board init')
