@@ -3,6 +3,7 @@
 export const COMMANDS_WITH_SUB = new Set([
   'card',
   'executor',
+  'group',
   'queue',
   'run',
   'decision',
@@ -21,7 +22,7 @@ const KNOWN_FLAGS = new Set([
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge', 'no-plan', 'new-group',
   'backlog-path', 'backlog-auto', 'no-backlog-auto', 'backlog-refresh', 'html', 'open',
-  'no-decisions',
+  'no-decisions', 'defaults', 'name',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
   'large-spec', 'max-spec', 'branch-main', 'branch-dev', 'no-git', 'standalone', 'sync', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
@@ -33,7 +34,7 @@ const BOOLEAN_FLAGS = new Set([
   'waive-dependents', 'done', 'reopen', 'top', 'bottom', 'mine', 'all', 'block',
   'force', 'fresh', 'no-merge', 'yes', 'show', 'refresh', 'review-after-run',
   'no-review-after-run', 'allow-downgrade', 'clear-tags', 'md', 'events', 'no-git', 'standalone', 'no-plan', 'new-group',
-  'backlog-auto', 'no-backlog-auto', 'html', 'open', 'no-decisions',
+  'backlog-auto', 'no-backlog-auto', 'html', 'open', 'no-decisions', 'defaults',
 ])
 
 export type FlagValue = string | boolean | string[]
