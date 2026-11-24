@@ -76,3 +76,14 @@ test('setup --backlog-refresh меняет интервал, --show печата
 
   assert.equal(run(dir, ['setup', '--backlog-refresh', '3601']).code, 3)
 })
+
+test('card add пересобирает бэклог по флагу изменений', (t) => {
+  const dir = project(t)
+  const added = run(dir, ['card', 'add', '--group', 'SITE', '--title', 'Авто', '--skill', 'dev'])
+  assert.equal(added.code, 0, added.err)
+
+  assert.ok(existsSync(join(dir, 'docs/board/BACKLOG.md')))
+  assert.ok(existsSync(join(dir, 'docs/board/BACKLOG.html')))
+  assert.ok(existsSync(join(dir, '.board/backlog.state')))
+  assert.match(readFileSync(join(dir, 'docs/board/BACKLOG.html'), 'utf8'), /Авто/)
+})

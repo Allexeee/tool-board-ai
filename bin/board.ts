@@ -163,8 +163,48 @@ if (!globalFlag && !allowGlobal && !process.env.BOARD_DELEGATED && !local) {
   }
 }
 
+/** Команды, после которых бэклог заведомо не меняется. */
+const NO_BACKLOG_FLUSH = new Set([
+  'init',
+  'backlog',
+  'doctor',
+  'now',
+  'help',
+  'version',
+  'export',
+  'backup',
+])
+
+/**
+ * После успешной команды проверяет отметку бэклога и пересобирает файлы,
+ * если доска изменилась. Ошибка пересборки — предупреждение, не код выхода.
+ */
+async function flushBacklogAfterCommand(argv: string[]): Promise<void> {
+  const command = argv[0]
+  if (!command || NO_BACKLOG_FLUSH.has(command)) return
+  try {
+    const { findProject } = await import('../src/core/project.ts')
+    const project = findProject(process.cwd())
+    if (!project) return
+    const { openDb } = await import('../src/core/db.ts')
+    const { flushBacklog } = await import('../src/core/backlog.ts')
+    const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
+    try {
+      const result = flushBacklog(db, project.root)
+      if (result.error) {
+        process.stderr.write('бэклог не пересобран: ' + result.error + '\n')
+      }
+    } finally {
+      db.close()
+    }
+  } catch (error) {
+    process.stderr.write('бэклог не пересобран: ' + (error as Error).message + '\n')
+  }
+}
+
 try {
   const code = await main(argv)
+  if (code === 0) await flushBacklogAfterCommand(argv)
   process.exitCode = code
 } catch (error) {
   if (error instanceof UserError) {
