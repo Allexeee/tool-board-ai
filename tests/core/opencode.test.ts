@@ -25,6 +25,16 @@ test('initProject создаёт четыре навыка, плагин, ком
   assert.ok(created.some((p) => p.includes('SKILL.md')))
 })
 
+test('плагин: submit --no-decisions и setup --defaults', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /no_decisions/)
+  assert.match(plugin, /--no-decisions/)
+  assert.match(plugin, /action === 'defaults'/)
+  assert.match(plugin, /--defaults/)
+})
+
 test('навыки ссылаются на terminology.md и на порядок работы', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
