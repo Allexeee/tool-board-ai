@@ -382,3 +382,38 @@ test('review submit: при наличии шагов план обязател�
     /--plan/,
   )
 })
+
+test('acceptance failed: done отклоняется, reopen и решение владельца проходят', (t) => {
+  const { db } = board(t)
+
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  assert.throws(
+    () =>
+      submitVerdict(db, {
+        cardId: card.id,
+        reviewer: 'reviewer-1',
+        verdict: 'done',
+        acceptance: 'failed',
+      }),
+    /acceptance/,
+  )
+
+  const reopened = submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    verdict: 'reopen',
+    acceptance: 'failed',
+    note: 'acceptance не выполнен',
+  })
+  assert.equal(reopened.card.status, 'ready')
+
+  const ownerCard = seedCard(db, { phase: 'task', status: 'review' })
+  const owned = submitVerdict(db, {
+    cardId: ownerCard.id,
+    reviewer: 'owner',
+    verdict: 'done',
+    acceptance: 'failed',
+    note: 'принято владельцем',
+  })
+  assert.equal(owned.card.status, 'done')
+})

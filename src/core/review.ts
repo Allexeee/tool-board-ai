@@ -33,6 +33,7 @@ export interface SubmitVerdictInput {
   note?: string
   findings?: FindingInput[]
   planCompliance?: 'done' | 'failed'
+  acceptance?: 'done' | 'failed'
   mode?: 'self' | 'subagent'
 }
 
@@ -145,6 +146,16 @@ export function submitVerdict(
     const planCompliance = input.planCompliance ?? 'done'
     if (planCompliance === 'failed' && verdict !== 'reopen') {
       throw new UserError(3, 'plan failed требует verdict reopen')
+    }
+    const acceptance = input.acceptance ?? 'done'
+    if (acceptance !== 'done' && acceptance !== 'failed') {
+      throw new UserError(3, 'acceptance — done или failed')
+    }
+    if (acceptance === 'failed' && verdict === 'done' && reviewer !== OWNER) {
+      throw new UserError(
+        3,
+        'acceptance не выполнен: verdict reopen или решение владельца (--reviewer owner)',
+      )
     }
     // Если план есть, ревьюер обязан дать compliance: иначе сравнить нечего.
     if (listSteps(db, card.id).length > 0 && input.planCompliance === undefined) {

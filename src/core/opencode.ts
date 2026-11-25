@@ -546,6 +546,7 @@ function reviewArgs(input) {
   if (a === 'submit') {
     if (input.id) args.push(input.id)
     flag(args, 'plan', input.plan)
+    flag(args, 'acceptance', input.acceptance)
     flag(args, 'verdict', input.verdict)
     flag(args, 'mode', input.mode)
     flag(args, 'note', input.note)
@@ -891,6 +892,7 @@ export default Plugin.define({
           text: { type: 'string' },
           findings: { type: 'string' },
           plan: { type: 'string' },
+          acceptance: { type: 'string' },
           mode: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, reviewArgs(input), context),
@@ -948,9 +950,9 @@ subagent: false
 3. Итоги прохода — один блок: покрытые карточки, вердикты, находки с severity
    и рангом important (не больше 7 находок).
    - для забега: \`board run note <RUN> --text "..." --as <ревьюер>\`;
-   - для одиночной карточки: \`board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\`.
-4. Вердикт по каждой: \`board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"\`.
-   Critical или регрессия этого diff — \`reopen\`; \`plan failed\` требует \`reopen\`.
+   - для одиночной карточки: \`board review submit <ID> --plan done --acceptance done|failed --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\`.
+4. Вердикт по каждой: \`board review submit <ID> --plan done|failed --acceptance done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"\`.
+   Critical или регрессия этого diff — \`reopen\`; \`plan failed\` или \`acceptance failed\` требуют \`reopen\` (или решения владельца).
 5. В карточке — ссылка: \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`.
 6. Бюджет прохода: critical и регрессии — всегда; important — finding-карточка
    в очередь; other — сборник в deferred. Повторный проход — только дельта:
@@ -1039,11 +1041,11 @@ ${permissions}
 
 Проверяй acceptance, plan и код. Итоги прохода пиши одним блоком:
 - для забега — \`board run note <RUN> --text "..." --as <твой id>\`;
-- для одиночной карточки — \`board review submit <ID> --plan done --verdict done --reviewer <твой id> --note "ИТОГИ: ..."\`.
+- для одиночной карточки — \`board review submit <ID> --plan done --acceptance done|failed --verdict done --reviewer <твой id> --note "ИТОГИ: ..."\`.
 В блоке: покрытые карточки, вердикты, находки с severity и рангом important.
 Больше 7 находок на проход не перечисляй — выбирай важнейшие.
 
-Вердикт по карточке: \`board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <твой id> --note "итоги: <RUN или ID>"\`. Critical или регрессия из этого diff — \`reopen\`.
+Вердикт по карточке: \`board review submit <ID> --plan done|failed --acceptance done|failed --verdict done|reopen --reviewer <твой id> --note "итоги: <RUN или ID>"\`. Critical или регрессия из этого diff — \`reopen\`; acceptance failed при verdict done отклоняется.
 В карточке оставь ссылку: \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`.
 `
 }
