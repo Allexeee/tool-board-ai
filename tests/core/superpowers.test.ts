@@ -154,6 +154,31 @@ test('приоритет: .opencode выше корневого', (t) => {
   assert.equal(conflictingSkillsDisabled(root, home), true)
 })
 
+test('permissions нет в приоритетном конфиге: нижний deny действует', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({
+      plugins: ['superpowers'],
+      permissions: CONFLICTING_SKILLS.map((skill) => ({
+        action: 'skill',
+        resource: skill,
+        effect: 'deny',
+      })),
+    }),
+    'utf8',
+  )
+
+  assert.equal(conflictingSkillsDisabled(root, home), true)
+})
+
 test('deny только в нижнем конфиге не считается выключением', (t) => {
   const root = tempDir(t)
   const home = tempDir(t)
