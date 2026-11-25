@@ -5,7 +5,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  AGENTS_BLOCK,
+  COMMAND_SOURCE,
   PLUGIN_SOURCE,
+  SETUP_COMMAND_SOURCE,
+  SKILL_NOW_SOURCE,
+  SKILL_RUN_SOURCE,
+  SKILL_SPEC_SOURCE,
+  SKILL_WORK_SOURCE,
+  SPEC_REVIEW_COMMAND_SOURCE,
   reviewerAgentSource,
   writeOpenCodeFiles,
   writeReviewerAgent,
@@ -54,12 +62,23 @@ test('плагин: submit --no-decisions и setup --defaults', () => {
   assert.match(plugin, /--defaults/)
 })
 
-test('закоммиченный плагин совпадает с шаблоном', () => {
-  const committed = readFileSync(
-    new URL('../../.opencode/plugins/board/index.ts', import.meta.url),
-    'utf8',
-  )
-  assert.equal(committed, PLUGIN_SOURCE)
+test('закоммиченные .opencode файлы совпадают с шаблонами', () => {
+  const files: Array<[string, string]> = [
+    ['.opencode/skills/board-spec/SKILL.md', SKILL_SPEC_SOURCE],
+    ['.opencode/skills/board-work/SKILL.md', SKILL_WORK_SOURCE],
+    ['.opencode/skills/board-run/SKILL.md', SKILL_RUN_SOURCE],
+    ['.opencode/skills/board-now/SKILL.md', SKILL_NOW_SOURCE],
+    ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
+    ['.opencode/command/review.md', COMMAND_SOURCE],
+    ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
+    ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
+  ]
+  for (const [relative, source] of files) {
+    const committed = readFileSync(new URL(`../../${relative}`, import.meta.url), 'utf8')
+    assert.equal(committed, source, relative)
+  }
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  assert.ok(agents.includes(AGENTS_BLOCK), 'AGENTS.md: блок board совпадает')
 })
 
 test('навыки ссылаются на terminology.md и на порядок работы', () => {
