@@ -452,6 +452,7 @@ function cardArgs(input) {
   } else if (a === 'shape' || a === 'submit') {
     if (input.id) args.push(input.id)
     flag(args, 'from', input.from)
+    if (a === 'submit' && input.no_decisions) args.push('--no-decisions')
     flag(args, 'as', input.as)
   } else if (a === 'spec-review') {
     if (input.id) args.push(input.id)
@@ -628,11 +629,12 @@ export default Plugin.define({
 
       editor.add({
         name: 'setup',
-        description: 'Настройки доски: show|reviewer-model|spec-review|max-spec|large-spec|run-review',
+        description: 'Настройки доски: show|defaults|reviewer-model|spec-review|max-spec|large-spec|run-review',
         input: schema({ action: { type: 'string' }, value: { type: 'string' } }),
         execute: (input, context) => {
           const action = input.action ?? 'show'
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
+          if (action === 'defaults') return call(ctx, ['setup', '--defaults'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
           if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'backlog-path', 'backlog-refresh', 'run-review'].includes(action)) {
@@ -673,6 +675,7 @@ export default Plugin.define({
           urgency: { type: 'number' },
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
+          no_decisions: { type: 'boolean', description: 'submit: решений владельца нет' },
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
           clear_tags: { type: 'boolean' },
