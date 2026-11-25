@@ -38,7 +38,7 @@ const HELP = `board — доска карточек для людей и аге�
   decision add|list|supersede|obsolete
   term add|list|show
   command add|list
-  review list|finding|submit
+  review list|finding|submit|waive
   release / now / doctor / backup / export / sync
   backlog [--out <path>] [--html] [--open]  md- или html-бэклог; --open — в браузере
 
@@ -77,7 +77,8 @@ const COMMAND_HELP: Record<string, string> = {
   'queue move': 'board queue move <ID> --before <ID> | --top | --bottom',
   'group add': 'board group add <PREFIX> [--name <название>] [--as <id>]',
   'review submit':
-    'board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <id> --note "..."',
+    'board review submit <ID> --plan done|failed [--acceptance done|failed] --verdict done|reopen --reviewer <id> --note "..."',
+  'review waive': 'board review waive <ID> --reason "..." --as owner',
   setup:
     'board setup [--show] [--defaults] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
