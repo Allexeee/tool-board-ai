@@ -104,28 +104,33 @@ function pluginsOf(file: string): unknown[] {
   return parsed && Array.isArray(parsed.plugins) ? parsed.plugins : []
 }
 
-function hasSuperpowers(plugins: unknown[]): boolean {
-  return plugins.some((item) => {
-    if (typeof item === 'string') return /superpowers/i.test(item)
-    if (item !== null && typeof item === 'object') {
-      return /superpowers/i.test(JSON.stringify(item))
-    }
-    return false
-  })
+/** Имя записи plugins: строка, объект с name или JSON-строка. */
+function pluginName(entry: unknown): string | null {
+  if (typeof entry === 'string') return entry
+  if (entry !== null && typeof entry === 'object') {
+    const name = (entry as { name?: unknown }).name
+    if (typeof name === 'string') return name
+    return JSON.stringify(entry)
+  }
+  return null
 }
 
 /**
- * Подключён ли superpowers: смотрим первый по приоритету конфиг с ключом
- * `plugins` (проектные выше глобального), потому что верхний массив заменяет
- * нижний. Битый файл — не подключён.
+ * Подключён ли superpowers: OpenCode объединяет plugins из конфигов от низкого
+ * приоритета к высокому; запись `-superpowers` выключает плагин.
  */
 export function superpowersConfigured(root: string, home: string = homedir()): boolean {
-  const files = [...projectConfigFiles(root), ...globalConfigFiles(home)]
-  const withPlugins = files.find((file) => {
-    const config = readConfig(file)
-    return config !== null && Object.prototype.hasOwnProperty.call(config, 'plugins')
-  })
-  return withPlugins ? hasSuperpowers(pluginsOf(withPlugins)) : false
+  let enabled = false
+  for (const file of configLoadOrder(root, home)) {
+    for (const entry of pluginsOf(file)) {
+      const name = pluginName(entry)
+      if (!name) continue
+      const negative = name.startsWith('-')
+      const target = negative ? name.slice(1) : name
+      if (/superpowers/i.test(target)) enabled = !negative
+    }
+  }
+  return enabled
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

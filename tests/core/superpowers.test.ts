@@ -101,13 +101,31 @@ test('writeSkillPermissions: без superpowers файл не создаётся
   assert.equal(existsSync(join(root, '.opencode', 'opencode.json')), false)
 })
 
-test('верхний plugins перекрывает нижний', (t) => {
+test('plugins объединяются: верхний other + нижний superpowers', (t) => {
   const root = tempDir(t)
   const home = tempDir(t)
   mkdirSync(join(root, '.opencode'), { recursive: true })
   writeFileSync(
     join(root, '.opencode', 'opencode.json'),
     JSON.stringify({ plugins: ['other'] }),
+    'utf8',
+  )
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+
+  assert.equal(superpowersConfigured(root, home), true)
+})
+
+test('control-entry -superpowers выключает плагин', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['-superpowers'] }),
     'utf8',
   )
   writeFileSync(
