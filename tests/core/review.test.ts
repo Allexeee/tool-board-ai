@@ -17,6 +17,7 @@ import {
   waiveReview,
 } from '../../src/core/review.ts'
 import { listEvents } from '../../src/core/events.ts'
+import { listReviews } from '../../src/core/spec-review.ts'
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
@@ -418,6 +419,26 @@ test('acceptance failed: done отклоняется, reopen и решение �
     note: 'принято владельцем',
   })
   assert.equal(owned.card.status, 'done')
+})
+
+test('submitVerdict сохраняет acceptance в reviews', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+
+  submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'owner',
+    verdict: 'done',
+    acceptance: 'failed',
+    note: 'принято владельцем',
+  })
+
+  const row = db
+    .prepare("select acceptance from reviews where card_id = ? and kind = 'run'")
+    .get(card.id) as { acceptance: string }
+  assert.equal(row.acceptance, 'failed')
+  const reviews = listReviews(db, card.id)
+  assert.equal(reviews.find((review) => review.kind === 'run')?.acceptance, 'failed')
 })
 
 test('waiveReview: только владелец, причина, идемпотентность', (t) => {

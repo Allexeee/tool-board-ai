@@ -204,8 +204,8 @@ export function submitVerdict(
     )
 
     db.prepare(
-      `insert into reviews (card_id, reviewer, verdict, note, at, kind, mode, spec_rev, plan_compliance)
-       values (?, ?, ?, ?, ?, 'run', ?, ?, ?)`,
+      `insert into reviews (card_id, reviewer, verdict, note, at, kind, mode, spec_rev, plan_compliance, acceptance)
+       values (?, ?, ?, ?, ?, 'run', ?, ?, ?, ?)`,
     ).run(
       card.id,
       reviewer,
@@ -215,6 +215,7 @@ export function submitVerdict(
       input.mode ?? null,
       card.specRev,
       planCompliance,
+      acceptance,
     )
 
     const at = nowIso()
