@@ -66,7 +66,8 @@ test('аудитор: read-only и чек-лист', () => {
   const source = auditorAgentSource('acme/main')
   assert.match(source, /Только чтение/)
   assert.match(source, /Полнота spec/)
-  assert.match(source, /docs\/inbox/)
+  assert.match(source, /в чат/)
+  assert.match(source, /оркестратор/)
   assert.match(source, /resource: "\*"\n    effect: deny/)
 })
 
