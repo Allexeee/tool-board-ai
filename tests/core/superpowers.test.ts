@@ -101,6 +101,42 @@ test('writeSkillPermissions: без superpowers файл не создаётся
   assert.equal(existsSync(join(root, '.opencode', 'opencode.json')), false)
 })
 
+test('верхний plugins перекрывает нижний', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['other'] }),
+    'utf8',
+  )
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+
+  assert.equal(superpowersConfigured(root, home), false)
+})
+
+test('верхний без plugins — нижний действует', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ permissions: [] }),
+    'utf8',
+  )
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+
+  assert.equal(superpowersConfigured(root, home), true)
+})
+
 test('superpowers в корневом opencode.json: права пишутся туда', (t) => {
   const root = tempDir(t)
   const home = tempDir(t)
@@ -131,7 +167,7 @@ test('приоритет: .opencode выше корневого', (t) => {
   mkdirSync(join(root, '.opencode'), { recursive: true })
   writeFileSync(
     join(root, '.opencode', 'opencode.json'),
-    JSON.stringify({ plugins: ['other'], permissions: [] }),
+    JSON.stringify({ plugins: ['superpowers', 'other'], permissions: [] }),
     'utf8',
   )
   writeFileSync(
