@@ -62,6 +62,11 @@ test('плагин: submit --no-decisions и setup --defaults', () => {
   assert.match(plugin, /--defaults/)
 })
 
+test('card verdict передаёт acceptance', () => {
+  assert.match(PLUGIN_SOURCE, /acceptance_result/)
+  assert.match(PLUGIN_SOURCE, /flag\(args, 'acceptance', input\.acceptance_result\)/)
+})
+
 test('закоммиченные .opencode файлы совпадают с шаблонами', () => {
   const files: Array<[string, string]> = [
     ['.opencode/skills/board-spec/SKILL.md', SKILL_SPEC_SOURCE],

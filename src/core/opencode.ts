@@ -477,6 +477,7 @@ function cardArgs(input) {
   } else if (a === 'verdict') {
     if (input.id) args.push(input.id)
     flag(args, 'plan', input.plan)
+    flag(args, 'acceptance', input.acceptance_result)
     if (input.done) args.push('--done')
     if (input.reopen) args.push('--reopen')
     flag(args, 'mode', input.mode)
@@ -670,6 +671,7 @@ export default Plugin.define({
           body: { type: 'string' },
           spec: { type: 'string' },
           acceptance: { type: 'array', items: { type: 'string' } },
+          acceptance_result: { type: 'string', description: 'verdict: done|failed' },
           skill: { type: 'string' },
           summary: { type: 'string' },
           reason: { type: 'string' },
