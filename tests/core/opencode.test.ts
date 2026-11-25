@@ -8,6 +8,7 @@ import {
   AGENTS_BLOCK,
   OPENCODE_FILES,
   PLUGIN_SOURCE,
+  auditorAgentSource,
   reviewerAgentSource,
   writeOpenCodeFiles,
   writeReviewerAgent,
@@ -59,6 +60,22 @@ test('плагин: submit --no-decisions и setup --defaults', () => {
 test('card verdict передаёт acceptance', () => {
   assert.match(PLUGIN_SOURCE, /acceptance_result/)
   assert.match(PLUGIN_SOURCE, /flag\(args, 'acceptance', input\.acceptance_result\)/)
+})
+
+test('аудитор: read-only и чек-лист', () => {
+  const source = auditorAgentSource('acme/main')
+  assert.match(source, /Только чтение/)
+  assert.match(source, /Полнота spec/)
+  assert.match(source, /docs\/inbox/)
+  assert.match(source, /resource: "\*"\n    effect: deny/)
+})
+
+test('writeOpenCodeFiles создаёт auditor.md при модели', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root, {
+    settings: { ...DEFAULT_SETTINGS, reviewer: { model: 'acme/main' } },
+  })
+  assert.ok(existsSync(join(root, '.opencode/agents/auditor.md')))
 })
 
 test('закоммиченные .opencode файлы совпадают с шаблонами', () => {

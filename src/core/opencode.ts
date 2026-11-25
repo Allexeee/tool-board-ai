@@ -1058,6 +1058,61 @@ ${permissions}
 `
 }
 
+export function auditorAgentSource(model: string): string {
+  const shellAllow = [
+    'git diff*',
+    'git log*',
+    'git show*',
+    'git rev-parse*',
+    'git merge-base*',
+    'board card show*',
+    'board card list*',
+    'board run list*',
+    'board run show*',
+    'board review list*',
+    'board now*',
+  ]
+  const permissions = [
+    '  - action: edit\n    resource: "*"\n    effect: deny',
+    '  - action: read\n    resource: "*"\n    effect: allow',
+    '  - action: shell\n    resource: "*"\n    effect: deny',
+    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
+  ].join('\n')
+
+  return `---
+description: Read-only auditor before release
+mode: subagent
+model: ${model}
+permissions:
+${permissions}
+---
+
+Ты — аудитор перед релизом. Только чтение: файлы не правишь, карточки не создаёшь,
+в доску не пишешь. Твой shell — read-only команды, каждая отдельным вызовом.
+
+Проверяй по чек-листу:
+1. Полнота spec: problem, результат, non-goals, критерии приёмки.
+2. Независимость ревью: не self против держателя, есть вердикты.
+3. Закрытие карточек: done совпадает с acceptance, нет done без вердикта.
+4. Итоги забегов: run note и находки, critical закрыты.
+5. Готовность к релизу: critical нет, waiver оформлены, тесты и типы.
+
+Отчёт пиши в docs/inbox/audit-<дата>.md. Находки не оформляй карточками —
+верни их владельцу, решение принимает он.
+`
+}
+
+export const AUDIT_COMMAND_SOURCE = `---
+description: Аудит перед релизом
+---
+
+Запусти субагента \`auditor\` и передай ему текущий пакет релиза.
+
+Проверь: полноту spec, независимость ревью, закрытие карточек, итоги забегов
+и готовность к релизу. Отчёт — в \`docs/inbox/audit-<дата>.md\`, находки —
+списком владельцу, без правок кода и карточек.
+`
+
 export interface OpenCodeWriteOptions {
   /** Перезаписать сгенерированные файлы, даже если они уже есть. */
   refresh?: boolean
@@ -1100,6 +1155,33 @@ export function writeReviewerAgent(
   return exists ? { created: [], updated: [relative] } : { created: [relative], updated: [] }
 }
 
+/** Пишет или удаляет auditor.md по reviewer.model. */
+export function writeAuditorAgent(
+  root: string,
+  settings: BoardSettings,
+  refresh = false,
+  context: ModelContext = modelContext(process.env),
+): OpenCodeWriteResult {
+  const relative = '.opencode/agents/auditor.md'
+  const path = join(root, relative)
+  const model = effectiveReviewerModel(settings, context)
+
+  if (!model) {
+    if (!existsSync(path)) return { created: [], updated: [] }
+    rmSync(path, { force: true })
+    return { created: [], updated: [relative] }
+  }
+
+  const content = auditorAgentSource(model)
+  const exists = existsSync(path)
+  if (exists && !refresh) return { created: [], updated: [] }
+  if (exists && readFileSync(path, 'utf8') === content) return { created: [], updated: [] }
+
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, content, 'utf8')
+  return exists ? { created: [], updated: [relative] } : { created: [relative], updated: [] }
+}
+
 /**
  * Пишет в `root` скилл, плагин, команды ревью/настроек и (при settings)
  * board-reviewer.md, и ставит блок `board:begin`/`board:end` в `AGENTS.md`.
@@ -1117,6 +1199,7 @@ export const OPENCODE_FILES: Array<[string, string]> = [
   ['.opencode/command/review.md', COMMAND_SOURCE],
   ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
   ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
+  ['.opencode/command/audit.md', AUDIT_COMMAND_SOURCE],
 ]
 
 export function writeOpenCodeFiles(
@@ -1157,6 +1240,15 @@ export function writeOpenCodeFiles(
     )
     created.push(...agent.created)
     updated.push(...agent.updated)
+
+    const auditor = writeAuditorAgent(
+      root,
+      options.settings,
+      options.refresh === true,
+      options.context ?? modelContext(process.env),
+    )
+    created.push(...auditor.created)
+    updated.push(...auditor.updated)
   }
 
   const agentsPath = join(root, 'AGENTS.md')
