@@ -22,13 +22,13 @@ export const CONFLICTING_SKILLS = [
 export const CONFLICTING_SKILLS_ADVICE =
   'superpowers подключён, но конкурирующие навыки не выключены: выполните board init --refresh'
 
-/** Конфиги проекта: корневые opencode.json/.jsonc и старый .opencode/. */
+/** Конфиги проекта в порядке приоритета OpenCode: .opencode выше корневого. */
 function projectConfigFiles(root: string): string[] {
   return [
-    join(root, 'opencode.json'),
-    join(root, 'opencode.jsonc'),
     join(root, '.opencode', 'opencode.json'),
     join(root, '.opencode', 'opencode.jsonc'),
+    join(root, 'opencode.json'),
+    join(root, 'opencode.jsonc'),
   ]
 }
 
@@ -117,12 +117,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** Куда писать права: конфиг с superpowers, иначе существующий, иначе старый путь. */
+/** Куда писать права: самый приоритетный существующий конфиг, иначе старый путь. */
 function projectConfigTarget(root: string): string {
-  const files = projectConfigFiles(root)
   return (
-    files.find((file) => hasSuperpowers(pluginsOf(file))) ??
-    files.find((file) => existsSync(file)) ??
+    projectConfigFiles(root).find((file) => existsSync(file)) ??
     join(root, '.opencode', 'opencode.json')
   )
 }
@@ -195,5 +193,6 @@ export function writeSkillPermissions(
 /** Все конкурирующие навыки выключены (или superpowers не подключён). */
 export function conflictingSkillsDisabled(root: string, home: string = homedir()): boolean {
   if (!superpowersConfigured(root, home)) return true
-  return projectConfigFiles(root).some((file) => hasDenyRules(readConfig(file)))
+  const target = projectConfigFiles(root).find((file) => existsSync(file))
+  return target ? hasDenyRules(readConfig(target)) : false
 }
