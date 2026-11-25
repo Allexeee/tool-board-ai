@@ -5,6 +5,7 @@ import { listCards } from './cards.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { refreshMergeState, releaseToMain, tagRelease } from './git.ts'
+import { hasReviewVerdict, hasReviewWaiver } from './review.ts'
 import type { Card } from './types.ts'
 
 /** Версия пакета board (package.json рядом с src), по ней ставится тег релиза. */
@@ -55,6 +56,20 @@ export function release(
   if (critical.length > 0) {
     const detail = critical.map((card) => card.id).join(', ')
     throw new UserError(2, `релиз заблокирован: открыты критические находки: ${detail}`)
+  }
+
+  const unreviewed = fresh.filter(
+    (card) =>
+      card.inDev &&
+      !card.inMain &&
+      card.status === 'done' &&
+      card.revertedAt === null &&
+      !hasReviewVerdict(db, card.id) &&
+      !hasReviewWaiver(db, card.id),
+  )
+  if (unreviewed.length > 0) {
+    const detail = unreviewed.map((card) => card.id).join(', ')
+    throw new UserError(2, `релиз заблокирован: нет ревью или waiver: ${detail}`)
   }
 
   const commit = releaseToMain(root)

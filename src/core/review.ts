@@ -26,6 +26,28 @@ export interface AddFindingInput {
   scope?: string[]
 }
 
+/** Есть ли у карточки вердикт run review done. */
+export function hasReviewVerdict(db: DatabaseSync, cardId: string): boolean {
+  return (
+    db
+      .prepare(
+        "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' limit 1",
+      )
+      .get(cardId) !== undefined
+  )
+}
+
+/** Владелец явно отказался от ревью: есть событие card.review_waived. */
+export function hasReviewWaiver(db: DatabaseSync, cardId: string): boolean {
+  return (
+    db
+      .prepare(
+        "select 1 as found from events where subject = ? and type = 'card.review_waived' limit 1",
+      )
+      .get(cardId) !== undefined
+  )
+}
+
 /** Явный отказ владельца от ревью старой карточки: событие с причиной. */
 export function waiveReview(
   db: DatabaseSync,

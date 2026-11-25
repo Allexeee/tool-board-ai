@@ -15,6 +15,7 @@ import {
 import { cancelCard, finishCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
+import { waiveReview } from '../../src/core/review.ts'
 import type { Card } from '../../src/core/types.ts'
 import { seedCard } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
@@ -54,6 +55,9 @@ function merged(root: string, db: DatabaseSync, status: Card['status'], executor
     merge,
     card.id,
   )
+  if (status === 'done') {
+    waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'test: release-гейт' })
+  }
   return getCard(db, card.id)!
 }
 
@@ -65,11 +69,20 @@ test('release блокируется на карточке в dev не в done �
   assert.throws(() => release(db, root, 'owner'), /не done/)
 
   db.prepare("update cards set status = 'done' where id = ?").run(review.id)
+  waiveReview(db, { cardId: review.id, actor: 'owner', reason: 'test: release-гейт' })
 
   const result = release(db, root, 'owner')
   assert.equal(result.commit.length, 40)
   assert.equal(getCard(db, done.id)!.inMain, true)
   assert.equal(getCard(db, review.id)!.inMain, true)
+})
+
+test('release блокируется на done без ревью и waiver', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+
+  assert.throws(() => release(db, root, 'owner'), /нет ревью/)
 })
 
 test('критическая находка блокирует release, пока не закрыта', (t) => {
