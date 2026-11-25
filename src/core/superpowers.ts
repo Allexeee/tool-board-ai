@@ -117,12 +117,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** Куда писать права: самый приоритетный существующий конфиг, иначе старый путь. */
+/** Куда писать права: приоритетный .json, а для .jsonc — отдельный .opencode/opencode.json. */
 function projectConfigTarget(root: string): string {
-  return (
-    projectConfigFiles(root).find((file) => existsSync(file)) ??
-    join(root, '.opencode', 'opencode.json')
-  )
+  const existing = projectConfigFiles(root).find((file) => existsSync(file))
+  if (!existing || existing.toLowerCase().endsWith('.jsonc')) {
+    return join(root, '.opencode', 'opencode.json')
+  }
+  return existing
 }
 
 function hasDenyRules(parsed: Record<string, unknown> | null): boolean {
