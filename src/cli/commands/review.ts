@@ -8,6 +8,7 @@ import {
   addFinding,
   listReviewCards,
   submitVerdict,
+  waiveReview,
   type FindingInput,
 } from '../../core/review.ts'
 import { getRun } from '../../core/runs.ts'
@@ -181,11 +182,28 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const waive = (args: ParsedArgs): number => {
+    const cardId = args.positionals[0]
+    if (!cardId) {
+      throw new UserError(3, 'использование: board review waive UI-1 --reason «...» --as owner')
+    }
+    const reason = stringFlag(args, 'reason')
+    if (!reason) throw new UserError(3, 'нужен --reason «почему без ревью»')
+    const card = waiveReview(db, {
+      cardId,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      reason,
+    })
+    ok(card, `${cardId}: ревью waive — ${reason}`)
+    return 0
+  }
+
   try {
     if (args.sub === 'list') return list(args)
     if (args.sub === 'finding') return finding(args)
     if (args.sub === 'submit') return submit(args)
-    throw new UserError(3, 'использование: board review list|finding|submit')
+    if (args.sub === 'waive') return waive(args)
+    throw new UserError(3, 'использование: board review list|finding|submit|waive')
   } finally {
     db.close()
   }

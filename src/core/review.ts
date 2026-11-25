@@ -4,7 +4,7 @@ import { createCard, getCard, listCards } from './cards.ts'
 import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { addDep, refreshReadiness } from './deps.ts'
-import { appendEvent } from './events.ts'
+import { appendEvent, listEvents } from './events.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { listSteps } from './steps.ts'
 import type { Card, Severity } from './types.ts'
@@ -24,6 +24,33 @@ export interface AddFindingInput {
   text: string
   skill?: string
   scope?: string[]
+}
+
+/** Явный отказ владельца от ревью старой карточки: событие с причиной. */
+export function waiveReview(
+  db: DatabaseSync,
+  input: { cardId: string; actor: string; reason: string },
+): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.cardId)
+    if (input.actor !== OWNER) {
+      throw new UserError(3, 'waiver ревью — решение владельца: --as owner')
+    }
+    const reason = requiredText(input.reason, 'нужна причина waiver')
+    const existing = listEvents(db, card.id).some(
+      (event) => event.type === 'card.review_waived',
+    )
+    if (existing) return card
+
+    appendEvent(db, {
+      type: 'card.review_waived',
+      actor: input.actor,
+      subject: card.id,
+      note: reason,
+      after: { cardId: card.id },
+    })
+    return getCard(db, card.id)!
+  })
 }
 
 export interface SubmitVerdictInput {

@@ -557,6 +557,10 @@ function reviewArgs(input) {
     flag(args, 'severity', input.severity)
     flag(args, 'text', input.text)
     flag(args, 'reviewer', input.reviewer)
+  } else if (a === 'waive') {
+    if (input.id) args.push(input.id)
+    flag(args, 'reason', input.reason)
+    flag(args, 'as', input.as)
   }
   return args
 }
@@ -881,7 +885,7 @@ export default Plugin.define({
 
       editor.add({
         name: 'review',
-        description: 'Ревью: list|submit|finding',
+        description: 'Ревью: list|submit|finding|waive',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
@@ -893,6 +897,8 @@ export default Plugin.define({
           findings: { type: 'string' },
           plan: { type: 'string' },
           acceptance: { type: 'string' },
+          reason: { type: 'string' },
+          as: { type: 'string' },
           mode: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, reviewArgs(input), context),

@@ -14,7 +14,9 @@ import {
   listReviewCards,
   revalidateDependents,
   submitVerdict,
+  waiveReview,
 } from '../../src/core/review.ts'
+import { listEvents } from '../../src/core/events.ts'
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
@@ -416,4 +418,27 @@ test('acceptance failed: done отклоняется, reopen и решение �
     note: 'принято владельцем',
   })
   assert.equal(owned.card.status, 'done')
+})
+
+test('waiveReview: только владелец, причина, идемпотентность', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'done' })
+
+  assert.throws(
+    () => waiveReview(db, { cardId: card.id, actor: 'developer', reason: 'x' }),
+    /владельц|owner/,
+  )
+  assert.throws(
+    () => waiveReview(db, { cardId: card.id, actor: 'owner', reason: '  ' }),
+    /причина/,
+  )
+
+  waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'ревью REVIEW-7' })
+  let events = listEvents(db, card.id).filter((event) => event.type === 'card.review_waived')
+  assert.equal(events.length, 1)
+  assert.match(events[0].note ?? '', /REVIEW-7/)
+
+  waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'повтор' })
+  events = listEvents(db, card.id).filter((event) => event.type === 'card.review_waived')
+  assert.equal(events.length, 1)
 })
