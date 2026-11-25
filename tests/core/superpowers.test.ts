@@ -125,6 +125,60 @@ test('superpowers в корневом opencode.json: права пишутся �
   assert.equal(conflictingSkillsDisabled(root, home), true)
 })
 
+test('приоритет: .opencode выше корневого', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['other'], permissions: [] }),
+    'utf8',
+  )
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+
+  assert.equal(superpowersConfigured(root, home), true)
+  const result = writeSkillPermissions(root, home)
+  assert.equal(result.changed, true)
+  assert.equal(result.path, join(root, '.opencode', 'opencode.json'))
+
+  const high = JSON.parse(readFileSync(join(root, '.opencode', 'opencode.json'), 'utf8')) as {
+    permissions: unknown[]
+  }
+  assert.equal(high.permissions.length, CONFLICTING_SKILLS.length)
+  const low = JSON.parse(readFileSync(join(root, 'opencode.json'), 'utf8')) as unknown
+  assert.deepEqual(low, { plugins: ['superpowers'] })
+  assert.equal(conflictingSkillsDisabled(root, home), true)
+})
+
+test('deny только в нижнем конфиге не считается выключением', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  writeFileSync(
+    join(root, '.opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'], permissions: [] }),
+    'utf8',
+  )
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({
+      plugins: ['superpowers'],
+      permissions: CONFLICTING_SKILLS.map((skill) => ({
+        action: 'skill',
+        resource: skill,
+        effect: 'deny',
+      })),
+    }),
+    'utf8',
+  )
+
+  assert.equal(conflictingSkillsDisabled(root, home), false)
+})
+
 test('superpowers в opencode.jsonc с комментариями', (t) => {
   const root = tempDir(t)
   const home = tempDir(t)
