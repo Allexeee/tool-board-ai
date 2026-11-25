@@ -101,6 +101,52 @@ test('writeSkillPermissions: без superpowers файл не создаётся
   assert.equal(existsSync(join(root, '.opencode', 'opencode.json')), false)
 })
 
+test('superpowers в корневом opencode.json: права пишутся туда', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+
+  assert.equal(superpowersConfigured(root, home), true)
+  const result = writeSkillPermissions(root, home)
+  assert.equal(result.changed, true)
+
+  const parsed = JSON.parse(readFileSync(join(root, 'opencode.json'), 'utf8')) as {
+    plugins: string[]
+    permissions: Array<Record<string, string>>
+  }
+  assert.deepEqual(parsed.plugins, ['superpowers'])
+  assert.equal(parsed.permissions.length, CONFLICTING_SKILLS.length)
+  assert.equal(existsSync(join(root, '.opencode', 'opencode.json')), false)
+  assert.equal(conflictingSkillsDisabled(root, home), true)
+})
+
+test('superpowers в opencode.jsonc с комментариями', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  writeFileSync(
+    join(root, 'opencode.jsonc'),
+    '{\n  // плагины проекта\n  "plugins": ["superpowers"],\n}\n',
+    'utf8',
+  )
+
+  assert.equal(superpowersConfigured(root, home), true)
+  assert.equal(writeSkillPermissions(root, home).changed, true)
+
+  const parsed = JSON.parse(readFileSync(join(root, 'opencode.jsonc'), 'utf8')) as {
+    permissions: Array<Record<string, string>>
+  }
+  assert.ok(
+    parsed.permissions.some(
+      (rule) => rule.action === 'skill' && rule.resource === 'writing-plans' && rule.effect === 'deny',
+    ),
+  )
+  assert.equal(conflictingSkillsDisabled(root, home), true)
+})
+
 test('writeSkillPermissions: битый проектный json не перезаписывается', (t) => {
   const root = tempDir(t)
   const home = tempDir(t)
