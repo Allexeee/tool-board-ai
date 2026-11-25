@@ -51,13 +51,16 @@ export default async function command(args: ParsedArgs) {
     allowOutdated: true,
     allowNewer: true,
   })
-  let proposal: SetupProposal
+  let proposal: SetupProposal | null = null
+  let proposalWarning: string | null = null
   try {
     proposal = buildSetupProposal(db, root, settings)
+  } catch (error) {
+    proposalWarning = `мастер настроек недоступен: база не совместима — ${(error as Error).message}`
   } finally {
     db.close()
   }
-  lines.push('', ...proposalLines(proposal))
+  if (proposal) lines.push('', ...proposalLines(proposal))
 
   const effectiveReviewer = effectiveReviewerModel(settings, modelContext(process.env))
   lines.push(
@@ -72,6 +75,7 @@ export default async function command(args: ParsedArgs) {
   }
   const recommendations = [
     ...warnings,
+    ...(proposalWarning ? [proposalWarning] : []),
     ...(superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]),
   ]
   if (recommendations.length > 0) {
@@ -81,7 +85,17 @@ export default async function command(args: ParsedArgs) {
 
   const setupRequired = settings.setupAt === null
   ok(
-    { root, created, updated, boardVersion, settings, setupRequired, recommendations, proposal },
+    {
+      root,
+      created,
+      updated,
+      boardVersion,
+      settings,
+      setupRequired,
+      recommendations,
+      proposal,
+      proposalWarning,
+    },
     lines.join('\n'),
   )
   return 0
