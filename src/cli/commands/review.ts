@@ -147,6 +147,10 @@ export default async function command(args: ParsedArgs) {
     if (planCompliance !== 'done' && planCompliance !== 'failed') {
       throw new UserError(3, 'нужен --plan done|failed')
     }
+    const acceptance = stringFlag(args, 'acceptance') ?? 'done'
+    if (acceptance !== 'done' && acceptance !== 'failed') {
+      throw new UserError(3, '--acceptance done|failed')
+    }
     const requestedMode = stringFlag(args, 'mode')
     if (requestedMode !== undefined && requestedMode !== 'self' && requestedMode !== 'subagent') {
       throw new UserError(3, '--mode self|subagent')
@@ -167,6 +171,7 @@ export default async function command(args: ParsedArgs) {
       note: stringFlag(args, 'note') ?? '',
       findings,
       planCompliance,
+      acceptance,
       mode,
     })
     ok(
