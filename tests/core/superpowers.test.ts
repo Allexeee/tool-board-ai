@@ -179,19 +179,19 @@ test('deny только в нижнем конфиге не считается �
   assert.equal(conflictingSkillsDisabled(root, home), false)
 })
 
-test('superpowers в opencode.jsonc с комментариями', (t) => {
+test('superpowers в opencode.jsonc с комментариями: jsonc не трогаем', (t) => {
   const root = tempDir(t)
   const home = tempDir(t)
-  writeFileSync(
-    join(root, 'opencode.jsonc'),
-    '{\n  // плагины проекта\n  "plugins": ["superpowers"],\n}\n',
-    'utf8',
-  )
+  const original = '{\n  // плагины проекта\n  "plugins": ["superpowers"],\n}\n'
+  writeFileSync(join(root, 'opencode.jsonc'), original, 'utf8')
 
   assert.equal(superpowersConfigured(root, home), true)
-  assert.equal(writeSkillPermissions(root, home).changed, true)
+  const result = writeSkillPermissions(root, home)
+  assert.equal(result.changed, true)
+  assert.equal(result.path, join(root, '.opencode', 'opencode.json'))
+  assert.equal(readFileSync(join(root, 'opencode.jsonc'), 'utf8'), original)
 
-  const parsed = JSON.parse(readFileSync(join(root, 'opencode.jsonc'), 'utf8')) as {
+  const parsed = JSON.parse(readFileSync(join(root, '.opencode', 'opencode.json'), 'utf8')) as {
     permissions: Array<Record<string, string>>
   }
   assert.ok(
@@ -199,6 +199,20 @@ test('superpowers в opencode.jsonc с комментариями', (t) => {
       (rule) => rule.action === 'skill' && rule.resource === 'writing-plans' && rule.effect === 'deny',
     ),
   )
+  assert.equal(conflictingSkillsDisabled(root, home), true)
+})
+
+test('superpowers в .opencode/opencode.jsonc: jsonc не трогаем', (t) => {
+  const root = tempDir(t)
+  const home = tempDir(t)
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  const original = '{\n  // локальный конфиг\n  "plugins": ["superpowers"],\n}\n'
+  writeFileSync(join(root, '.opencode', 'opencode.jsonc'), original, 'utf8')
+
+  const result = writeSkillPermissions(root, home)
+  assert.equal(result.changed, true)
+  assert.equal(result.path, join(root, '.opencode', 'opencode.json'))
+  assert.equal(readFileSync(join(root, '.opencode', 'opencode.jsonc'), 'utf8'), original)
   assert.equal(conflictingSkillsDisabled(root, home), true)
 })
 
