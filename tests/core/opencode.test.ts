@@ -4,7 +4,12 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeOpenCodeFiles, writeReviewerAgent, reviewerAgentSource } from '../../src/core/opencode.ts'
+import {
+  PLUGIN_SOURCE,
+  reviewerAgentSource,
+  writeOpenCodeFiles,
+  writeReviewerAgent,
+} from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
 import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
@@ -47,6 +52,14 @@ test('плагин: submit --no-decisions и setup --defaults', () => {
   assert.match(plugin, /--no-decisions/)
   assert.match(plugin, /action === 'defaults'/)
   assert.match(plugin, /--defaults/)
+})
+
+test('закоммиченный плагин совпадает с шаблоном', () => {
+  const committed = readFileSync(
+    new URL('../../.opencode/plugins/board/index.ts', import.meta.url),
+    'utf8',
+  )
+  assert.equal(committed, PLUGIN_SOURCE)
 })
 
 test('навыки ссылаются на terminology.md и на порядок работы', () => {

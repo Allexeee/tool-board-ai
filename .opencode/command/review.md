@@ -18,9 +18,9 @@ subagent: false
 3. Итоги прохода — один блок: покрытые карточки, вердикты, находки с severity
    и рангом important (не больше 7 находок).
    - для забега: `board run note <RUN> --text "..." --as <ревьюер>`;
-   - для одиночной карточки: `board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."`.
-4. Вердикт по каждой: `board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"`.
-   Critical или регрессия этого diff — `reopen`; `plan failed` требует `reopen`.
+   - для одиночной карточки: `board review submit <ID> --plan done --acceptance done|failed --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."`.
+4. Вердикт по каждой: `board review submit <ID> --plan done|failed --acceptance done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"`.
+   Critical или регрессия этого diff — `reopen`; `plan failed` или `acceptance failed` требуют `reopen` (или решения владельца).
 5. В карточке — ссылка: `board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"`.
 6. Бюджет прохода: critical и регрессии — всегда; important — finding-карточка
    в очередь; other — сборник в deferred. Повторный проход — только дельта:
