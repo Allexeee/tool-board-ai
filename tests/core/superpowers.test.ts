@@ -113,6 +113,7 @@ test('superpowers в корневом opencode.json: права пишутся �
   assert.equal(superpowersConfigured(root, home), true)
   const result = writeSkillPermissions(root, home)
   assert.equal(result.changed, true)
+  assert.equal(result.path, join(root, 'opencode.json'))
 
   const parsed = JSON.parse(readFileSync(join(root, 'opencode.json'), 'utf8')) as {
     plugins: string[]

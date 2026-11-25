@@ -143,6 +143,7 @@ function hasDenyRules(parsed: Record<string, unknown> | null): boolean {
 export interface PermissionsWrite {
   changed: boolean
   created?: boolean
+  path?: string
   warning?: string
 }
 
@@ -188,7 +189,7 @@ export function writeSkillPermissions(
   config.permissions = permissions
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, JSON.stringify(config, null, 2) + '\n', 'utf8')
-  return { changed: true, created: !existed }
+  return { changed: true, created: !existed, path }
 }
 
 /** Все конкурирующие навыки выключены (или superpowers не подключён). */
