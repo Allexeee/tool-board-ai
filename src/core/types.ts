@@ -75,6 +75,7 @@ export interface Review {
   mode: 'self' | 'subagent' | null
   specRev: number | null
   planCompliance: PlanCompliance | null
+  acceptance: PlanCompliance | null
 }
 
 export interface Executor {

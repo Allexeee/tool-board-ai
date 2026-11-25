@@ -30,6 +30,7 @@ import { getRun } from '../../core/runs.ts'
 import { readSettings } from '../../core/settings.ts'
 import {
   latestSpecReview,
+  listReviews,
   recordSpecReview,
   type SpecReviewGate,
 } from '../../core/spec-review.ts'
@@ -184,6 +185,7 @@ export default async function command(args: ParsedArgs) {
         reviewerModel: resolution.reviewerModel,
       },
       specReviewLatest: latestSpecReview(db, card.id),
+      reviews: listReviews(db, card.id),
       refs: listRefs(db, card.id),
       deps: listDeps(db, card.id),
       discussion: listDiscussion(db, card.id),

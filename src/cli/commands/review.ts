@@ -40,6 +40,7 @@ interface ReviewItem {
     at: string
     mode: string | null
     planCompliance: string | null
+    acceptance: string | null
   }>
   findings: Array<{ id: string; title: string; severity: string | null; status: string }>
   refs: Ref[]
@@ -57,7 +58,7 @@ export default async function command(args: ParsedArgs) {
       const steps = listSteps(db, card.id)
       const reviews = db
         .prepare(
-          "select verdict, reviewer, note, at, mode, plan_compliance from reviews where card_id = ? and kind = 'run' order by id desc",
+          "select verdict, reviewer, note, at, mode, plan_compliance, acceptance from reviews where card_id = ? and kind = 'run' order by id desc",
         )
         .all(card.id) as Array<{
         verdict: string
@@ -66,6 +67,7 @@ export default async function command(args: ParsedArgs) {
         at: string
         mode: string | null
         plan_compliance: string | null
+        acceptance: string | null
       }>
       const findings = db
         .prepare(
@@ -98,6 +100,7 @@ export default async function command(args: ParsedArgs) {
           at: row.at,
           mode: row.mode,
           planCompliance: row.plan_compliance,
+          acceptance: row.acceptance,
         })),
         findings,
         refs: listRefs(db, card.id),
@@ -257,7 +260,7 @@ function formatReviewList(items: ReviewItem[]): string {
       }
       if (item.reviewReopens > 0) lines.push(`  reopens: ${item.reviewReopens}`)
       for (const review of item.reviews) {
-        lines.push(`  review: ${review.verdict} · plan ${review.planCompliance ?? '—'}`)
+        lines.push(`  review: ${review.verdict} · plan ${review.planCompliance ?? '—'} · acceptance ${review.acceptance ?? '—'}`)
       }
       for (const finding of item.findings) {
         lines.push(`  finding: ${finding.id} · ${finding.severity ?? '—'} · ${finding.status}`)

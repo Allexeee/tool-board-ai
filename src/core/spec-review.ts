@@ -30,6 +30,7 @@ interface ReviewRow {
   mode: string | null
   spec_rev: number | null
   plan_compliance: string | null
+  acceptance: string | null
 }
 
 function toReview(row: ReviewRow): Review {
@@ -44,6 +45,7 @@ function toReview(row: ReviewRow): Review {
     mode: row.mode as Review['mode'],
     specRev: row.spec_rev,
     planCompliance: row.plan_compliance as Review['planCompliance'],
+    acceptance: row.acceptance as Review['acceptance'],
   }
 }
 
@@ -99,6 +101,14 @@ export function latestSpecReview(db: DatabaseSync, cardId: string): Review | nul
     )
     .get(cardId) as unknown as ReviewRow | undefined
   return row ? toReview(row) : null
+}
+
+/** Все записи ревью карточки: spec и run, в порядке появления. */
+export function listReviews(db: DatabaseSync, cardId: string): Review[] {
+  const rows = db
+    .prepare('select * from reviews where card_id = ? order by id')
+    .all(cardId) as unknown as ReviewRow[]
+  return rows.map(toReview)
 }
 
 /** Проверяет, что для текущей версии spec есть подходящий done-review. */
