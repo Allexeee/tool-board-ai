@@ -1012,13 +1012,15 @@ export function reviewerAgentSource(model: string): string {
     'board run list*',
     'board run note*',
     'board review submit*',
+    'board card spec-review*',
     'board card ref add*',
   ]
   const permissions = [
     '  - action: edit\n    resource: "*"\n    effect: deny',
     '  - action: read\n    resource: "*"\n    effect: allow',
-    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
+    // Last matching rule wins: общий deny идёт первым, allowlist перекрывает его.
     '  - action: shell\n    resource: "*"\n    effect: deny',
+    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
   ].join('\n')
 
   return `---

@@ -540,6 +540,15 @@ test('ревьюер не создаёт карточки и пишет итог
   assert.match(source, /--verdict done\|reopen/)
 })
 
+test('ревьюер: shell deny * до allowlist', () => {
+  const source = reviewerAgentSource('acme/main')
+  const denyAll = source.indexOf('  - action: shell\n    resource: "*"\n    effect: deny')
+  const allowDiff = source.indexOf('  - action: shell\n    resource: "git diff*"\n    effect: allow')
+  assert.ok(denyAll >= 0, 'deny * есть')
+  assert.ok(allowDiff > denyAll, 'deny * идёт до allowlist')
+  assert.match(source, /board card spec-review\*/)
+})
+
 test('board-work: целевые тесты на карточке, полный прогон перед релизом', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
