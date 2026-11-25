@@ -6,9 +6,10 @@ import { listCards } from './cards.ts'
 import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
+import { hasReviewVerdict, hasReviewWaiver } from './review.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 import { readSettings } from './settings.ts'
-import { SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
+import { CONFLICTING_SKILLS_ADVICE, conflictingSkillsDisabled, SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
 
 export interface DoctorResult {
   errors: string[]
@@ -30,6 +31,9 @@ export function doctorData(
   const errors: string[] = []
   const warnings: string[] = []
   const recommendations: string[] = superpowersConfigured(root, home) ? [] : [SUPERPOWERS_ADVICE]
+  if (superpowersConfigured(root, home) && !conflictingSkillsDisabled(root, home)) {
+    warnings.push(CONFLICTING_SKILLS_ADVICE)
+  }
 
   if (!existsSync(join(root, '.board', 'board.db'))) {
     errors.push('.board/board.db не найден: выполните board init')
@@ -149,6 +153,21 @@ function checkCards(db: DatabaseSync, warnings: string[]): void {
   const review = cards.filter((card) => card.status === 'review')
   if (review.length > 0) {
     warnings.push(`карточки на ревью: ${review.map((c) => c.id).join(', ')}`)
+  }
+
+  const unreviewedDev = cards.filter(
+    (card) =>
+      card.inDev &&
+      !card.inMain &&
+      card.status === 'done' &&
+      card.revertedAt === null &&
+      !hasReviewVerdict(db, card.id) &&
+      !hasReviewWaiver(db, card.id),
+  )
+  if (unreviewedDev.length > 0) {
+    warnings.push(
+      `в dev без ревью и без waiver: ${unreviewedDev.map((c) => c.id).join(', ')}`,
+    )
   }
 
   // План пропущен молча: done-карточка с обязательным ревью без шагов и без --no-plan.

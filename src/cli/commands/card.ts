@@ -24,12 +24,13 @@ import { findProject } from '../../core/project.ts'
 import { listGroups, normalizeGroupPrefix } from '../../core/groups.ts'
 import { insertIntoQueue } from '../../core/queue.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
-import { submitVerdict } from '../../core/review.ts'
+import { submitVerdict, waiveReview } from '../../core/review.ts'
 import { modelContext, resolveSpecReviewMode } from '../../core/review-policy.ts'
 import { getRun } from '../../core/runs.ts'
 import { readSettings } from '../../core/settings.ts'
 import {
   latestSpecReview,
+  listReviews,
   recordSpecReview,
   type SpecReviewGate,
 } from '../../core/spec-review.ts'
@@ -45,6 +46,19 @@ import type { Card, CardPhase, CardStatus } from '../../core/types.ts'
 import { boolFlag, numberFlag, stringFlag, stringsFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { ok } from '../output.ts'
+
+/** --no-review для мержа — решение владельца с причиной; иначе waiver не записать. */
+function requireNoReview(args: ParsedArgs): string {
+  const actor = stringFlag(args, 'as') ?? 'owner'
+  const reason = stringFlag(args, 'reason')
+  if (actor !== 'owner') {
+    throw new UserError(3, '--no-review — решение владельца: --as owner')
+  }
+  if (!reason) {
+    throw new UserError(3, '--no-review требует --reason «почему без ревью»')
+  }
+  return reason
+}
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
@@ -123,13 +137,25 @@ export default async function command(args: ParsedArgs) {
     const scope = stringsFlag(args, 'scope')
     if (scope.length > 0) patch.scope = scope
     const reviewFlag = switchFlag(args, 'review', 'no-review')
-    if (reviewFlag !== undefined) patch.reviewRequired = reviewFlag
     const needsMergeFlag = switchFlag(args, 'needs-merge', 'no-needs-merge')
+    const effectiveNeedsMerge = needsMergeFlag ?? (skill !== 'owner' && settings.git)
+    let waiverReason: string | null = null
+    if (reviewFlag === undefined) {
+      if (effectiveNeedsMerge) patch.reviewRequired = true
+    } else if (reviewFlag === false && effectiveNeedsMerge) {
+      waiverReason = requireNoReview(args)
+      patch.reviewRequired = false
+    } else {
+      patch.reviewRequired = reviewFlag
+    }
     if (needsMergeFlag !== undefined) patch.needsMerge = needsMergeFlag
     const note = stringFlag(args, 'note')
     if (note !== undefined) patch.note = note
     if (Object.keys(patch).length > 0) {
       editCard(db, { id: card.id, actor: stringFlag(args, 'as') ?? 'owner', patch })
+    }
+    if (waiverReason) {
+      waiveReview(db, { cardId: card.id, actor: 'owner', reason: waiverReason })
     }
     insertIntoQueue(db, card.id)
     const created = getCard(db, card.id)!
@@ -184,6 +210,7 @@ export default async function command(args: ParsedArgs) {
         reviewerModel: resolution.reviewerModel,
       },
       specReviewLatest: latestSpecReview(db, card.id),
+      reviews: listReviews(db, card.id),
       refs: listRefs(db, card.id),
       deps: listDeps(db, card.id),
       discussion: listDiscussion(db, card.id),
@@ -225,9 +252,20 @@ export default async function command(args: ParsedArgs) {
     if (urgency !== undefined) patch.urgency = urgency
 
     const needsMerge = switchFlag(args, 'needs-merge', 'no-needs-merge')
-    if (needsMerge !== undefined) patch.needsMerge = needsMerge
     const reviewRequired = switchFlag(args, 'review', 'no-review')
-    if (reviewRequired !== undefined) patch.reviewRequired = reviewRequired
+    const existing = requireCard(id, 'board card edit UI-1')
+    const effectiveNeedsMerge = needsMerge ?? existing.needsMerge
+    let waiverReason: string | null = null
+    if (reviewRequired === undefined) {
+      if (needsMerge === true) patch.reviewRequired = true
+      else if (needsMerge === false) patch.reviewRequired = false
+    } else if (reviewRequired === false && effectiveNeedsMerge) {
+      waiverReason = requireNoReview(args)
+      patch.reviewRequired = false
+    } else {
+      patch.reviewRequired = reviewRequired
+    }
+    if (needsMerge !== undefined) patch.needsMerge = needsMerge
 
     if (args.flags['scope'] !== undefined) patch.scope = stringsFlag(args, 'scope')
     if (args.flags.tag !== undefined) patch.tags = stringsFlag(args, 'tag')
@@ -241,6 +279,9 @@ export default async function command(args: ParsedArgs) {
     }
 
     const card = editCard(db, { id, actor: stringFlag(args, 'as') ?? 'owner', patch })
+    if (waiverReason) {
+      waiveReview(db, { cardId: card.id, actor: 'owner', reason: waiverReason })
+    }
     ok(card, `${card.id} изменена: ${card.title}`)
     return 0
   }
@@ -414,8 +455,14 @@ export default async function command(args: ParsedArgs) {
 
     const existing = requireCard(id, 'board card submit UI-1 --as developer')
     const { gate } = specGate(existing)
-    const card = submitCard(db, { id, actor, requiredSpecReview: gate })
-    ok(card, `${card.id} на утверждении: ${card.title}`)
+    const noDecisions = boolFlag(args, 'no-decisions')
+    const card = submitCard(db, { id, actor, requiredSpecReview: gate, noDecisions })
+    ok(
+      card,
+      noDecisions
+        ? `${card.id} в очереди без утверждения: решений владельца нет`
+        : `${card.id} на утверждении: ${card.title}`,
+    )
     return 0
   }
 
@@ -566,6 +613,10 @@ export default async function command(args: ParsedArgs) {
     if (planCompliance !== 'done' && planCompliance !== 'failed') {
       throw new UserError(3, 'нужен --plan done|failed')
     }
+    const acceptance = stringFlag(args, 'acceptance')
+    if (acceptance !== undefined && acceptance !== 'done' && acceptance !== 'failed') {
+      throw new UserError(3, '--acceptance done|failed')
+    }
     const requestedMode = stringFlag(args, 'mode')
     if (requestedMode !== undefined && requestedMode !== 'self' && requestedMode !== 'subagent') {
       throw new UserError(3, '--mode self|subagent')
@@ -582,6 +633,7 @@ export default async function command(args: ParsedArgs) {
       verdict: done ? 'done' : 'reopen',
       note: stringFlag(args, 'note') ?? '',
       planCompliance,
+      acceptance: acceptance as 'done' | 'failed' | undefined,
       mode,
     })
     ok(result, `${id} ${result.card.status} · plan ${planCompliance}`)

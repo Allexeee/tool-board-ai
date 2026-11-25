@@ -57,15 +57,17 @@ git checkout -b dev          # если ветки dev ещё нет
 board init                   # добавит tools/board (submodule) и .opencode
 git add -A                   # .gitmodules, tools/board, .opencode
 git commit -m "chore: board init"
-board executor add developer --kind agent --skills dev
+board setup --defaults       # бэклог, ревью, исполнитель developer
+board group add SITE --name Сайт
+board backlog --open         # показать бэклог в браузере
 board doctor
 board now
 ```
 
-Первый `init` в терминале запускает мастер настроек: спрашивает, включать ли
-ревью после каждого забега. По умолчанию выключено. Если `init` запускал агент
-(не-TTY), мастер не спрашивает — вызовите `/setup` в OpenCode или `board setup`
-в терминале.
+`init` в любом режиме печатает предложение мастера: бэклог, ревью, исполнитель
+`developer`, области. Агент показывает его окном выбора «Оставить умолчания /
+Поменять / Не сейчас». `board setup --defaults` применяет умолчания разом;
+`/setup` и флаги `board setup` меняют отдельные настройки.
 
 `init` создаёт:
 
@@ -114,6 +116,8 @@ board card add --group UI --title "Форма входа" --skill dev
 
 `needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 0–3. Зависимости — `card dep`.
 
+`needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done` и без waiver.
+
 ## Очередь и забег
 
 После утверждения карточка встаёт в очередь задач по оценке. `now 0` (по умолчанию) показывает владельцу утверждения, owner-задачи и вопросы; `now 1` — задачи указанного `--as`; `now 2` — других агентов; `now 3` — открытые запросы и очередь.
@@ -160,6 +164,8 @@ board setup --large-spec 6000                       # порог большог�
 board setup --max-spec 1500                         # порог для max-модели
 board setup --run-review none|self|subagent|auto    # run review: plan + код
 board setup --reviewer-model provider/model         # default-вариант ревьюера
+board setup --backlog-path docs/board/BACKLOG.md    # путь md-бэклога
+board setup --backlog-refresh 5                     # автообновление HTML, сек (0 — выкл.)
 ```
 
 `specReview.mode=auto` (по умолчанию) выбирает субагента по длине spec:
@@ -258,6 +264,7 @@ board command add "RUN" "начать забег по очереди" --as owner
 | `release` | слить `dev` в `main` |
 | `backup [path]` | копия `.board/board.db` |
 | `export [--format json\|md] [--out path]` | выгрузка карточек |
+| `backlog [--out path] [--html]` | md- или HTML-бэклог (HTML сам перезагружается) |
 | `now [0\|1\|2\|3]` | терминальная доска |
 | `doctor` | диагностика |
 

@@ -199,3 +199,39 @@ test('doctorData: нет .board/board.db — ошибка', () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('doctorData: предупреждает о done в dev без ревью', (t) => {
+  const board = makeBoardRepo()
+  t.after(board.close)
+  const card = seedCard(board.db, { phase: 'task', status: 'done' })
+  board.db.prepare('update cards set in_dev = 1, in_main = 0 where id = ?').run(card.id)
+
+  const data = doctorData(board.db, board.root)
+  assert.ok(
+    data.warnings.some((item) => item.includes('без ревью')),
+    data.warnings.join(' | '),
+  )
+})
+
+test('doctorData: предупреждает, когда конкурирующие навыки не выключены', (t) => {
+  const board = makeBoardRepo()
+  const home = mkdtempSync(join(tmpdir(), 'board-home-'))
+  t.after(() => {
+    board.close()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+  writeFileSync(
+    join(home, '.config', 'opencode', 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+  rmSync(join(board.root, '.opencode', 'opencode.json'), { force: true })
+
+  const data = doctorData(board.db, board.root, home)
+  assert.ok(
+    data.warnings.some((item) => item.includes('конкурирующие')),
+    data.warnings.join(' | '),
+  )
+})

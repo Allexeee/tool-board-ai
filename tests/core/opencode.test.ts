@@ -4,7 +4,15 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeOpenCodeFiles, writeReviewerAgent, reviewerAgentSource } from '../../src/core/opencode.ts'
+import {
+  AGENTS_BLOCK,
+  OPENCODE_FILES,
+  PLUGIN_SOURCE,
+  auditorAgentSource,
+  reviewerAgentSource,
+  writeOpenCodeFiles,
+  writeReviewerAgent,
+} from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
 import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
@@ -23,6 +31,61 @@ test('initProject создаёт четыре навыка, плагин, ком
   assert.ok(existsSync(join(root, '.opencode', 'command', 'setup.md')))
   assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /board/)
   assert.ok(created.some((p) => p.includes('SKILL.md')))
+})
+
+test('writeOpenCodeFiles показывает фактический путь конфига прав', () => {
+  const root = tmp()
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+  const result = writeOpenCodeFiles(root)
+  assert.ok(
+    result.updated.includes('opencode.json (права навыков)'),
+    result.updated.join(' | '),
+  )
+})
+
+test('плагин: submit --no-decisions и setup --defaults', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
+  assert.match(plugin, /no_decisions/)
+  assert.match(plugin, /--no-decisions/)
+  assert.match(plugin, /action === 'defaults'/)
+  assert.match(plugin, /--defaults/)
+})
+
+test('card verdict передаёт acceptance', () => {
+  assert.match(PLUGIN_SOURCE, /acceptance_result/)
+  assert.match(PLUGIN_SOURCE, /flag\(args, 'acceptance', input\.acceptance_result\)/)
+})
+
+test('аудитор: read-only и чек-лист', () => {
+  const source = auditorAgentSource('acme/main')
+  assert.match(source, /Только чтение/)
+  assert.match(source, /Полнота spec/)
+  assert.match(source, /в чат/)
+  assert.match(source, /оркестратор/)
+  assert.match(source, /resource: "\*"\n    effect: deny/)
+})
+
+test('writeOpenCodeFiles создаёт auditor.md при модели', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root, {
+    settings: { ...DEFAULT_SETTINGS, reviewer: { model: 'acme/main' } },
+  })
+  assert.ok(existsSync(join(root, '.opencode/agents/auditor.md')))
+})
+
+test('закоммиченные .opencode файлы совпадают с шаблонами', () => {
+  for (const [relative, source] of OPENCODE_FILES) {
+    const committed = readFileSync(new URL(`../../${relative}`, import.meta.url), 'utf8')
+    assert.equal(committed, source, relative)
+  }
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  assert.ok(agents.includes(AGENTS_BLOCK), 'AGENTS.md: блок board совпадает')
 })
 
 test('навыки ссылаются на terminology.md и на порядок работы', () => {
@@ -406,8 +469,8 @@ test('четыре навыка: разные description и свои прави
   assert.equal(new Set(descriptions).size, 4)
 
   assert.match(read('board-spec'), /без глагола работы/i)
-  assert.match(read('board-spec'), /«Ран» — board-run/)
-  assert.match(read('board-spec'), /«работай» — board-work/)
+  assert.match(read('board-spec'), /«Ран» — забег \(board-run\)/)
+  assert.match(read('board-spec'), /«сделай \/ работай»/)
   assert.match(read('board-spec'), /Тип карточки/)
   assert.match(read('board-spec'), /feat:/)
   assert.match(read('board-spec'), /review:/)
@@ -514,6 +577,15 @@ test('ревьюер не создаёт карточки и пишет итог
   assert.match(source, /7 находок/)
   assert.match(source, /--reviewer/)
   assert.match(source, /--verdict done\|reopen/)
+})
+
+test('ревьюер: shell deny * до allowlist', () => {
+  const source = reviewerAgentSource('acme/main')
+  const denyAll = source.indexOf('  - action: shell\n    resource: "*"\n    effect: deny')
+  const allowDiff = source.indexOf('  - action: shell\n    resource: "git diff*"\n    effect: allow')
+  assert.ok(denyAll >= 0, 'deny * есть')
+  assert.ok(allowDiff > denyAll, 'deny * идёт до allowlist')
+  assert.match(source, /board card spec-review\*/)
 })
 
 test('board-work: целевые тесты на карточке, полный прогон перед релизом', () => {

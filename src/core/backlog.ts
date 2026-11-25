@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { listCards } from './cards.ts'
 import { listDeps } from './deps.ts'
@@ -16,7 +16,7 @@ export const STATUS_LABEL: Record<CardStatus, string> = {
   ready: 'готов к работе',
   booked: 'готов к работе',
   in_progress: 'в работе',
-  review: 'на ревью у агента',
+  review: 'ждет финального ревью',
   blocked: 'заблокирована',
   deferred: 'отложена',
   done: 'готово',
@@ -194,14 +194,30 @@ export function backlogHtmlPath(root: string, settings: BoardSettings): string {
   return backlogPath(root, settings).replace(/\.md$/i, '.html')
 }
 
+/** Атомарная запись: читатель видит либо старый файл, либо новый, но не половину. */
+function writeAtomic(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const temp = `${path}.${process.pid}.tmp`
+  try {
+    writeFileSync(temp, content, 'utf8')
+    renameSync(temp, path)
+  } catch {
+    try {
+      rmSync(temp, { force: true })
+    } catch {
+      // временный файл не создался — чистить нечего
+    }
+    writeFileSync(path, content, 'utf8')
+  }
+}
+
 export function writeBacklog(
   db: DatabaseSync,
   root: string,
   settings: BoardSettings,
 ): string {
   const path = backlogPath(root, settings)
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, renderBacklog(db), 'utf8')
+  writeAtomic(path, renderBacklog(db))
   return path
 }
 
@@ -212,16 +228,99 @@ export function writeBacklogHtml(
   settings: BoardSettings,
 ): string {
   const path = backlogHtmlPath(root, settings)
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, renderBacklogPage(buildBacklog(db)), 'utf8')
+  writeAtomic(path, renderBacklogPage(buildBacklog(db), settings.backlog.refreshSeconds))
   return path
 }
 
-/** Автосборка после finish/run end: только если включена в настройках. */
-export function refreshBacklogIfAuto(db: DatabaseSync, root: string): string | null {
+/** Отметка «бэклог собран на такой-то ревизии»: лежит рядом с базой. */
+export interface BacklogState {
+  revision: number
+  path: string
+  refreshSeconds: number
+}
+
+export function backlogStatePath(root: string): string {
+  return join(root, '.board', 'backlog.state')
+}
+
+/** Ревизия доски — последнее событие. Любое изменение карточки или забега её двигает. */
+export function backlogRevision(db: DatabaseSync): number {
+  const row = db
+    .prepare('select coalesce(max(id), 0) as revision from events')
+    .get() as { revision: number }
+  return row.revision
+}
+
+function readBacklogState(root: string): BacklogState | null {
+  try {
+    const parsed = JSON.parse(readFileSync(backlogStatePath(root), 'utf8')) as Partial<BacklogState>
+    if (
+      typeof parsed.revision !== 'number' ||
+      typeof parsed.path !== 'string' ||
+      typeof parsed.refreshSeconds !== 'number'
+    ) {
+      return null
+    }
+    return {
+      revision: parsed.revision,
+      path: parsed.path,
+      refreshSeconds: parsed.refreshSeconds,
+    }
+  } catch {
+    return null
+  }
+}
+
+export interface BacklogFlush {
+  path: string | null
+  error?: string
+}
+
+/**
+ * Пересборка «по флагу»: отметка хранит ревизию и настройки, поэтому команда
+ * без изменений файлы не трогает. Ошибка пересборки не роняет команду —
+ * отметка остаётся, следующая команда повторит.
+ */
+export function flushBacklog(
+  db: DatabaseSync,
+  root: string,
+  options: { force?: boolean } = {},
+): BacklogFlush {
   const settings = readSettings(root)
-  if (!settings.backlog.auto) return null
-  const md = writeBacklog(db, root, settings)
-  writeBacklogHtml(db, root, settings)
-  return md
+  if (!settings.backlog.auto) return { path: null }
+
+  const state = readBacklogState(root)
+  const stale =
+    options.force === true ||
+    state === null ||
+    state.revision !== backlogRevision(db) ||
+    state.path !== settings.backlog.path ||
+    state.refreshSeconds !== settings.backlog.refreshSeconds
+  if (!stale) return { path: null }
+
+  const revision = backlogRevision(db)
+  try {
+    const path = writeBacklog(db, root, settings)
+    writeBacklogHtml(db, root, settings)
+    writeAtomic(
+      backlogStatePath(root),
+      JSON.stringify(
+        {
+          revision,
+          path: settings.backlog.path,
+          refreshSeconds: settings.backlog.refreshSeconds,
+        },
+        null,
+        2,
+      ) + '\n',
+    )
+    return { path }
+  } catch (error) {
+    return { path: null, error: (error as Error).message }
+  }
+}
+
+/** Автосборка после finish/run end и любой другой команды, меняющей доску. */
+export function refreshBacklogIfAuto(db: DatabaseSync, root: string): string | null {
+  return flushBacklog(db, root).path
 }

@@ -165,12 +165,12 @@ export function shapeCard(db: DatabaseSync, input: { id: string; actor: string }
  */
 export function submitCard(
   db: DatabaseSync,
-  input: { id: string; actor: string; requiredSpecReview?: SpecReviewGate },
+  input: { id: string; actor: string; requiredSpecReview?: SpecReviewGate; noDecisions?: boolean },
 ): Card {
   return tx(db, () => {
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
-    if (card.skill === OWNER) {
+    if (card.skill === OWNER && input.noDecisions !== true) {
       throw new UserError(3, `owner-карточку ${card.id} закрывает владелец, а не submit`)
     }
     if (card.holder !== actor) {
@@ -202,6 +202,42 @@ export function submitCard(
     )
 
     const at = nowIso()
+
+    // Решений владельца нет — утверждение не нужно: карточка сразу в очередь.
+    if (input.noDecisions === true) {
+      const questions = openQuestions(db, card.id)
+      if (questions.length > 0) {
+        throw new UserError(
+          3,
+          `у карточки ${card.id} ${questions.length} открытых вопросов: сначала ответьте или снимите их`,
+        )
+      }
+      if (card.skill === OWNER) {
+        db.prepare(
+          `update cards set phase = 'task', status = 'ready', needs_merge = 0, review_required = 0,
+           holder = null, lease_until = null, position = null, approved_at = ?, updated_at = ?
+           where id = ?`,
+        ).run(at, at, card.id)
+      } else {
+        db.prepare(
+          `update cards set phase = 'task', status = 'waiting', holder = null, lease_until = null,
+           position = null, approved_at = ?, updated_at = ? where id = ?`,
+        ).run(at, at, card.id)
+        insertIntoQueue(db, card.id)
+        refreshReadiness(db)
+      }
+      const updated = getCard(db, card.id)!
+      appendEvent(db, {
+        type: 'card.approved',
+        actor,
+        subject: card.id,
+        before: card,
+        after: updated,
+        note: 'авто: решений владельца нет',
+      })
+      return updated
+    }
+
     db.prepare(
       `update cards set phase = 'task', status = 'approval', holder = null, lease_until = null,
        position = null, updated_at = ? where id = ?`,

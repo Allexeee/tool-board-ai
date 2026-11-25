@@ -1,5 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
+import { nowIso } from './clock.ts'
+import { tx } from './db.ts'
+import { appendEvent } from './events.ts'
 
 const PREFIX = /^[A-Z0-9]{1,8}$/
 
@@ -33,4 +36,28 @@ export function listGroups(db: DatabaseSync): CardGroup[] {
 export function groupExists(db: DatabaseSync, prefix: string): boolean {
   const row = db.prepare('select 1 as found from groups where prefix = ?').get(prefix)
   return row !== undefined
+}
+
+/** Область проекта без карточки: префикс, название, событие в журнал. */
+export function addGroup(
+  db: DatabaseSync,
+  input: { prefix: string; name?: string | null; actor: string },
+): CardGroup {
+  return tx(db, () => {
+    const prefix = normalizeGroupPrefix(input.prefix)
+    if (groupExists(db, prefix)) throw new UserError(3, `группа ${prefix} уже есть`)
+    const name = input.name?.trim() ? input.name.trim() : null
+    db.prepare('insert into groups (prefix, name, created_at) values (?, ?, ?)').run(
+      prefix,
+      name,
+      nowIso(),
+    )
+    appendEvent(db, {
+      type: 'group.added',
+      actor: input.actor,
+      subject: prefix,
+      after: { prefix, name },
+    })
+    return { prefix, name, count: 0 }
+  })
 }

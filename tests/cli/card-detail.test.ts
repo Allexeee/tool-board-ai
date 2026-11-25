@@ -189,14 +189,14 @@ test('card show --json отдаёт карточку с шагами, ссылк
   json(dir, ['ask', 'UI-1', 'Нужен ли SSO?', '--as', 'developer'])
   json(dir, ['answer', 'UI-1', 'Нет', '--as', 'owner'])
 
-  const detail = json(dir, ['card', 'show', 'UI-1', '--events'])
+  const detail = json(dir, ['card', 'show', 'UI-1', '--events', '--limit', '10'])
 
   assert.equal(detail.id, 'UI-1')
   assert.equal(detail.title, 'Форма')
   assert.equal(detail.plan.length, 1)
   assert.equal(detail.refs.length, 1)
   assert.equal(detail.discussion.length, 2)
-  assert.equal(detail.events[0].type, 'card.created')
+  assert.ok(detail.events.some((event: { type: string }) => event.type === 'card.created'))
 
   const limited = json(dir, ['card', 'show', 'UI-1', '--events', '--limit', '1'])
   assert.equal(limited.events.length, 1)

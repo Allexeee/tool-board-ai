@@ -14,7 +14,10 @@ import {
   listReviewCards,
   revalidateDependents,
   submitVerdict,
+  waiveReview,
 } from '../../src/core/review.ts'
+import { listEvents } from '../../src/core/events.ts'
+import { listReviews } from '../../src/core/spec-review.ts'
 import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
@@ -381,4 +384,94 @@ test('review submit: при наличии шагов план обязател�
     () => submitVerdict(db, { cardId: card.id, reviewer: 'reviewer-1', verdict: 'done' }),
     /--plan/,
   )
+})
+
+test('acceptance failed: done отклоняется, reopen и решение владельца проходят', (t) => {
+  const { db } = board(t)
+
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  assert.throws(
+    () =>
+      submitVerdict(db, {
+        cardId: card.id,
+        reviewer: 'reviewer-1',
+        verdict: 'done',
+        acceptance: 'failed',
+      }),
+    /acceptance/,
+  )
+
+  const reopened = submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    verdict: 'reopen',
+    acceptance: 'failed',
+    note: 'acceptance не выполнен',
+  })
+  assert.equal(reopened.card.status, 'ready')
+
+  const ownerCard = seedCard(db, { phase: 'task', status: 'review' })
+  const owned = submitVerdict(db, {
+    cardId: ownerCard.id,
+    reviewer: 'owner',
+    verdict: 'done',
+    acceptance: 'failed',
+    note: 'принято владельцем',
+  })
+  assert.equal(owned.card.status, 'done')
+})
+
+test('submitVerdict сохраняет acceptance в reviews', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+
+  submitVerdict(db, {
+    cardId: card.id,
+    reviewer: 'owner',
+    verdict: 'done',
+    acceptance: 'failed',
+    note: 'принято владельцем',
+  })
+
+  const row = db
+    .prepare("select acceptance from reviews where card_id = ? and kind = 'run'")
+    .get(card.id) as { acceptance: string }
+  assert.equal(row.acceptance, 'failed')
+  const reviews = listReviews(db, card.id)
+  assert.equal(reviews.find((review) => review.kind === 'run')?.acceptance, 'failed')
+})
+
+test('review submit без acceptance сохраняет null', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+
+  submitVerdict(db, { cardId: card.id, reviewer: 'reviewer-1', verdict: 'done' })
+
+  const row = db
+    .prepare("select acceptance from reviews where card_id = ? and kind = 'run'")
+    .get(card.id) as { acceptance: string | null }
+  assert.equal(row.acceptance, null)
+})
+
+test('waiveReview: только владелец, причина, идемпотентность', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'done' })
+
+  assert.throws(
+    () => waiveReview(db, { cardId: card.id, actor: 'developer', reason: 'x' }),
+    /владельц|owner/,
+  )
+  assert.throws(
+    () => waiveReview(db, { cardId: card.id, actor: 'owner', reason: '  ' }),
+    /причина/,
+  )
+
+  waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'ревью REVIEW-7' })
+  let events = listEvents(db, card.id).filter((event) => event.type === 'card.review_waived')
+  assert.equal(events.length, 1)
+  assert.match(events[0].note ?? '', /REVIEW-7/)
+
+  waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'повтор' })
+  events = listEvents(db, card.id).filter((event) => event.type === 'card.review_waived')
+  assert.equal(events.length, 1)
 })

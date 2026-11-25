@@ -34,6 +34,34 @@ function json(dir: string, args: string[]) {
   return JSON.parse(result.out)
 }
 
+test('card add: --no-review требует owner и причину, пишет waiver', (t) => {
+  const dir = project(t)
+
+  const noReason = run(dir, ['card', 'add', '--group', 'UI', '--title', 'x', '--skill', 'dev', '--no-review', '--as', 'owner'])
+  assert.equal(noReason.code, 3)
+
+  const notOwner = run(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'x', '--skill', 'dev',
+    '--no-review', '--reason', 'маленькая правка', '--as', 'developer',
+  ])
+  assert.equal(notOwner.code, 3)
+
+  const card = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'x', '--skill', 'dev',
+    '--no-review', '--reason', 'маленькая правка', '--as', 'owner',
+  ])
+  assert.equal(card.reviewRequired, false)
+
+  const db = openDb(join(dir, '.board', 'board.db'))
+  try {
+    const waived = listEvents(db, card.id).filter((event) => event.type === 'card.review_waived')
+    assert.equal(waived.length, 1)
+    assert.match(waived[0].note ?? '', /маленькая правка/)
+  } finally {
+    db.close()
+  }
+})
+
 test('card add заводит запрос и печатает его в json', (t) => {
   const dir = project(t)
 
@@ -50,7 +78,7 @@ test('card add заводит запрос и печатает его в json', 
   assert.equal(card.status, 'new')
   assert.equal(card.skill, 'dev')
   assert.equal(card.needsMerge, true)
-  assert.equal(card.reviewRequired, false)
+  assert.equal(card.reviewRequired, true)
 })
 
 test('card add принимает spec и повторяемый acceptance', (t) => {
@@ -152,7 +180,7 @@ test('card show печатает id, статус, навык, оценки, sco
   assert.match(shown.out, /важность: 2/)
   assert.match(shown.out, /срочность: 3/)
   assert.match(shown.out, /мерж: да/)
-  assert.match(shown.out, /ревью: нет/)
+  assert.match(shown.out, /ревью: да/)
   assert.match(shown.out, /scope: src\/\*\*/)
   assert.match(shown.out, /Подробное описание задачи/)
 

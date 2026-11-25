@@ -23,7 +23,7 @@ const HELP = `board — доска карточек для людей и аге�
                           --no-review-after-run
 
   executor add|list|edit|remove
-  group list                области проекта (префиксы карточек)
+  group list|add             области проекта (префиксы карточек)
   card add|list|show|edit  карточки
   card shape|submit|spec-review|approve|amend|reject|verdict
   card done|cancel|reopen|defer|resume
@@ -38,9 +38,9 @@ const HELP = `board — доска карточек для людей и аге�
   decision add|list|supersede|obsolete
   term add|list|show
   command add|list
-  review list|finding|submit
+  review list|finding|submit|waive
   release / now / doctor / backup / export / sync
-  backlog [--out <path>] [--html]  md- или html-бэклог из доски
+  backlog [--out <path>] [--html] [--open]  md- или html-бэклог; --open — в браузере
 
   --json                  машинный вывод
   --version               версия инструмента
@@ -59,11 +59,11 @@ const HELP = `board — доска карточек для людей и аге�
 
 const COMMAND_HELP: Record<string, string> = {
   'card add':
-    'board card add [--group <P>] --title "<тип: заголовок>" --skill <s> [--new-group] [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review] [--no-needs-merge] [--as <id>]',
+    'board card add [--group <P>] --title "<тип: заголовок>" --skill <s> [--new-group] [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review|--no-review --reason "..."] [--no-needs-merge] [--as <id>]',
   'card edit':
     'board card edit <ID> [--title ...] [--spec ...] [--acceptance ...] [--scope <path>] [--importance 0..3] [--urgency 0..3] [--review|--no-review] [--needs-merge|--no-needs-merge] [--tag ...|--clear-tags] [--as <id>]',
   'card shape': 'board card shape <ID> --as <исполнитель> [--from card.json]',
-  'card submit': 'board card submit <ID> --as <исполнитель>',
+  'card submit': 'board card submit <ID> --as <исполнитель> [--no-decisions]',
   'card spec-review':
     'board card spec-review <ID> --as <ревьюер> --mode self|subagent --verdict done|reopen --note "..."',
   'card approve': 'board card approve <ID>',
@@ -75,15 +75,18 @@ const COMMAND_HELP: Record<string, string> = {
   'run start': 'board run start --as <исполнитель> (--cards ID,ID | --suggest 1|2|3)',
   'run note': 'board run note <RUN> --text "..." --as <ревьюер>',
   'queue move': 'board queue move <ID> --before <ID> | --top | --bottom',
+  'group add': 'board group add <PREFIX> [--name <название>] [--as <id>]',
   'review submit':
-    'board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <id> --note "..."',
+    'board review submit <ID> --plan done|failed [--acceptance done|failed] --verdict done|reopen --reviewer <id> --note "..."',
+  'review waive': 'board review waive <ID> --reason "..." --as owner',
   setup:
-    'board setup [--show] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
+    'board setup [--show] [--defaults] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
   export: 'board export [--format json|md] [--out path] [--md]',
   'sync push': 'board sync push — копия базы в приватный git',
   'sync pull': 'board sync pull — обновить базу из приватного git (с бэкапом .pre-pull)',
-  backlog: 'board backlog [--out <path>] [--html] — md или HTML-снимок для браузера',
+  backlog:
+    'board backlog [--out <path>] [--html] [--open] — md или HTML-снимок; --open открывает в браузере (BOARD_OPEN=echo — только URL)',
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -163,8 +166,48 @@ if (!globalFlag && !allowGlobal && !process.env.BOARD_DELEGATED && !local) {
   }
 }
 
+/** Команды, после которых бэклог заведомо не меняется. */
+const NO_BACKLOG_FLUSH = new Set([
+  'init',
+  'backlog',
+  'doctor',
+  'now',
+  'help',
+  'version',
+  'export',
+  'backup',
+])
+
+/**
+ * После успешной команды проверяет отметку бэклога и пересобирает файлы,
+ * если доска изменилась. Ошибка пересборки — предупреждение, не код выхода.
+ */
+async function flushBacklogAfterCommand(argv: string[]): Promise<void> {
+  const command = argv[0]
+  if (!command || NO_BACKLOG_FLUSH.has(command)) return
+  try {
+    const { findProject } = await import('../src/core/project.ts')
+    const project = findProject(process.cwd())
+    if (!project) return
+    const { openDb } = await import('../src/core/db.ts')
+    const { flushBacklog } = await import('../src/core/backlog.ts')
+    const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
+    try {
+      const result = flushBacklog(db, project.root)
+      if (result.error) {
+        process.stderr.write('бэклог не пересобран: ' + result.error + '\n')
+      }
+    } finally {
+      db.close()
+    }
+  } catch (error) {
+    process.stderr.write('бэклог не пересобран: ' + (error as Error).message + '\n')
+  }
+}
+
 try {
   const code = await main(argv)
+  if (code === 0) await flushBacklogAfterCommand(argv)
   process.exitCode = code
 } catch (error) {
   if (error instanceof UserError) {

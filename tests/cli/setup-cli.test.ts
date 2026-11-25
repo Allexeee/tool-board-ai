@@ -227,3 +227,56 @@ test('init --refresh обновляет старый плагин и навык'
   assert.match(readFileSync(plugin, 'utf8'), /board_setup/)
   assert.match(readFileSync(skill, 'utf8'), /# board-spec/)
 })
+
+test('init печатает мастер и proposal без TTY', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'board-master-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+
+  const human = run(dir, ['init', '--no-git'])
+  assert.equal(human.code, 0, human.err)
+  assert.match(human.out, /Мастер первичной настройки/)
+  assert.match(human.out, /board setup --defaults/)
+
+  const data = json(dir, ['init', '--no-git'])
+  const proposal = data.proposal as {
+    defaults: { backlog: { refreshSeconds: number } }
+    missing: { executors: string[]; groups: boolean }
+  }
+  assert.equal(proposal.defaults.backlog.refreshSeconds, 5)
+  assert.deepEqual(proposal.missing.executors, ['developer'])
+  assert.equal(proposal.missing.groups, true)
+})
+
+test('setup --defaults: умолчания, developer один раз, бэклог собран', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const first = json(fixture.root, ['setup', '--defaults'], { BOARD_SESSION_MODEL: '' })
+  const settings = first.settings as {
+    backlog: { auto: boolean; refreshSeconds: number }
+    specReview: { mode: string }
+    runReview: { mode: string }
+  }
+  assert.equal(settings.backlog.auto, true)
+  assert.equal(settings.backlog.refreshSeconds, 5)
+  assert.equal(settings.specReview.mode, 'auto')
+  assert.equal(settings.runReview.mode, 'auto')
+  assert.equal(first.executorCreated, true)
+  assert.ok(existsSync(join(fixture.root, 'docs/board/BACKLOG.md')))
+  assert.ok(existsSync(join(fixture.root, 'docs/board/BACKLOG.html')))
+
+  const second = json(fixture.root, ['setup', '--defaults'], { BOARD_SESSION_MODEL: '' })
+  assert.equal(second.executorCreated, false)
+})
+
+test('group add: область без карточки, повтор — ошибка', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const added = run(fixture.root, ['group', 'add', 'SITE', '--name', 'Сайт', '--as', 'owner'])
+  assert.equal(added.code, 0, added.err)
+  const list = run(fixture.root, ['group', 'list'])
+  assert.match(list.out, /SITE\s+0\s+Сайт/)
+
+  assert.equal(run(fixture.root, ['group', 'add', 'SITE']).code, 3)
+})

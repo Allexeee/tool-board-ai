@@ -9,14 +9,15 @@ function columns(db: DatabaseSync, table: string): string[] {
 
 test('новый файл получает схему v3 с полями spec/review и tags', () => {
   const db = new DatabaseSync(':memory:')
-  assert.equal(migrate(db), 5)
-  assert.equal(SCHEMA_VERSION, 5)
+  assert.equal(migrate(db), 6)
+  assert.equal(SCHEMA_VERSION, 6)
   assert.ok(columns(db, 'cards').includes('acceptance'))
   assert.ok(columns(db, 'cards').includes('spec_rev'))
   assert.ok(columns(db, 'cards').includes('review_reopens'))
   assert.ok(columns(db, 'cards').includes('tags'))
   assert.ok(columns(db, 'reviews').includes('kind'))
   assert.ok(columns(db, 'reviews').includes('plan_compliance'))
+  assert.ok(columns(db, 'reviews').includes('acceptance'))
   assert.ok(columns(db, 'runs').includes('review_mode'))
 })
 
@@ -33,11 +34,28 @@ test('база v1 мигрирует без потери карточки', () =
     insert into cards values ('UI-1', 'spec', 'ready');
     insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'review', 'done', '2026-01-01');`)
 
-  assert.equal(migrate(db), 5)
-  assert.equal(schemaVersionOf(db), 5)
+  assert.equal(migrate(db), 6)
+  assert.equal(schemaVersionOf(db), 6)
   assert.equal((db.prepare('select count(*) as n from cards').get() as { n: number }).n, 1)
   assert.equal(columns(db, 'cards').includes('spec_rev'), true)
   assert.equal(columns(db, 'cards').includes('tags'), true)
+})
+
+test('база v5 мигрирует acceptance в reviews', () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(`create table meta (key text primary key, value text not null);
+    create table reviews (id integer primary key autoincrement, card_id text not null,
+      reviewer text not null, verdict text not null, note text, at text not null,
+      kind text not null default 'run', mode text, spec_rev integer, plan_compliance text);
+    insert into meta values ('schemaVersion', '5');
+    insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'r', 'done', '2026-01-01');`)
+
+  assert.equal(migrate(db), 6)
+  assert.ok(columns(db, 'reviews').includes('acceptance'))
+  const row = db.prepare('select acceptance from reviews').get() as {
+    acceptance: string | null
+  }
+  assert.equal(row.acceptance, null)
 })
 
 test('база v2 мигрирует tags и помечает находки review', () => {
@@ -48,7 +66,7 @@ test('база v2 мигрирует tags и помечает находки rev
     insert into cards values ('UI-1', 'UI-9');
     insert into cards values ('UI-2', null);`)
 
-  assert.equal(migrate(db), 5)
+  assert.equal(migrate(db), 6)
   const rows = db.prepare('select id, tags from cards order by id').all() as Array<{
     id: string
     tags: string

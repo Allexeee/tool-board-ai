@@ -1,11 +1,12 @@
 ﻿import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import {
   effectiveReviewerModel,
   modelContext,
   type ModelContext,
 } from './review-policy.ts'
 import type { BoardSettings } from './settings.ts'
+import { writeSkillPermissions } from './superpowers.ts'
 
 /**
  * Файлы OpenCode, которые `board init` кладёт в проект: тонкий плагин, четыре
@@ -27,16 +28,19 @@ export const AGENTS_BLOCK = [
   '- Разговор ведёт brainstorming; spec и критерии приёмки пишутся в карточку, не в `docs/superpowers`.',
   '- Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.',
   '- Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.',
+  '- Решений владельца нет — `card submit --no-decisions`: карточка сразу в очередь, approve не нужен. Решения — окно выбора (2–4 варианта) и обычный `card approve`.',
   '- Префикс — область проекта (Сайт, Контент, CORE), не ярлык задачи: сначала `board group list`, новый — только с `--new-group`; в пустом проекте — CARD.',
   '- После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.',
   '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
+  '- «Открой/покажи бэклог» — `board backlog --open`; если доступен инструмент браузера, открой `docs/board/BACKLOG.html` в панели Review (`browser.preview`). В чат HTML не вставляй.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
+  '- `writing-plans`, `executing-plans` и другие конкурирующие навыки superpowers в проекте выключены правами OpenCode: план — steps карточки, отдельного plan-файла нет.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
   '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`. Первый проход полный; повторный — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь; other — сборник в `deferred`.',
   '- Ревьюер не гоняет тесты и не пишет в доску; его shell ограничен read-only командами, каждая команда — отдельный вызов.',
   '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
-  '- После `board init`, если в ответе `setupRequired: true`, спроси владельца и запусти `/setup`.',
+  '- После `board init` сразу покажи мастер окном выбора: «Оставить умолчания / Поменять / Не сейчас». Умолчания — `board setup --defaults`; недостающих исполнителей и области — `board executor add` / `board group add`.',
   '- Коммит делаешь сам в ветке карточки; мерж в `dev` делает `finish`. `main` меняется только `release` владельцем.',
   AGENTS_END,
 ].join('\n')
@@ -54,7 +58,13 @@ description: Доска: разобрать запрос в spec и утверд
 
 Разговор ведёт brainstorming, а не этот навык. В board-проекте brainstorming не пишет \`docs/superpowers/**\`: spec и критерии приёмки идут в карточку (\`card shape\`), решения — в body карточки или \`board decision\`, утверждение дизайна — \`card approve\`. Второго гейта (отдельного design doc) нет.
 
-Доска реагирует только на глагол работы: «разбери / добавь / оформи» — карточка и навык board-spec, «работай» — board-work, «Ран» — board-run. Без глагола работы карточки не создаются: на «порассуждать» доска молчит.
+Доска реагирует только на глагол работы:
+
+- «разбери / добавь / оформи / нарежь» — карточка и spec; работа не начинается;
+- «сделай / работай» — то же и сразу выполнение;
+- «Ран» — забег (board-run).
+
+Без глагола работы карточки не создаются: на «порассуждать» доска молчит.
 
 ## Тип карточки
 
@@ -65,17 +75,26 @@ description: Доска: разобрать запрос в spec и утверд
 Префикс — это **область проекта** (Сайт, Контент, Мобильное, CORE), а не ярлык задачи; набор у каждого проекта свой.
 
 1. Сначала \`board group list\` — посмотри, какие области уже есть, и выбери подходящую.
-2. Новый префикс — только \`card add --group <P> --new-group\`, и только если ни одна существующая область не подходит; решение попадёт в журнал.
-3. Если областей ещё нет, \`card add\` без \`--group\` берёт \`CARD\`.
+2. Если областей ещё нет — предложи владельцу 2–4 префикса под проект (окно выбора); \`CARD\` — только если он отказался выбирать.
+3. Новый префикс — только \`card add --group <P> --new-group\`, и только если ни одна существующая область не подходит; решение попадёт в журнал.
 
 ## Разбор
 
 1. Запрос → разбор: \`board card shape <ID> --as <исполнитель> [--from card.json]\`.
-2. Вопросы по разбору решай в чате. \`ask\` — асинхронный вопрос, если владельца нет; \`block\` — только если без ответа нельзя продолжать. Угадывать нельзя.
+2. Решение владельца спрашивай **окном выбора** с 2–4 вариантами до записи spec; свой ответ владельца можно уточнить один раз. \`ask\` — асинхронный вопрос, если владельца нет; \`block\` — только если без ответа нельзя продолжать. Угадывать нельзя.
 3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. План (\`steps\`) при shape не пишется.
 4. Spec review: \`/spec-review\`. Режим — \`board card show <ID> --json\` → \`specReview.mode\`: \`none\` — не нужна, \`self\` — сам, \`subagent\` — \`board-reviewer\`. Результат: \`board card spec-review <ID> --mode self|subagent --verdict done|reopen --note "..."\`.
-5. \`board card submit <ID> --as <исполнитель>\`; владелец делает \`card approve\` или \`card reject\`.
-6. После approve spec/acceptance/scope не меняются. Нужно изменение — \`board card amend <ID> --reason "..."\`, затем review и approve снова.
+5. Решений владельца нет — \`board card submit <ID> --as <исполнитель> --no-decisions\`: карточка сразу в очередь, отдельное утверждение не нужно.
+6. Решения нужны — \`board card submit <ID> --as <исполнитель>\` и \`card approve\` владельца после его ответа.
+7. После approve spec/acceptance/scope не меняются. Нужно изменение — \`board card amend <ID> --reason "..."\`, затем review и approve снова.
+
+## Отчёт
+
+- «Приступаю к написанию спецификации для карточки {ID}.»
+- «Написал спецификацию. Отдельных решений владельца не требуется.» — либо «Сделал n допущений:» и таблица.
+- «Ревьюер закрыл n дыр, новых решений нет. Спецификация полная, утверждение владельца не требуется.»
+- Нужно решение — окно выбора; после ответа можно уточнить один раз.
+- «Сделай» — после spec сразу «Приступаю к выполнению задачи: шаги 1..N.»
 
 ## Просто или не просто
 
@@ -123,6 +142,7 @@ description: Доска: исполнить карточку — take, план 
 
 - разбор закончен — «Разобрал {ID}: …» и «Вопросов нет» либо список вопросов;
 - второй \`take\` — «Приступаю к {ID}: шаги 1..N»;
+- «сделай» — после spec сразу «Приступаю к выполнению задачи: шаги 1..N»;
 - \`finish\` — две строки: «Сделал {ID}: что сделано.» и на следующей строке «Перехожу к {ID}: что сделаю.»; для последней карточки забега — только «Сделал»;
 - первая карточка забега — без «Сделал» до её завершения: её объявляют «Беру в работу» и «Приступаю»;
 - зелёные тесты, doctor, typecheck и номера коммитов в чат не пиши: это шум. Сообщай, только если что-то упало, красное или мешает работе;
@@ -203,6 +223,8 @@ description: Доска: посмотреть состояние — now 0/1/2/3
 \`board now\` (инструмент \`board_now\`): \`now 0\` — владельцу (по умолчанию), \`now 1\` — текущий агент, \`now 2\` — другие агенты, \`now 3\` — запросы и очередь. Варианты забега задаются тегами карточки: \`new\`, \`improve\`, \`review\`.
 
 Показывает статусы, держателей и вероятные забеги; ничего не меняет.
+
+Показать бэклог: \`board backlog --open\` (системный браузер); при наличии \`browser.preview\` — открыть \`docs/board/BACKLOG.html\` в панели Review.
 `
 
 export const PLUGIN_SOURCE = `// Инструменты: board_now, board_setup, board_card, board_run, board_take,
@@ -430,6 +452,7 @@ function cardArgs(input) {
   } else if (a === 'shape' || a === 'submit') {
     if (input.id) args.push(input.id)
     flag(args, 'from', input.from)
+    if (a === 'submit' && input.no_decisions) args.push('--no-decisions')
     flag(args, 'as', input.as)
   } else if (a === 'spec-review') {
     if (input.id) args.push(input.id)
@@ -454,6 +477,7 @@ function cardArgs(input) {
   } else if (a === 'verdict') {
     if (input.id) args.push(input.id)
     flag(args, 'plan', input.plan)
+    flag(args, 'acceptance', input.acceptance_result)
     if (input.done) args.push('--done')
     if (input.reopen) args.push('--reopen')
     flag(args, 'mode', input.mode)
@@ -523,6 +547,7 @@ function reviewArgs(input) {
   if (a === 'submit') {
     if (input.id) args.push(input.id)
     flag(args, 'plan', input.plan)
+    flag(args, 'acceptance', input.acceptance)
     flag(args, 'verdict', input.verdict)
     flag(args, 'mode', input.mode)
     flag(args, 'note', input.note)
@@ -533,6 +558,10 @@ function reviewArgs(input) {
     flag(args, 'severity', input.severity)
     flag(args, 'text', input.text)
     flag(args, 'reviewer', input.reviewer)
+  } else if (a === 'waive') {
+    if (input.id) args.push(input.id)
+    flag(args, 'reason', input.reason)
+    flag(args, 'as', input.as)
   }
   return args
 }
@@ -606,14 +635,15 @@ export default Plugin.define({
 
       editor.add({
         name: 'setup',
-        description: 'Настройки доски: show|reviewer-model|spec-review|max-spec|large-spec|run-review',
+        description: 'Настройки доски: show|defaults|reviewer-model|spec-review|max-spec|large-spec|run-review',
         input: schema({ action: { type: 'string' }, value: { type: 'string' } }),
         execute: (input, context) => {
           const action = input.action ?? 'show'
           if (action === 'show') return call(ctx, ['setup', '--show'], context)
+          if (action === 'defaults') return call(ctx, ['setup', '--defaults'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'backlog-path', 'run-review'].includes(action)) {
+          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'backlog-path', 'backlog-refresh', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
           if (action === 'review-after-run' || action === 'no-review-after-run' || action === 'backlog-auto' || action === 'no-backlog-auto') {
@@ -641,6 +671,7 @@ export default Plugin.define({
           body: { type: 'string' },
           spec: { type: 'string' },
           acceptance: { type: 'array', items: { type: 'string' } },
+          acceptance_result: { type: 'string', description: 'verdict: done|failed' },
           skill: { type: 'string' },
           summary: { type: 'string' },
           reason: { type: 'string' },
@@ -651,6 +682,7 @@ export default Plugin.define({
           urgency: { type: 'number' },
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
+          no_decisions: { type: 'boolean', description: 'submit: решений владельца нет' },
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
           clear_tags: { type: 'boolean' },
@@ -855,7 +887,7 @@ export default Plugin.define({
 
       editor.add({
         name: 'review',
-        description: 'Ревью: list|submit|finding',
+        description: 'Ревью: list|submit|finding|waive',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
@@ -866,6 +898,9 @@ export default Plugin.define({
           text: { type: 'string' },
           findings: { type: 'string' },
           plan: { type: 'string' },
+          acceptance: { type: 'string' },
+          reason: { type: 'string' },
+          as: { type: 'string' },
           mode: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, reviewArgs(input), context),
@@ -923,9 +958,9 @@ subagent: false
 3. Итоги прохода — один блок: покрытые карточки, вердикты, находки с severity
    и рангом important (не больше 7 находок).
    - для забега: \`board run note <RUN> --text "..." --as <ревьюер>\`;
-   - для одиночной карточки: \`board review submit <ID> --plan done --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\`.
-4. Вердикт по каждой: \`board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"\`.
-   Critical или регрессия этого diff — \`reopen\`; \`plan failed\` требует \`reopen\`.
+   - для одиночной карточки: \`board review submit <ID> --plan done --acceptance done|failed --verdict done --reviewer <ревьюер> --note "ИТОГИ: ..."\`.
+4. Вердикт по каждой: \`board review submit <ID> --plan done|failed --acceptance done|failed --verdict done|reopen --reviewer <ревьюер> --note "итоги: <RUN или ID>"\`.
+   Critical или регрессия этого diff — \`reopen\`; \`plan failed\` или \`acceptance failed\` требуют \`reopen\` (или решения владельца).
 5. В карточке — ссылка: \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`.
 6. Бюджет прохода: critical и регрессии — всегда; important — finding-карточка
    в очередь; other — сборник в deferred. Повторный проход — только дельта:
@@ -987,13 +1022,15 @@ export function reviewerAgentSource(model: string): string {
     'board run list*',
     'board run note*',
     'board review submit*',
+    'board card spec-review*',
     'board card ref add*',
   ]
   const permissions = [
     '  - action: edit\n    resource: "*"\n    effect: deny',
     '  - action: read\n    resource: "*"\n    effect: allow',
-    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
+    // Last matching rule wins: общий deny идёт первым, allowlist перекрывает его.
     '  - action: shell\n    resource: "*"\n    effect: deny',
+    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
   ].join('\n')
 
   return `---
@@ -1012,14 +1049,69 @@ ${permissions}
 
 Проверяй acceptance, plan и код. Итоги прохода пиши одним блоком:
 - для забега — \`board run note <RUN> --text "..." --as <твой id>\`;
-- для одиночной карточки — \`board review submit <ID> --plan done --verdict done --reviewer <твой id> --note "ИТОГИ: ..."\`.
+- для одиночной карточки — \`board review submit <ID> --plan done --acceptance done|failed --verdict done --reviewer <твой id> --note "ИТОГИ: ..."\`.
 В блоке: покрытые карточки, вердикты, находки с severity и рангом important.
 Больше 7 находок на проход не перечисляй — выбирай важнейшие.
 
-Вердикт по карточке: \`board review submit <ID> --plan done|failed --verdict done|reopen --reviewer <твой id> --note "итоги: <RUN или ID>"\`. Critical или регрессия из этого diff — \`reopen\`.
+Вердикт по карточке: \`board review submit <ID> --plan done|failed --acceptance done|failed --verdict done|reopen --reviewer <твой id> --note "итоги: <RUN или ID>"\`. Critical или регрессия из этого diff — \`reopen\`; acceptance failed при verdict done отклоняется.
 В карточке оставь ссылку: \`board card ref add <ID> --kind review --value <RUN> --title "итоги прохода"\`.
 `
 }
+
+export function auditorAgentSource(model: string): string {
+  const shellAllow = [
+    'git diff*',
+    'git log*',
+    'git show*',
+    'git rev-parse*',
+    'git merge-base*',
+    'board card show*',
+    'board card list*',
+    'board run list*',
+    'board run show*',
+    'board review list*',
+    'board now*',
+  ]
+  const permissions = [
+    '  - action: edit\n    resource: "*"\n    effect: deny',
+    '  - action: read\n    resource: "*"\n    effect: allow',
+    '  - action: shell\n    resource: "*"\n    effect: deny',
+    ...shellAllow.map((resource) => `  - action: shell\n    resource: "${resource}"\n    effect: allow`),
+  ].join('\n')
+
+  return `---
+description: Read-only auditor before release
+mode: subagent
+model: ${model}
+permissions:
+${permissions}
+---
+
+Ты — аудитор перед релизом. Только чтение: файлы не правишь, карточки не создаёшь,
+в доску не пишешь. Твой shell — read-only команды, каждая отдельным вызовом.
+
+Проверяй по чек-листу:
+1. Полнота spec: problem, результат, non-goals, критерии приёмки.
+2. Независимость ревью: не self против держателя, есть вердикты.
+3. Закрытие карточек: done совпадает с acceptance, нет done без вердикта.
+4. Итоги забегов: run note и находки, critical закрыты.
+5. Готовность к релизу: critical нет, waiver оформлены, тесты и типы.
+
+Отчёт верни в чат: файл при необходимости запишет оркестратор. Находки
+не оформляй карточками — верни их владельцу, решение принимает он.
+`
+}
+
+export const AUDIT_COMMAND_SOURCE = `---
+description: Аудит перед релизом
+---
+
+Запусти субагента \`auditor\` и передай ему текущий пакет релиза.
+
+Проверь: полноту spec, независимость ревью, закрытие карточек, итоги забегов
+и готовность к релизу. Отчёт — в чат; файл при необходимости пишет оркестратор.
+Находки — списком владельцу, без правок кода и карточек.
+`
 
 export interface OpenCodeWriteOptions {
   /** Перезаписать сгенерированные файлы, даже если они уже есть. */
@@ -1033,6 +1125,7 @@ export interface OpenCodeWriteOptions {
 export interface OpenCodeWriteResult {
   created: string[]
   updated: string[]
+  warnings?: string[]
 }
 
 /** Пишет или удаляет board-reviewer.md по reviewer.model. */
@@ -1062,6 +1155,33 @@ export function writeReviewerAgent(
   return exists ? { created: [], updated: [relative] } : { created: [relative], updated: [] }
 }
 
+/** Пишет или удаляет auditor.md по reviewer.model. */
+export function writeAuditorAgent(
+  root: string,
+  settings: BoardSettings,
+  refresh = false,
+  context: ModelContext = modelContext(process.env),
+): OpenCodeWriteResult {
+  const relative = '.opencode/agents/auditor.md'
+  const path = join(root, relative)
+  const model = effectiveReviewerModel(settings, context)
+
+  if (!model) {
+    if (!existsSync(path)) return { created: [], updated: [] }
+    rmSync(path, { force: true })
+    return { created: [], updated: [relative] }
+  }
+
+  const content = auditorAgentSource(model)
+  const exists = existsSync(path)
+  if (exists && !refresh) return { created: [], updated: [] }
+  if (exists && readFileSync(path, 'utf8') === content) return { created: [], updated: [] }
+
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, content, 'utf8')
+  return exists ? { created: [], updated: [relative] } : { created: [relative], updated: [] }
+}
+
 /**
  * Пишет в `root` скилл, плагин, команды ревью/настроек и (при settings)
  * board-reviewer.md, и ставит блок `board:begin`/`board:end` в `AGENTS.md`.
@@ -1069,23 +1189,25 @@ export function writeReviewerAgent(
  * шаблонами (нужно после апгрейда CLI). Блок между маркерами заменяется на
  * канонический всегда.
  */
+/** Генерируемые файлы OpenCode: относительный путь → шаблон. */
+export const OPENCODE_FILES: Array<[string, string]> = [
+  ['.opencode/skills/board-spec/SKILL.md', SKILL_SPEC_SOURCE],
+  ['.opencode/skills/board-work/SKILL.md', SKILL_WORK_SOURCE],
+  ['.opencode/skills/board-run/SKILL.md', SKILL_RUN_SOURCE],
+  ['.opencode/skills/board-now/SKILL.md', SKILL_NOW_SOURCE],
+  ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
+  ['.opencode/command/review.md', COMMAND_SOURCE],
+  ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
+  ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
+  ['.opencode/command/audit.md', AUDIT_COMMAND_SOURCE],
+]
+
 export function writeOpenCodeFiles(
   root: string,
   options: OpenCodeWriteOptions = {},
 ): OpenCodeWriteResult {
   const created: string[] = []
   const updated: string[] = []
-
-  const files: Array<[string, string]> = [
-    ['.opencode/skills/board-spec/SKILL.md', SKILL_SPEC_SOURCE],
-    ['.opencode/skills/board-work/SKILL.md', SKILL_WORK_SOURCE],
-    ['.opencode/skills/board-run/SKILL.md', SKILL_RUN_SOURCE],
-    ['.opencode/skills/board-now/SKILL.md', SKILL_NOW_SOURCE],
-    ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
-    ['.opencode/command/review.md', COMMAND_SOURCE],
-    ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
-    ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
-  ]
 
   // Старый единый навык: удаляем только при refresh, иначе init не должен
   // трогать уже установленные файлы.
@@ -1098,7 +1220,7 @@ export function writeOpenCodeFiles(
       // в каталоге остались чужие файлы — не трогаем
     }
   }
-  for (const [relative, content] of files) {
+  for (const [relative, content] of OPENCODE_FILES) {
     const path = join(root, relative)
     const exists = existsSync(path)
     if (exists && !options.refresh) continue
@@ -1118,6 +1240,15 @@ export function writeOpenCodeFiles(
     )
     created.push(...agent.created)
     updated.push(...agent.updated)
+
+    const auditor = writeAuditorAgent(
+      root,
+      options.settings,
+      options.refresh === true,
+      options.context ?? modelContext(process.env),
+    )
+    created.push(...auditor.created)
+    updated.push(...auditor.updated)
   }
 
   const agentsPath = join(root, 'AGENTS.md')
@@ -1140,5 +1271,15 @@ export function writeOpenCodeFiles(
     created.push('AGENTS.md (блок board)')
   }
 
-  return { created, updated }
+  const permissions = writeSkillPermissions(root)
+  const warnings: string[] = []
+  if (permissions.changed) {
+    const display = permissions.path
+      ? relative(root, permissions.path)
+      : join('.opencode', 'opencode.json')
+    ;(permissions.created ? created : updated).push(`${display} (права навыков)`)
+  }
+  if (permissions.warning) warnings.push(permissions.warning)
+
+  return { created, updated, warnings }
 }

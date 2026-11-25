@@ -4,7 +4,7 @@ import { createCard, getCard, listCards } from './cards.ts'
 import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { addDep, refreshReadiness } from './deps.ts'
-import { appendEvent } from './events.ts'
+import { appendEvent, listEvents } from './events.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { listSteps } from './steps.ts'
 import type { Card, Severity } from './types.ts'
@@ -26,6 +26,55 @@ export interface AddFindingInput {
   scope?: string[]
 }
 
+/** Есть ли у карточки вердикт run review done. */
+export function hasReviewVerdict(db: DatabaseSync, cardId: string): boolean {
+  return (
+    db
+      .prepare(
+        "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' limit 1",
+      )
+      .get(cardId) !== undefined
+  )
+}
+
+/** Владелец явно отказался от ревью: есть событие card.review_waived. */
+export function hasReviewWaiver(db: DatabaseSync, cardId: string): boolean {
+  return (
+    db
+      .prepare(
+        "select 1 as found from events where subject = ? and type = 'card.review_waived' limit 1",
+      )
+      .get(cardId) !== undefined
+  )
+}
+
+/** Явный отказ владельца от ревью старой карточки: событие с причиной. */
+export function waiveReview(
+  db: DatabaseSync,
+  input: { cardId: string; actor: string; reason: string },
+): Card {
+  return tx(db, () => {
+    const card = requireCard(db, input.cardId)
+    if (input.actor !== OWNER) {
+      throw new UserError(3, 'waiver ревью — решение владельца: --as owner')
+    }
+    const reason = requiredText(input.reason, 'нужна причина waiver')
+    const existing = listEvents(db, card.id).some(
+      (event) => event.type === 'card.review_waived',
+    )
+    if (existing) return card
+
+    appendEvent(db, {
+      type: 'card.review_waived',
+      actor: input.actor,
+      subject: card.id,
+      note: reason,
+      after: { cardId: card.id },
+    })
+    return getCard(db, card.id)!
+  })
+}
+
 export interface SubmitVerdictInput {
   cardId: string
   reviewer: string
@@ -33,6 +82,7 @@ export interface SubmitVerdictInput {
   note?: string
   findings?: FindingInput[]
   planCompliance?: 'done' | 'failed'
+  acceptance?: 'done' | 'failed'
   mode?: 'self' | 'subagent'
 }
 
@@ -146,6 +196,16 @@ export function submitVerdict(
     if (planCompliance === 'failed' && verdict !== 'reopen') {
       throw new UserError(3, 'plan failed требует verdict reopen')
     }
+    const acceptance = input.acceptance
+    if (acceptance !== undefined && acceptance !== 'done' && acceptance !== 'failed') {
+      throw new UserError(3, 'acceptance — done или failed')
+    }
+    if (acceptance === 'failed' && verdict === 'done' && reviewer !== OWNER) {
+      throw new UserError(
+        3,
+        'acceptance не выполнен: verdict reopen или решение владельца (--reviewer owner)',
+      )
+    }
     // Если план есть, ревьюер обязан дать compliance: иначе сравнить нечего.
     if (listSteps(db, card.id).length > 0 && input.planCompliance === undefined) {
       throw new UserError(3, 'у карточки есть шаги плана: укажите --plan done|failed')
@@ -166,8 +226,8 @@ export function submitVerdict(
     )
 
     db.prepare(
-      `insert into reviews (card_id, reviewer, verdict, note, at, kind, mode, spec_rev, plan_compliance)
-       values (?, ?, ?, ?, ?, 'run', ?, ?, ?)`,
+      `insert into reviews (card_id, reviewer, verdict, note, at, kind, mode, spec_rev, plan_compliance, acceptance)
+       values (?, ?, ?, ?, ?, 'run', ?, ?, ?, ?)`,
     ).run(
       card.id,
       reviewer,
@@ -177,6 +237,7 @@ export function submitVerdict(
       input.mode ?? null,
       card.specRev,
       planCompliance,
+      acceptance ?? null,
     )
 
     const at = nowIso()

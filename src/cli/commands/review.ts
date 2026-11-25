@@ -8,6 +8,7 @@ import {
   addFinding,
   listReviewCards,
   submitVerdict,
+  waiveReview,
   type FindingInput,
 } from '../../core/review.ts'
 import { getRun } from '../../core/runs.ts'
@@ -39,6 +40,7 @@ interface ReviewItem {
     at: string
     mode: string | null
     planCompliance: string | null
+    acceptance: string | null
   }>
   findings: Array<{ id: string; title: string; severity: string | null; status: string }>
   refs: Ref[]
@@ -56,7 +58,7 @@ export default async function command(args: ParsedArgs) {
       const steps = listSteps(db, card.id)
       const reviews = db
         .prepare(
-          "select verdict, reviewer, note, at, mode, plan_compliance from reviews where card_id = ? and kind = 'run' order by id desc",
+          "select verdict, reviewer, note, at, mode, plan_compliance, acceptance from reviews where card_id = ? and kind = 'run' order by id desc",
         )
         .all(card.id) as Array<{
         verdict: string
@@ -65,6 +67,7 @@ export default async function command(args: ParsedArgs) {
         at: string
         mode: string | null
         plan_compliance: string | null
+        acceptance: string | null
       }>
       const findings = db
         .prepare(
@@ -97,6 +100,7 @@ export default async function command(args: ParsedArgs) {
           at: row.at,
           mode: row.mode,
           planCompliance: row.plan_compliance,
+          acceptance: row.acceptance,
         })),
         findings,
         refs: listRefs(db, card.id),
@@ -147,6 +151,10 @@ export default async function command(args: ParsedArgs) {
     if (planCompliance !== 'done' && planCompliance !== 'failed') {
       throw new UserError(3, 'нужен --plan done|failed')
     }
+    const acceptance = stringFlag(args, 'acceptance')
+    if (acceptance !== undefined && acceptance !== 'done' && acceptance !== 'failed') {
+      throw new UserError(3, '--acceptance done|failed')
+    }
     const requestedMode = stringFlag(args, 'mode')
     if (requestedMode !== undefined && requestedMode !== 'self' && requestedMode !== 'subagent') {
       throw new UserError(3, '--mode self|subagent')
@@ -167,6 +175,7 @@ export default async function command(args: ParsedArgs) {
       note: stringFlag(args, 'note') ?? '',
       findings,
       planCompliance,
+      acceptance,
       mode,
     })
     ok(
@@ -176,11 +185,28 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const waive = (args: ParsedArgs): number => {
+    const cardId = args.positionals[0]
+    if (!cardId) {
+      throw new UserError(3, 'использование: board review waive UI-1 --reason «...» --as owner')
+    }
+    const reason = stringFlag(args, 'reason')
+    if (!reason) throw new UserError(3, 'нужен --reason «почему без ревью»')
+    const card = waiveReview(db, {
+      cardId,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      reason,
+    })
+    ok(card, `${cardId}: ревью waive — ${reason}`)
+    return 0
+  }
+
   try {
     if (args.sub === 'list') return list(args)
     if (args.sub === 'finding') return finding(args)
     if (args.sub === 'submit') return submit(args)
-    throw new UserError(3, 'использование: board review list|finding|submit')
+    if (args.sub === 'waive') return waive(args)
+    throw new UserError(3, 'использование: board review list|finding|submit|waive')
   } finally {
     db.close()
   }
@@ -234,7 +260,7 @@ function formatReviewList(items: ReviewItem[]): string {
       }
       if (item.reviewReopens > 0) lines.push(`  reopens: ${item.reviewReopens}`)
       for (const review of item.reviews) {
-        lines.push(`  review: ${review.verdict} · plan ${review.planCompliance ?? '—'}`)
+        lines.push(`  review: ${review.verdict} · plan ${review.planCompliance ?? '—'} · acceptance ${review.acceptance ?? '—'}`)
       }
       for (const finding of item.findings) {
         lines.push(`  finding: ${finding.id} · ${finding.severity ?? '—'} · ${finding.status}`)

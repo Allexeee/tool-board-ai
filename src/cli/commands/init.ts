@@ -1,6 +1,9 @@
 ﻿import { writeReviewerAgent } from '../../core/opencode.ts'
+import { openDb } from '../../core/db.ts'
+import { join } from 'node:path'
 import { initProject } from '../../core/project.ts'
 import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
+import { buildSetupProposal, type SetupProposal } from '../../core/setup.ts'
 import { ensureSettings, updateSettings, type BoardSettings } from '../../core/settings.ts'
 import { SUPERPOWERS_ADVICE, superpowersConfigured } from '../../core/superpowers.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
@@ -9,7 +12,7 @@ import { ok, isJsonMode } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const dir = args.positionals[0] ?? process.cwd()
-  const { created, updated, root, boardVersion } = initProject(dir, {
+  const { created, updated, warnings, root, boardVersion } = initProject(dir, {
     refresh: boolFlag(args, 'refresh'),
     boardVersion: stringFlag(args, 'board-version'),
     boardSource: stringFlag(args, 'board-source'),
@@ -44,6 +47,21 @@ export default async function command(args: ParsedArgs) {
   }
   if (lines.length === 0) lines.push('Доска уже настроена, ничего не менялось.')
 
+  const db = openDb(join(root, '.board', 'board.db'), {
+    allowOutdated: true,
+    allowNewer: true,
+  })
+  let proposal: SetupProposal | null = null
+  let proposalWarning: string | null = null
+  try {
+    proposal = buildSetupProposal(db, root, settings)
+  } catch (error) {
+    proposalWarning = `мастер настроек недоступен: база не совместима — ${(error as Error).message}`
+  } finally {
+    db.close()
+  }
+  if (proposal) lines.push('', ...proposalLines(proposal))
+
   const effectiveReviewer = effectiveReviewerModel(settings, modelContext(process.env))
   lines.push(
     '',
@@ -53,9 +71,13 @@ export default async function command(args: ParsedArgs) {
     'Версия board: ' + (boardVersion ?? 'локальная'),
   )
   if (settings.setupAt === null) {
-    lines.push('Мастер настроек: запустите board setup (или /setup в OpenCode)')
+    lines.push('Мастер настроек ещё не применялся: board setup --defaults')
   }
-  const recommendations = superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]
+  const recommendations = [
+    ...warnings,
+    ...(proposalWarning ? [proposalWarning] : []),
+    ...(superpowersConfigured(root) ? [] : [SUPERPOWERS_ADVICE]),
+  ]
   if (recommendations.length > 0) {
     lines.push('', ...recommendations.map((item) => '*   ' + item))
   }
@@ -63,8 +85,42 @@ export default async function command(args: ParsedArgs) {
 
   const setupRequired = settings.setupAt === null
   ok(
-    { root, created, updated, boardVersion, settings, setupRequired, recommendations },
+    {
+      root,
+      created,
+      updated,
+      boardVersion,
+      settings,
+      setupRequired,
+      recommendations,
+      proposal,
+      proposalWarning,
+    },
     lines.join('\n'),
   )
   return 0
+}
+
+function proposalLines(proposal: SetupProposal): string[] {
+  const { defaults, missing, superpowers } = proposal
+  const skills = !superpowers.configured
+    ? 'superpowers не подключён'
+    : superpowers.conflictsDisabled
+      ? 'конкурирующие навыки выключены'
+      : 'конкурирующие навыки не выключены — board init --refresh'
+  return [
+    'Мастер первичной настройки:',
+    `  бэклог: ${defaults.backlog.path} (+ .html), авто ${defaults.backlog.refreshSeconds} с`,
+    `  ревью spec: ${defaults.specReview}, ревью забега: ${defaults.runReview}`,
+    `  модель ревьюера: ${defaults.reviewer ?? 'не задана'}`,
+    `  исполнитель: ${
+      missing.executors.length > 0
+        ? `добавить ${missing.executors.join(', ')} (агент, dev)`
+        : 'developer уже есть'
+    }`,
+    `  области проекта: ${missing.groups ? 'нет — предложи владельцу 2–4 префикса' : 'уже есть'}`,
+    `  ${skills}`,
+    'Оставить умолчания: board setup --defaults',
+    'Поменять: окно выбора по каждому пункту; области — board group add <PREFIX> --name <название>',
+  ]
 }
