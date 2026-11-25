@@ -104,13 +104,17 @@ function hasSuperpowers(plugins: unknown[]): boolean {
 }
 
 /**
- * Подключён ли superpowers: корневой opencode.json/.jsonc, старый
- * `.opencode/opencode.json` или глобальный конфиг. Битый файл — не подключён.
+ * Подключён ли superpowers: смотрим первый по приоритету конфиг с ключом
+ * `plugins` (проектные выше глобального), потому что верхний массив заменяет
+ * нижний. Битый файл — не подключён.
  */
 export function superpowersConfigured(root: string, home: string = homedir()): boolean {
-  return [...projectConfigFiles(root), ...globalConfigFiles(home)].some((file) =>
-    hasSuperpowers(pluginsOf(file)),
-  )
+  const files = [...projectConfigFiles(root), ...globalConfigFiles(home)]
+  const withPlugins = files.find((file) => {
+    const config = readConfig(file)
+    return config !== null && Object.prototype.hasOwnProperty.call(config, 'plugins')
+  })
+  return withPlugins ? hasSuperpowers(pluginsOf(withPlugins)) : false
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
