@@ -1107,23 +1107,24 @@ export function writeReviewerAgent(
  * шаблонами (нужно после апгрейда CLI). Блок между маркерами заменяется на
  * канонический всегда.
  */
+/** Генерируемые файлы OpenCode: относительный путь → шаблон. */
+export const OPENCODE_FILES: Array<[string, string]> = [
+  ['.opencode/skills/board-spec/SKILL.md', SKILL_SPEC_SOURCE],
+  ['.opencode/skills/board-work/SKILL.md', SKILL_WORK_SOURCE],
+  ['.opencode/skills/board-run/SKILL.md', SKILL_RUN_SOURCE],
+  ['.opencode/skills/board-now/SKILL.md', SKILL_NOW_SOURCE],
+  ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
+  ['.opencode/command/review.md', COMMAND_SOURCE],
+  ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
+  ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
+]
+
 export function writeOpenCodeFiles(
   root: string,
   options: OpenCodeWriteOptions = {},
 ): OpenCodeWriteResult {
   const created: string[] = []
   const updated: string[] = []
-
-  const files: Array<[string, string]> = [
-    ['.opencode/skills/board-spec/SKILL.md', SKILL_SPEC_SOURCE],
-    ['.opencode/skills/board-work/SKILL.md', SKILL_WORK_SOURCE],
-    ['.opencode/skills/board-run/SKILL.md', SKILL_RUN_SOURCE],
-    ['.opencode/skills/board-now/SKILL.md', SKILL_NOW_SOURCE],
-    ['.opencode/plugins/board/index.ts', PLUGIN_SOURCE],
-    ['.opencode/command/review.md', COMMAND_SOURCE],
-    ['.opencode/command/spec-review.md', SPEC_REVIEW_COMMAND_SOURCE],
-    ['.opencode/command/setup.md', SETUP_COMMAND_SOURCE],
-  ]
 
   // Старый единый навык: удаляем только при refresh, иначе init не должен
   // трогать уже установленные файлы.
@@ -1136,7 +1137,7 @@ export function writeOpenCodeFiles(
       // в каталоге остались чужие файлы — не трогаем
     }
   }
-  for (const [relative, content] of files) {
+  for (const [relative, content] of OPENCODE_FILES) {
     const path = join(root, relative)
     const exists = existsSync(path)
     if (exists && !options.refresh) continue
