@@ -41,6 +41,23 @@ test('база v1 мигрирует без потери карточки', () =
   assert.equal(columns(db, 'cards').includes('tags'), true)
 })
 
+test('база v5 мигрирует acceptance в reviews', () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(`create table meta (key text primary key, value text not null);
+    create table reviews (id integer primary key autoincrement, card_id text not null,
+      reviewer text not null, verdict text not null, note text, at text not null,
+      kind text not null default 'run', mode text, spec_rev integer, plan_compliance text);
+    insert into meta values ('schemaVersion', '5');
+    insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'r', 'done', '2026-01-01');`)
+
+  assert.equal(migrate(db), 6)
+  assert.ok(columns(db, 'reviews').includes('acceptance'))
+  const row = db.prepare('select acceptance from reviews').get() as {
+    acceptance: string | null
+  }
+  assert.equal(row.acceptance, null)
+})
+
 test('база v2 мигрирует tags и помечает находки review', () => {
   const db = new DatabaseSync(':memory:')
   db.exec(`create table meta (key text primary key, value text not null);

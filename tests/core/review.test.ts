@@ -441,6 +441,18 @@ test('submitVerdict сохраняет acceptance в reviews', (t) => {
   assert.equal(reviews.find((review) => review.kind === 'run')?.acceptance, 'failed')
 })
 
+test('review submit без acceptance сохраняет null', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+
+  submitVerdict(db, { cardId: card.id, reviewer: 'reviewer-1', verdict: 'done' })
+
+  const row = db
+    .prepare("select acceptance from reviews where card_id = ? and kind = 'run'")
+    .get(card.id) as { acceptance: string | null }
+  assert.equal(row.acceptance, null)
+})
+
 test('waiveReview: только владелец, причина, идемпотентность', (t) => {
   const { db } = board(t)
   const card = seedCard(db, { phase: 'task', status: 'done' })

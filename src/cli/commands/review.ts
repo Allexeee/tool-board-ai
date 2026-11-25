@@ -151,8 +151,8 @@ export default async function command(args: ParsedArgs) {
     if (planCompliance !== 'done' && planCompliance !== 'failed') {
       throw new UserError(3, 'нужен --plan done|failed')
     }
-    const acceptance = stringFlag(args, 'acceptance') ?? 'done'
-    if (acceptance !== 'done' && acceptance !== 'failed') {
+    const acceptance = stringFlag(args, 'acceptance')
+    if (acceptance !== undefined && acceptance !== 'done' && acceptance !== 'failed') {
       throw new UserError(3, '--acceptance done|failed')
     }
     const requestedMode = stringFlag(args, 'mode')

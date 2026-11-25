@@ -174,8 +174,8 @@ export function submitVerdict(
     if (planCompliance === 'failed' && verdict !== 'reopen') {
       throw new UserError(3, 'plan failed требует verdict reopen')
     }
-    const acceptance = input.acceptance ?? 'done'
-    if (acceptance !== 'done' && acceptance !== 'failed') {
+    const acceptance = input.acceptance
+    if (acceptance !== undefined && acceptance !== 'done' && acceptance !== 'failed') {
       throw new UserError(3, 'acceptance — done или failed')
     }
     if (acceptance === 'failed' && verdict === 'done' && reviewer !== OWNER) {
@@ -215,7 +215,7 @@ export function submitVerdict(
       input.mode ?? null,
       card.specRev,
       planCompliance,
-      acceptance,
+      acceptance ?? null,
     )
 
     const at = nowIso()
