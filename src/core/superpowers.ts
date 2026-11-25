@@ -39,6 +39,17 @@ function globalConfigFiles(home: string): string[] {
   ]
 }
 
+/** Порядок загрузки OpenCode: глобальный, корневой проект, затем .opencode. */
+function configLoadOrder(root: string, home: string): string[] {
+  return [
+    ...globalConfigFiles(home),
+    join(root, 'opencode.json'),
+    join(root, 'opencode.jsonc'),
+    join(root, '.opencode', 'opencode.json'),
+    join(root, '.opencode', 'opencode.jsonc'),
+  ]
+}
+
 /** JSONC: комментарии и хвостовые запятые — не ошибка конфига. */
 export function stripJsonc(text: string): string {
   let out = ''
@@ -121,6 +132,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+/** `*` и `?` в resource — как в правах OpenCode. */
+export function globMatches(pattern: string, value: string): boolean {
+  if (pattern === value || pattern === '*') return true
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')
+  return new RegExp(`^${escaped}$`).test(value)
+}
+
+function permissionRules(root: string, home: string): Array<Record<string, unknown>> {
+  const rules: Array<Record<string, unknown>> = []
+  for (const file of configLoadOrder(root, home)) {
+    const config = readConfig(file)
+    if (!config || !Array.isArray(config.permissions)) continue
+    for (const rule of config.permissions) {
+      if (isRecord(rule) && rule.action === 'skill' && typeof rule.resource === 'string') {
+        rules.push(rule)
+      }
+    }
+  }
+  return rules
+}
+
 /** Куда писать права: приоритетный .json, а для .jsonc — отдельный .opencode/opencode.json. */
 function projectConfigTarget(root: string): string {
   const existing = projectConfigFiles(root).find((file) => existsSync(file))
@@ -130,17 +165,17 @@ function projectConfigTarget(root: string): string {
   return existing
 }
 
-function hasDenyRules(parsed: Record<string, unknown> | null): boolean {
-  const permissions = parsed && Array.isArray(parsed.permissions) ? parsed.permissions : []
-  return CONFLICTING_SKILLS.every((skill) =>
-    permissions.some(
-      (rule) =>
-        isRecord(rule) &&
-        rule.action === 'skill' &&
-        rule.resource === skill &&
-        rule.effect === 'deny',
-    ),
-  )
+/** Все конкурирующие навыки выключены: правила комбинируются, выигрывает последнее. */
+export function conflictingSkillsDisabled(root: string, home: string = homedir()): boolean {
+  if (!superpowersConfigured(root, home)) return true
+  const rules = permissionRules(root, home)
+  return CONFLICTING_SKILLS.every((skill) => {
+    let effect: unknown
+    for (const rule of rules) {
+      if (globMatches(String(rule.resource), skill)) effect = rule.effect
+    }
+    return effect === 'deny'
+  })
 }
 
 export interface PermissionsWrite {
@@ -193,15 +228,4 @@ export function writeSkillPermissions(
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, JSON.stringify(config, null, 2) + '\n', 'utf8')
   return { changed: true, created: !existed, path }
-}
-
-/** Все конкурирующие навыки выключены с учётом слияния конфигов OpenCode. */
-export function conflictingSkillsDisabled(root: string, home: string = homedir()): boolean {
-  if (!superpowersConfigured(root, home)) return true
-  const files = projectConfigFiles(root).filter((file) => existsSync(file))
-  const withPermissions = files.find((file) => {
-    const config = readConfig(file)
-    return config !== null && Object.prototype.hasOwnProperty.call(config, 'permissions')
-  })
-  return withPermissions ? hasDenyRules(readConfig(withPermissions)) : false
 }
