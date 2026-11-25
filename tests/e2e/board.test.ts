@@ -177,6 +177,7 @@ test('забег с запросом: разбор и promotion', (t) => {
   const root = project(t)
   const req = json(root, [
     'card', 'add', '--group', 'NOW', '--title', 'Новое', '--skill', 'dev', '--tag', 'new',
+    '--no-review', '--reason', 'тест promotion без ревью', '--as', 'owner',
   ])
   json(root, ['run', 'start', '--as', 'owner', '--cards', req.id])
 
