@@ -1,5 +1,5 @@
 ﻿import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import {
   effectiveReviewerModel,
   modelContext,
@@ -1169,7 +1169,10 @@ export function writeOpenCodeFiles(
   const permissions = writeSkillPermissions(root)
   const warnings: string[] = []
   if (permissions.changed) {
-    ;(permissions.created ? created : updated).push('.opencode/opencode.json (права навыков)')
+    const display = permissions.path
+      ? relative(root, permissions.path)
+      : join('.opencode', 'opencode.json')
+    ;(permissions.created ? created : updated).push(`${display} (права навыков)`)
   }
   if (permissions.warning) warnings.push(permissions.warning)
 

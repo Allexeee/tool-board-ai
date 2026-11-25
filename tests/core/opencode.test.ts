@@ -25,6 +25,20 @@ test('initProject создаёт четыре навыка, плагин, ком
   assert.ok(created.some((p) => p.includes('SKILL.md')))
 })
 
+test('writeOpenCodeFiles показывает фактический путь конфига прав', () => {
+  const root = tmp()
+  writeFileSync(
+    join(root, 'opencode.json'),
+    JSON.stringify({ plugins: ['superpowers'] }),
+    'utf8',
+  )
+  const result = writeOpenCodeFiles(root)
+  assert.ok(
+    result.updated.includes('opencode.json (права навыков)'),
+    result.updated.join(' | '),
+  )
+})
+
 test('плагин: submit --no-decisions и setup --defaults', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
