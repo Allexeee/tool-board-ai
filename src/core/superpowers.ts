@@ -191,9 +191,13 @@ export function writeSkillPermissions(
   return { changed: true, created: !existed, path }
 }
 
-/** Все конкурирующие навыки выключены (или superpowers не подключён). */
+/** Все конкурирующие навыки выключены с учётом слияния конфигов OpenCode. */
 export function conflictingSkillsDisabled(root: string, home: string = homedir()): boolean {
   if (!superpowersConfigured(root, home)) return true
-  const target = projectConfigFiles(root).find((file) => existsSync(file))
-  return target ? hasDenyRules(readConfig(target)) : false
+  const files = projectConfigFiles(root).filter((file) => existsSync(file))
+  const withPermissions = files.find((file) => {
+    const config = readConfig(file)
+    return config !== null && Object.prototype.hasOwnProperty.call(config, 'permissions')
+  })
+  return withPermissions ? hasDenyRules(readConfig(withPermissions)) : false
 }
