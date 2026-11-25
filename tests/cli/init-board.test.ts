@@ -32,8 +32,16 @@ test('init в git-проекте ставит submodule и генерирует 
   ])
   assert.equal(result.status, 0, result.stderr || result.stdout)
 
-  const data = JSON.parse(result.stdout) as { boardVersion: string }
+  const data = JSON.parse(result.stdout) as {
+    boardVersion: string
+    proposal: unknown
+    proposalWarning: string | null
+    recommendations: string[]
+  }
   assert.equal(data.boardVersion, '1.1.0')
+  assert.equal(data.proposal, null)
+  assert.match(data.proposalWarning ?? '', /не совместима/)
+  assert.ok(data.recommendations.includes(data.proposalWarning!))
   assert.equal(currentBoardVersion(repo.root), '1.1.0')
   assert.ok(existsSync(join(repo.root, 'tools', 'board', 'bin', 'board.ts')))
   assert.ok(existsSync(join(repo.root, '.opencode', 'plugins', 'board', 'index.ts')))
