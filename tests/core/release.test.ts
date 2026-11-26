@@ -417,7 +417,21 @@ test('release ставит тег версии и требует bump перед
   assert.match(tags, new RegExp(`^v${version.replace(/\./g, '\\.')}$`, 'm'))
   assert.equal(runGit(root, ['rev-parse', `v${version}^{commit}`]).trim(), first.commit)
 
-  assert.throws(() => release(db, root, 'owner'), /не новее/)
+  const second = release(db, root, 'owner')
+  assert.ok(second.commit)
   const after = runGit(root, ['tag', '--list']).trim().split('\n').filter(Boolean)
   assert.equal(after.filter((tag) => tag === `v${version}`).length, 1)
+})
+
+test('release с package.json требует версию новее последнего тега', (t) => {
+  const { root, db } = repoBoard(t)
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'host', version: '1.4.7' }))
+  runGit(root, ['add', 'package.json'])
+  runGit(root, ['commit', '-m', 'host package'])
+  merged(root, db, 'done', 'developer')
+
+  release(db, root, 'owner')
+  const mainBefore = runGit(root, ['rev-parse', 'main'])
+  assert.throws(() => release(db, root, 'owner'), /не новее/)
+  assert.equal(runGit(root, ['rev-parse', 'main']), mainBefore)
 })

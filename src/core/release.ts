@@ -177,6 +177,20 @@ export function release(
     throw new UserError(2, `релиз заблокирован: нет ревью, пакета или waiver: ${detail}${packageHint}`)
   }
 
+  const version = projectVersion(root)
+  if (!parseSemver(version)) {
+    throw new UserError(2, `версия ${version} не semver: нужен X.Y.Z`)
+  }
+  if (existsSync(join(root, 'package.json'))) {
+    const last = latestReleaseTag(root)
+    if (last !== null && compareSemver(version, last) <= 0) {
+      throw new UserError(
+        2,
+        `версия ${version} не новее последнего тега v${last}: выполните board bump`,
+      )
+    }
+  }
+
   const commit =
     selector === null
       ? releaseToMain(root)
@@ -184,17 +198,6 @@ export function release(
           root,
           scoped.map((card) => card.mergeCommit!).filter((commit) => commit !== null),
         )
-  const version = projectVersion(root)
-  if (!parseSemver(version)) {
-    throw new UserError(2, `версия ${version} не semver: нужен X.Y.Z`)
-  }
-  const last = latestReleaseTag(root)
-  if (last !== null && compareSemver(version, last) <= 0) {
-    throw new UserError(
-      2,
-      `версия ${version} не новее последнего тега v${last}: выполните board bump`,
-    )
-  }
   tagRelease(root, version, commit)
 
   return tx(db, () => {

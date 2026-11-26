@@ -233,7 +233,7 @@ board setup --backlog-refresh 5                     # автообновлени
 
 `release` — команда владельца: проверяет, что в `dev` нет незавершённых карточек и открытых `critical`-находок, и мержит `dev` в `main` (`--no-ff`).
 
-Версия проекта — semver. `board bump patch|minor|major` обновляет `package.json`, lock и CHANGELOG; `release` требует версию новее последнего тега.
+Версия проекта — semver: major — ломающие изменения, minor — новые возможности, patch — исправления, документация и внутренние правки. `board bump patch|minor|major` обновляет `package.json`, lock и CHANGELOG; `release` требует версию новее последнего тега.
 
 ```bash
 board bump minor
