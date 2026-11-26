@@ -645,6 +645,25 @@ test('повтор находки после разбора не создаёт 
   assert.equal(getCard(db, finding.id)!.severity, 'important')
 })
 
+test('critical из пакета блокирует релиз у done-карточки в dev', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'done',
+    needsMerge: true,
+    inDev: true,
+  })
+
+  submitPackage(db, {
+    actor: 'reviewer-1',
+    verdict: 'done',
+    cards: [{ id: card.id, title: card.title, commit: 'd'.repeat(40) }],
+    findings: [{ severity: 'critical', text: 'нет теста на отказ', cardId: card.id }],
+  })
+
+  assert.throws(() => release(db, root, 'owner'), /находк/)
+})
+
 test('пакетное ревью атомарно: битая находка не оставляет карточек и записи', (t) => {
   const { db } = board(t)
   const card = seedCard(db, { phase: 'task', status: 'done' })
