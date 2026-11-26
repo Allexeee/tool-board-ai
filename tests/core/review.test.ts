@@ -11,6 +11,7 @@ import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import {
   addFinding,
+  hasReviewVerdict,
   listReviewCards,
   revalidateDependents,
   submitVerdict,
@@ -500,4 +501,32 @@ test('waiveReview: только владелец, причина, идемпот
   waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'повтор' })
   events = listEvents(db, card.id).filter((event) => event.type === 'card.review_waived')
   assert.equal(events.length, 1)
+})
+
+test('hasReviewVerdict: старый вердикт не считается после нового finish', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const card = seedCard(board.db, { phase: 'task', status: 'done' })
+  const finishEvent = (at: string) =>
+    board.db
+      .prepare(
+        "insert into events (at, type, actor, subject) values (?, 'card.finished', 'x', ?)",
+      )
+      .run(at, card.id)
+  const review = (at: string) =>
+    board.db
+      .prepare(
+        "insert into reviews (card_id, reviewer, verdict, at, kind) values (?, 'r', 'done', ?, 'run')",
+      )
+      .run(card.id, at)
+
+  finishEvent('2026-01-01T00:00:00.000Z')
+  review('2026-01-02T00:00:00.000Z')
+  assert.equal(hasReviewVerdict(board.db, card.id), true)
+
+  finishEvent('2026-01-03T00:00:00.000Z')
+  assert.equal(hasReviewVerdict(board.db, card.id), false)
+
+  review('2026-01-04T00:00:00.000Z')
+  assert.equal(hasReviewVerdict(board.db, card.id), true)
 })
