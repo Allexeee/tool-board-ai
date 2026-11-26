@@ -431,6 +431,11 @@ test('release с package.json требует версию новее после�
   merged(root, db, 'done', 'developer')
 
   release(db, root, 'owner')
+  runGit(root, ['checkout', 'dev'])
+  writeFileSync(join(root, 'extra.txt'), 'x\n')
+  runGit(root, ['add', '.'])
+  runGit(root, ['commit', '-m', 'extra dev change'])
+  runGit(root, ['checkout', 'main'])
   const mainBefore = runGit(root, ['rev-parse', 'main'])
   assert.throws(() => release(db, root, 'owner'), /не новее/)
   assert.equal(runGit(root, ['rev-parse', 'main']), mainBefore)
