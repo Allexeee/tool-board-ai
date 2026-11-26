@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { currentBoardVersion } from '../../src/core/git.ts'
 import { makeBoardSource, makeRepo } from '../helpers/repo.ts'
@@ -22,6 +22,16 @@ function runGlobal(dir: string, args: string[]) {
     cwd: dir,
     encoding: 'utf8',
     env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
+    windowsHide: true,
+  })
+}
+
+/** Имитирует запуск локального CLI диспетчером: BOARD_DELEGATED уже стоит. */
+function runDelegated(dir: string, args: string[]) {
+  return spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, BOARD_DELEGATED: '1' },
     windowsHide: true,
   })
 }
@@ -88,6 +98,38 @@ test('init --refresh не повторяет уже показанное «Чт�
   const text = runGlobal(repo.root, ['init', '--refresh'])
   assert.equal(text.status, 0, text.stderr || text.stdout)
   assert.match(text.stdout, /Что нового: изменений нет\./)
+})
+
+test('init --refresh через локальный CLI пишет отметку whats-new', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+  const source = makeBoardSource()
+  t.after(source.close)
+
+  const init = run(repo.root, [
+    'init', '--board-version', 'v1.1.0', '--board-source', source.source, '--json',
+  ])
+  assert.equal(init.status, 0, init.stderr || init.stdout)
+  // Имитируем проект, где старый init не успел записать отметку.
+  rmSync(join(repo.root, '.board', 'whats-new.json'), { force: true })
+
+  const first = runDelegated(repo.root, ['init', '--refresh', '--json'])
+  assert.equal(first.status, 0, first.stderr || first.stdout)
+  const firstData = JSON.parse(first.stdout) as {
+    from: string | null
+    whatsNew: Array<{ version: string }>
+  }
+  assert.equal(firstData.from, null)
+  assert.deepEqual(firstData.whatsNew.map((entry) => entry.version), ['1.0.0', '1.1.0'])
+
+  const second = runDelegated(repo.root, ['init', '--refresh', '--json'])
+  assert.equal(second.status, 0, second.stderr || second.stdout)
+  const secondData = JSON.parse(second.stdout) as {
+    from: string | null
+    whatsNew: Array<{ version: string }>
+  }
+  assert.equal(secondData.from, '1.1.0')
+  assert.deepEqual(secondData.whatsNew, [])
 })
 
 test('init в репозитории board не добавляет submodule', (t) => {

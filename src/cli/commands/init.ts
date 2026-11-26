@@ -1,6 +1,6 @@
 ﻿import { writeReviewerAgent } from '../../core/opencode.ts'
 import { openDb } from '../../core/db.ts'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { initProject } from '../../core/project.ts'
 import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
 import { buildSetupProposal, type SetupProposal } from '../../core/setup.ts'
@@ -19,6 +19,8 @@ import { ok, isJsonMode } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const dir = args.positionals[0] ?? process.cwd()
+  // Читаем отметку до initProject: установка может сразу записать новую версию.
+  const announced = readAnnouncedVersion(resolve(dir))
   const { created, updated, warnings, root, boardVersion } = initProject(dir, {
     refresh: boolFlag(args, 'refresh'),
     boardVersion: stringFlag(args, 'board-version'),
@@ -45,11 +47,10 @@ export default async function command(args: ParsedArgs) {
     writeReviewerAgent(root, settings, true)
   }
 
-  // Блок «Что нового» относится к человеку: upgrade запускает init внутри себя,
-  // поэтому отметку о показанном ставит только внешний вызов.
-  const announced = readAnnouncedVersion(root)
+  // Отметку пишет каждый вызов init: upgrade заранее запоминает from и не теряет
+  // диапазон, даже если вложенный init уже отметил новую версию.
   const whatsNew = collectWhatsNew(announced, boardVersion, whatsNewDir(root))
-  if (process.env.BOARD_DELEGATED !== '1') markAnnouncedVersion(root, boardVersion ?? '')
+  markAnnouncedVersion(root, boardVersion ?? '')
 
   const lines: string[] = []
   if (created.length > 0) {
