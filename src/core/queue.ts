@@ -224,8 +224,8 @@ export function moveCard(db: DatabaseSync, id: string, target: MoveTarget): void
 }
 
 /**
- * Явный пересчёт порядка по оценкам: внутри равных сохраняется текущий
- * порядок, поэтому ручные сдвиги не теряются.
+ * Пересборка нумерации: ручной порядок (`position`) сохраняется, оценки —
+ * только тайбрейк для карточек без позиции.
  */
 export function reorderQueue(db: DatabaseSync): void {
   tx(db, () => {
@@ -270,7 +270,8 @@ function normalizeClasses(db: DatabaseSync, cards: Card[], requests: boolean): v
 export function ensureSkillQueues(db: DatabaseSync): void {
   tx(db, () => {
     const groups = new Map<string, Card[]>()
-    for (const card of listCards(db, { phase: 'task', status: ['ready', 'waiting'] })) {
+    const statuses = QUEUE_STATUSES.filter((status) => status !== 'blocked')
+    for (const card of listCards(db, { phase: 'task', status: statuses })) {
       const key = cardQueueClass(card)
       groups.set(key, [...(groups.get(key) ?? []), card])
     }
