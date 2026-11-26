@@ -85,6 +85,7 @@ interface Row {
   plan_waived: number
   scope: string
   tags: string
+  legacy_ids: string
   severity: string | null
   origin_card_id: string | null
   summary: string | null
@@ -115,6 +116,7 @@ const toCard = (row: Row): Card => ({
   id: row.id,
   group: row.group_prefix,
   groupSeq: row.group_seq,
+  legacyIds: JSON.parse(row.legacy_ids) as string[],
   title: row.title,
   body: row.body,
   acceptance: row.acceptance,
@@ -288,6 +290,19 @@ export function createCard(db: DatabaseSync, input: NewCardInput): Card {
 export function getCard(db: DatabaseSync, id: string): Card | null {
   const row = db.prepare('select * from cards where id = ?').get(id) as Row | undefined
   return row ? toCard(row) : null
+}
+
+/** Текущий ID по старому: ищет в legacy_ids после rekey. */
+export function resolveCardId(db: DatabaseSync, id: string): string | null {
+  if (getCard(db, id)) return id
+  const row = db
+    .prepare(
+      `select id from cards
+       where exists (select 1 from json_each(cards.legacy_ids) where json_each.value = ?)
+       limit 1`,
+    )
+    .get(id) as { id: string } | undefined
+  return row?.id ?? null
 }
 
 export function listCards(db: DatabaseSync, filter: CardFilter = {}): Card[] {

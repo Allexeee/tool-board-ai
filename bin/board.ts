@@ -23,7 +23,7 @@ const HELP = `board — доска карточек для людей и аге�
                           --no-review-after-run
 
   executor add|list|edit|remove
-  group list|add             области проекта (префиксы карточек)
+  group list|add|rename     области проекта (префиксы карточек)
   card add|list|show|edit  карточки
   card shape|submit|spec-review|approve|amend|reject|verdict
   card done|cancel|reopen|defer|resume
@@ -76,6 +76,8 @@ const COMMAND_HELP: Record<string, string> = {
   'run note': 'board run note <RUN> --text "..." --as <ревьюер>',
   'queue move': 'board queue move <ID> --before <ID> | --top | --bottom',
   'group add': 'board group add <PREFIX> [--name <название>] [--as <id>]',
+  'group rename':
+    'board group rename <OLD> <NEW> [--merge] [--name <название>] [--dry-run] [--as <id>]',
   'review submit':
     'board review submit <ID> --plan done|failed [--acceptance done|failed] --verdict done|reopen --reviewer <id> --note "..."',
   'review waive': 'board review waive <ID> --reason "..." --as owner',

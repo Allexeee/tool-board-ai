@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
-import { createCard, editCard, getCard, listCards, type CardFilter, type CardPatch } from '../../core/cards.ts'
+import { createCard, editCard, getCard, listCards, resolveCardId, type CardFilter, type CardPatch } from '../../core/cards.ts'
 import { openDb, tx } from '../../core/db.ts'
 import { addDep, isSatisfied, listDeps, removeDep } from '../../core/deps.ts'
 import { listDiscussion, type Discussion } from '../../core/discussion.ts'
@@ -208,7 +208,9 @@ export default async function command(args: ParsedArgs) {
   }
 
   const show = (args: ParsedArgs): number => {
-    const card = requireCard(args.positionals[0], 'board card show UI-1')
+    const rawId = args.positionals[0]
+    if (!rawId) throw new UserError(3, 'использование: board card show UI-1')
+    const card = requireCard(resolveCardId(db, rawId) ?? rawId, 'board card show UI-1')
     const steps = listSteps(db, card.id)
     const { resolution } = specGate(card)
     // События — только по запросу: в каждом полный снимок before/after.

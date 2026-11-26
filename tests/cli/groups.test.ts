@@ -69,3 +69,51 @@ test('при наличии групп card add без --group — ошибка'
   assert.equal(result.code, 3)
   assert.match(result.err, /SITE/)
 })
+
+test('group rename без коллизий сохраняет номера', (t) => {
+  const dir = project(t)
+  run(dir, ['card', 'add', '--group', 'SEO', '--title', 'a', '--skill', 'dev'])
+  run(dir, ['card', 'add', '--group', 'SEO', '--title', 'b', '--skill', 'dev'])
+
+  const renamed = run(dir, ['group', 'rename', 'SEO', 'NEWSITE', '--json'])
+  assert.equal(renamed.code, 0, renamed.err)
+  const result = JSON.parse(renamed.out) as { cards: Array<{ from: string; to: string }> }
+  assert.deepEqual(result.cards, [
+    { from: 'SEO-1', to: 'NEWSITE-1' },
+    { from: 'SEO-2', to: 'NEWSITE-2' },
+  ])
+})
+
+test('group rename --merge: коллизия выдаёт новый номер и сохраняет старый ID', (t) => {
+  const dir = project(t)
+  run(dir, ['card', 'add', '--group', 'SEO', '--title', 'SEO', '--skill', 'dev'])
+  run(dir, ['card', 'add', '--group', 'SITE', '--new-group', '--title', 'SITE', '--skill', 'dev'])
+
+  const dry = run(dir, ['group', 'rename', 'SEO', 'SITE', '--merge', '--dry-run', '--json'])
+  assert.equal(dry.code, 0, dry.err)
+  const planned = JSON.parse(dry.out) as { cards: Array<{ from: string; to: string }> }
+  assert.deepEqual(planned.cards, [{ from: 'SEO-1', to: 'SITE-2' }])
+
+  const renamed = run(dir, ['group', 'rename', 'SEO', 'SITE', '--merge', '--json'])
+  assert.equal(renamed.code, 0, renamed.err)
+
+  const groups = JSON.parse(run(dir, ['group', 'list', '--json']).out) as Array<{
+    prefix: string
+    count: number
+  }>
+  assert.deepEqual(groups.map((group) => [group.prefix, group.count]), [['SITE', 2]])
+
+  const shown = run(dir, ['card', 'show', 'SEO-1', '--json'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.equal((JSON.parse(shown.out) as { id: string }).id, 'SITE-2')
+})
+
+test('group rename в существующую без --merge — ошибка', (t) => {
+  const dir = project(t)
+  run(dir, ['card', 'add', '--group', 'SEO', '--title', 'SEO', '--skill', 'dev'])
+  run(dir, ['card', 'add', '--group', 'SITE', '--new-group', '--title', 'SITE', '--skill', 'dev'])
+
+  const result = run(dir, ['group', 'rename', 'SEO', 'SITE'])
+  assert.equal(result.code, 3)
+  assert.match(result.err, /--merge/)
+})

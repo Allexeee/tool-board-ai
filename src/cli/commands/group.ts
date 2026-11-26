@@ -1,16 +1,18 @@
 import { openDb } from '../../core/db.ts'
-import { addGroup, listGroups } from '../../core/groups.ts'
+import { addGroup, listGroups, renameGroup } from '../../core/groups.ts'
 import { findProject } from '../../core/project.ts'
-import { stringFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { ok } from '../output.ts'
 
-const USAGE = 'board group list | board group add <PREFIX> [--name <название>] [--as <id>]'
+const USAGE =
+  'board group list | board group add <PREFIX> [--name <название>] [--as <id>] | ' +
+  'board group rename <OLD> <NEW> [--merge] [--name <название>] [--dry-run] [--as <id>]'
 
 export default async function command(args: ParsedArgs) {
   const project = findProject(process.cwd())
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
-  if (args.sub !== null && args.sub !== 'list' && args.sub !== 'add') {
+  if (args.sub !== null && args.sub !== 'list' && args.sub !== 'add' && args.sub !== 'rename') {
     throw new UserError(3, USAGE)
   }
 
@@ -25,6 +27,26 @@ export default async function command(args: ParsedArgs) {
         actor: stringFlag(args, 'as') ?? 'owner',
       })
       ok(group, `${group.prefix} добавлен${group.name ? ': ' + group.name : ''}`)
+      return 0
+    }
+
+    if (args.sub === 'rename') {
+      const [old, next] = args.positionals
+      if (!old || !next) throw new UserError(3, USAGE)
+      const result = renameGroup(db, {
+        old,
+        next,
+        merge: boolFlag(args, 'merge'),
+        name: stringFlag(args, 'name'),
+        actor: stringFlag(args, 'as') ?? 'owner',
+        dryRun: boolFlag(args, 'dry-run'),
+      })
+      const lines = [
+        `${result.from} → ${result.to}${result.created ? ' (создана)' : ''}${result.dryRun ? ' · dry-run' : ''}`,
+        ...result.cards.map((item) => `  ${item.from} → ${item.to}`),
+      ]
+      if (result.cards.length === 0) lines.push('  карточек не было')
+      ok(result, lines.join('\n'))
       return 0
     }
 
