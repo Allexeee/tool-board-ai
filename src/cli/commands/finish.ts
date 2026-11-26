@@ -39,7 +39,13 @@ export default async function command(args: ParsedArgs) {  const project = findP
       mergeCommit: stringFlag(args, 'merge-commit'),
       forceReview,
     })
-    ok(card, `${card.id} ${card.status === 'review' ? 'на ревью' : 'закрыта'}: ${card.title}`)
+    const state =
+      card.status === 'review'
+        ? 'ждет финального ревью'
+        : card.status === 'acceptance'
+          ? 'ждёт приёмки владельцем'
+          : 'закрыта'
+    ok(card, `${card.id} ${state}: ${card.title}`)
     try {
       refreshBacklogIfAuto(db, project.root)
     } catch (error) {

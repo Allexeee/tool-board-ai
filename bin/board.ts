@@ -39,6 +39,7 @@ const HELP = `board — доска карточек для людей и аге�
   term add|list|show
   command add|list
   review list|package|finding|submit|waive
+  acceptance rule add|list|remove / check   правила приёмки владельцем
   idea add|list|edit|drop   идеи: карточки вне очереди, мержа и ревью
   tag add|list|rename|remove  реестр тегов карточек
   release [--package <executor|skill>] [--no-review --reason "..."] / now / doctor / backup / export / sync
@@ -93,6 +94,10 @@ const COMMAND_HELP: Record<string, string> = {
   'tag list': 'board tag list [--json]',
   'tag rename': 'board tag rename <old> <new> [--as <id>]',
   'tag remove': 'board tag remove <name> [--as <id>]',
+  'card accept': 'board card accept <ID> [--note "..."] | --reject --reason "..." --as owner',
+  'acceptance rule':
+    'board acceptance rule add <name> [--include-group G] [--include-tag T] [--include-skill S] [--include-path P] [--exclude-tag T] ... | list | remove <name>',
+  'acceptance check': 'board acceptance check <ID>',
   'card tag': 'board card tag add|remove|list <ID> [тег] [--as <id>]',
   'release': 'board release [--package <executor|skill>] [--no-review --reason "..."] --as owner',
   setup:

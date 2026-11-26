@@ -4,6 +4,7 @@ import { addDep } from '../../src/core/deps.ts'
 import { addIdea } from '../../src/core/cards.ts'
 import {
   backlogStatePath,
+  buildBacklog,
   flushBacklog,
   renderBacklog,
   writeBacklog,
@@ -67,6 +68,29 @@ test('renderBacklog: статусы, группы, отложенные и го�
   assert.match(md, /## Готово за последние 12 часов/)
   assert.match(md, /Готово/)
   assert.doesNotMatch(md, /отменена/)
+})
+
+test('renderBacklog: приёмка — в начале задач владельца, без отдельной секции', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const acceptance = seedCard(board.db, {
+    phase: 'task',
+    status: 'acceptance',
+    skill: 'dev',
+    title: 'Ждёт приёмки',
+  })
+  card(board, 'ready', { skill: 'owner', title: 'Задача владельца' })
+
+  const data = buildBacklog(board.db)
+  const owner = data.skills.find((section) => section.skill === 'owner')
+  assert.ok(owner)
+  assert.equal(owner.rows[0].id, acceptance.id)
+  assert.equal(owner.rows[0].status, 'требует приёмки владельцем')
+  assert.equal(data.skills.some((section) => section.rows.some((row) => row.id === acceptance.id && section.skill !== 'owner')), false)
+
+  const md = renderBacklog(board.db)
+  assert.doesNotMatch(md, /## Ждут приёмки/)
+  assert.match(md, /требует приёмки владельцем/)
 })
 
 test('renderBacklog: идеи — отдельная таблица в конце, не в отложенных', (t) => {

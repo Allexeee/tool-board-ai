@@ -9,6 +9,26 @@ export type RunReviewSetting = 'auto' | 'none' | 'self' | 'subagent'
 export type ReviewCardMode = 'never' | 'needs_merge' | 'always'
 export type ReviewFindings = 'critical' | 'critical+important'
 
+/** Условие правила приёмки: любое из перечисленных совпадений. */
+export interface AcceptanceConditions {
+  groups?: string[]
+  tags?: string[]
+  skills?: string[]
+  paths?: string[]
+}
+
+export interface AcceptanceRule {
+  name: string
+  include: AcceptanceConditions
+  exclude?: AcceptanceConditions
+}
+
+export interface AcceptanceSettings {
+  rules: AcceptanceRule[]
+  /** Общее исключение: совпало — приёмка не нужна. */
+  exclude?: AcceptanceConditions
+}
+
 /** Профиль ревью: один набор правил вместо разрозненных настроек. */
 export interface ReviewProfile {
   spec: 'auto' | 'none' | 'self' | 'subagent'
@@ -36,6 +56,8 @@ export interface BoardSettings {
   specReview: { mode: SpecReviewSetting; maxSpecChars: number; largeSpecChars: number }
   runReview: { mode: RunReviewSetting }
   review: ReviewSettings
+  /** Правила приёмки владельцем: включают и исключают по группе, тегу, навыку и пути. */
+  acceptance: AcceptanceSettings
   /** Имена веток; null — определить по git. */
   branches: { main: string | null; dev: string | null }
   /** Ведётся ли проект в git; false — доска без мержа и веток. */
@@ -54,12 +76,15 @@ export const DEFAULT_REVIEW: ReviewSettings = {
   profiles: {},
 }
 
+export const DEFAULT_ACCEPTANCE: AcceptanceSettings = { rules: [] }
+
 export const DEFAULT_SETTINGS: BoardSettings = {
   version: 2,
   reviewer: { model: null },
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
   review: structuredClone(DEFAULT_REVIEW),
+  acceptance: structuredClone(DEFAULT_ACCEPTANCE),
   branches: { main: null, dev: null },
   git: true,
   sync: { remote: null },
@@ -137,6 +162,42 @@ function normalizeReview(raw: unknown): ReviewSettings {
   }
 }
 
+function normalizeAcceptance(raw: unknown): AcceptanceSettings {
+  if (!isRecord(raw)) return structuredClone(DEFAULT_ACCEPTANCE)
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? [...new Set(value.filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean))]
+      : []
+  const conditions = (value: unknown): AcceptanceConditions => {
+    if (!isRecord(value)) return {}
+    const result: AcceptanceConditions = {}
+    const groups = strings(value.groups)
+    const tags = strings(value.tags)
+    const skills = strings(value.skills)
+    const paths = strings(value.paths)
+    if (groups.length > 0) result.groups = groups
+    if (tags.length > 0) result.tags = tags
+    if (skills.length > 0) result.skills = skills
+    if (paths.length > 0) result.paths = paths
+    return result
+  }
+  const rules: AcceptanceRule[] = []
+  if (Array.isArray(raw.rules)) {
+    for (const item of raw.rules) {
+      if (!isRecord(item)) continue
+      const name = typeof item.name === 'string' ? item.name.trim() : ''
+      if (name === '') continue
+      const include = conditions(item.include)
+      if (Object.keys(include).length === 0) continue
+      rules.push({ name, include, exclude: conditions(item.exclude) })
+    }
+  }
+  const exclude = conditions(raw.exclude)
+  return Object.keys(exclude).length > 0 ? { rules, exclude } : { rules }
+}
+
 function setupAtValue(raw: unknown): string | null {
   return typeof raw === 'string' && raw.trim() !== '' ? raw : null
 }
@@ -196,6 +257,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
       runReview: { mode: raw.reviewAfterRun === true ? 'subagent' : 'none' },
       review: { ...structuredClone(DEFAULT_REVIEW), profile: 'custom' },
+      acceptance: structuredClone(DEFAULT_ACCEPTANCE),
       branches: { main: null, dev: null },
       git: true,
       sync: { remote: null },
@@ -218,6 +280,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
     },
     runReview: { mode: runModeValue(run.mode, 'none') },
     review: normalizeReview(raw.review),
+    acceptance: normalizeAcceptance(raw.acceptance),
     branches: {
       main: branchValue(branches.main),
       dev: branchValue(branches.dev),
@@ -351,6 +414,7 @@ export function updateSettings(
       modelMap?: Partial<ReviewSettings['modelMap']>
       profiles?: Record<string, ReviewProfile>
     }
+    acceptance?: AcceptanceSettings
   },
   now: () => string = nowIso,
 ): BoardSettings {
@@ -401,6 +465,10 @@ export function updateSettings(
       modelMap: { ...current.review.modelMap, ...patch.review?.modelMap },
       profiles: profileMap,
     },
+    acceptance:
+      patch.acceptance !== undefined
+        ? normalizeAcceptance(patch.acceptance)
+        : current.acceptance,
     branches: {
       main:
         patch.branches?.main !== undefined

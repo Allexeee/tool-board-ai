@@ -35,6 +35,7 @@ export const AGENTS_BLOCK = [
   '- «Открой/покажи бэклог» — `board backlog --open`; если доступен инструмент браузера, открой `docs/board/BACKLOG.html` в панели Review (`browser.preview`). В чат HTML не вставляй.',
   '- Идеи — `board idea add|list|edit|drop` (или `board_idea`): карточки IDEA, вне очереди, мержа и ревью; в бэклоге отдельная таблица.',
   '- Теги — реестр `board tag add|list|rename|remove` (или `board_tag`); на `card shape` теги берутся из дизайна задачи, `card tag add|remove` — точечно.',
+  '- Приёмка владельцем: флаг `owner_acceptance` и статус `acceptance`; правила — `board acceptance rule add|list|remove` и `check`; владелец закрывает `card accept` или отклоняет `--reject --reason`; релиз ждёт и ревью, и приёмку.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `writing-plans`, `executing-plans` и другие конкурирующие навыки superpowers в проекте выключены правами OpenCode: план — steps карточки, отдельного plan-файла нет.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
@@ -87,7 +88,7 @@ description: Доска: разобрать запрос в spec и утверд
 
 1. Запрос → разбор: \`board card shape <ID> --as <исполнитель> [--from card.json]\`.
 2. Решение владельца спрашивай **окном выбора** с 2–4 вариантами до записи spec; свой ответ владельца можно уточнить один раз. \`ask\` — асинхронный вопрос, если владельца нет; \`block\` — только если без ответа нельзя продолжать. Угадывать нельзя.
-3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. Теги — \`--tag\` из реестра, если дизайн задачи их предполагает; неизвестный тег сначала заводится \`board tag add\`. План (\`steps\`) при shape не пишется.
+3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. Теги — \`--tag\` из реестра, если дизайн задачи их предполагает; неизвестный тег сначала заводится \`board tag add\`. Приёмка владельцем — флаг \`--owner-acceptance\`, если дизайн задачи её требует. План (\`steps\`) при shape не пишется.
 4. Spec review: \`/spec-review\`. Режим — \`board card show <ID> --json\` → \`specReview.mode\`: \`none\` — не нужна, \`self\` — сам, \`subagent\` — \`board-reviewer\`. Результат: \`board card spec-review <ID> --mode self|subagent --verdict done|reopen --note "..."\`.
 5. Решений владельца нет — \`board card submit <ID> --as <исполнитель> --no-decisions\`: карточка сразу в очередь, отдельное утверждение не нужно.
 6. Решения нужны — \`board card submit <ID> --as <исполнитель>\` и \`card approve\` владельца после его ответа.
@@ -162,6 +163,7 @@ description: Доска: исполнить карточку — take, план 
 - important — finding-карточка \`board review finding <ID> --severity important --text "..."\` встаёт в очередь; release не блокирует, берётся следующим раном по приоритету.
 - other — один сборник \`review notes\` в \`deferred\`.
 - Перед релизом — \`board review package\`: пакет done-карточек dev вне main, проход записывается \`--verdict done|reopen\` и покрывает коммиты; release без пакета — \`--no-review --reason\` владельца.
+- Если карточка требует приёмки, вердикт \`done\` ведёт в \`acceptance\`; владелец закрывает \`board card accept\` или отклоняет \`--reject --reason\`. Релиз ждёт обе проверки.
 - Свою карточку не ревьюй: вердикт даёт свежий субагент. \`critical\` блокирует release.
 
 ## Правила
@@ -182,7 +184,7 @@ description: Доска: забег — «Ран», состав, порядок
 
 1. \`board run start --as <исполнитель> --cards <ID>,...\` (или \`--suggest 1|2|3\` — вариант new/improve/review). На старте не больше 3 карточек.
 2. \`board run next --as <исполнитель>\` — следующая карточка забега.
-3. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег; если \`reviewMode\` не \`none\`, запусти \`/review\`.
+3. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег; если \`reviewMode\` не \`none\`, запусти \`/review\`. Карточки в \`acceptance\` считаются сданными: забег закрывается, \`run next\` их не выдаёт.
 4. \`board run add <ID>\`, \`board run drop <ID>\` — состав забега.
 
 ## Ран
@@ -389,6 +391,15 @@ async function withJson(result, fn) {
 
 function cardArgs(input) {
   const a = input.action
+  if (a === 'accept') {
+    const args = ['card', 'accept']
+    if (input.id) args.push(input.id)
+    if (input.reject === true) args.push('--reject')
+    flag(args, 'reason', input.reason)
+    flag(args, 'note', input.note)
+    flag(args, 'as', input.as)
+    return args
+  }
   if (a === 'step' || a === 'ref' || a === 'dep' || a === 'scope') {
     const args = ['card', a, input.sub]
     if (input.id) args.push(input.id)
@@ -426,6 +437,9 @@ function cardArgs(input) {
     if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (input.new_group) args.push('--new-group')
     flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
@@ -446,6 +460,9 @@ function cardArgs(input) {
     if (input.urgency !== undefined) args.push('--urgency', String(input.urgency))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
     if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
     if (input.clear_tags) args.push('--clear-tags')
@@ -562,6 +579,34 @@ function ideaArgs(input) {
   } else if (a === 'drop') {
     if (input.id) args.push(input.id)
     flag(args, 'as', input.as)
+  }
+  return args
+}
+
+function acceptanceArgs(input) {
+  const args = ['acceptance', input.action]
+  if (input.action === 'check') {
+    if (input.id) args.push(input.id)
+    return args
+  }
+  if (input.action === 'rule') {
+    if (input.sub) args.push(input.sub)
+    if (input.name) args.push(input.name)
+    for (const key of [
+      'include_group',
+      'include_tag',
+      'include_skill',
+      'include_path',
+      'exclude_group',
+      'exclude_tag',
+      'exclude_skill',
+      'exclude_path',
+    ]) {
+      const values = input[key]
+      if (Array.isArray(values)) {
+        for (const value of values) args.push(\`--\${key.replace('_', '-')}\`, String(value))
+      }
+    }
   }
   return args
 }
@@ -730,6 +775,8 @@ export default Plugin.define({
           urgency: { type: 'number' },
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
+          owner_acceptance: { type: 'boolean' },
+          reject: { type: 'boolean' },
           no_decisions: { type: 'boolean', description: 'submit: решений владельца нет' },
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
@@ -979,6 +1026,26 @@ export default Plugin.define({
           as: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, tagArgs(input), context),
+      })
+
+      editor.add({
+        name: 'acceptance',
+        description: 'Приёмка владельцем: rule|check',
+        input: schema({
+          action: { type: 'string' },
+          sub: { type: 'string', description: 'rule: add|list|remove' },
+          id: { type: 'string' },
+          name: { type: 'string' },
+          include_group: { type: 'array', items: { type: 'string' } },
+          include_tag: { type: 'array', items: { type: 'string' } },
+          include_skill: { type: 'array', items: { type: 'string' } },
+          include_path: { type: 'array', items: { type: 'string' } },
+          exclude_group: { type: 'array', items: { type: 'string' } },
+          exclude_tag: { type: 'array', items: { type: 'string' } },
+          exclude_skill: { type: 'array', items: { type: 'string' } },
+          exclude_path: { type: 'array', items: { type: 'string' } },
+        }, ['action']),
+        execute: (input, context) => call(ctx, acceptanceArgs(input), context),
       })
 
       editor.add({

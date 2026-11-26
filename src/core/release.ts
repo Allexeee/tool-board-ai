@@ -109,11 +109,23 @@ export function release(
   }
 
   const inDevNotDone = scoped.filter(
-    (card) => card.inDev && card.status !== 'done' && card.revertedAt === null,
+    (card) =>
+      card.inDev &&
+      card.status !== 'done' &&
+      card.status !== 'acceptance' &&
+      card.revertedAt === null,
   )
   if (inDevNotDone.length > 0) {
     const detail = inDevNotDone.map((card) => `${card.id} (${card.status})`).join(', ')
     throw new UserError(2, `релиз заблокирован: в dev есть карточки не done: ${detail}`)
+  }
+
+  const waitingAcceptance = scoped.filter(
+    (card) => card.inDev && card.status === 'acceptance' && card.revertedAt === null,
+  )
+  if (waitingAcceptance.length > 0) {
+    const detail = waitingAcceptance.map((card) => card.id).join(', ')
+    throw new UserError(2, `релиз заблокирован: ждут приёмки владельцем: ${detail}`)
   }
 
   const settings = readSettings(root)

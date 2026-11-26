@@ -154,6 +154,15 @@ async function withJson(result, fn) {
 
 function cardArgs(input) {
   const a = input.action
+  if (a === 'accept') {
+    const args = ['card', 'accept']
+    if (input.id) args.push(input.id)
+    if (input.reject === true) args.push('--reject')
+    flag(args, 'reason', input.reason)
+    flag(args, 'note', input.note)
+    flag(args, 'as', input.as)
+    return args
+  }
   if (a === 'step' || a === 'ref' || a === 'dep' || a === 'scope') {
     const args = ['card', a, input.sub]
     if (input.id) args.push(input.id)
@@ -191,6 +200,9 @@ function cardArgs(input) {
     if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (input.new_group) args.push('--new-group')
     flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
@@ -211,6 +223,9 @@ function cardArgs(input) {
     if (input.urgency !== undefined) args.push('--urgency', String(input.urgency))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
     if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
     if (input.clear_tags) args.push('--clear-tags')
@@ -327,6 +342,34 @@ function ideaArgs(input) {
   } else if (a === 'drop') {
     if (input.id) args.push(input.id)
     flag(args, 'as', input.as)
+  }
+  return args
+}
+
+function acceptanceArgs(input) {
+  const args = ['acceptance', input.action]
+  if (input.action === 'check') {
+    if (input.id) args.push(input.id)
+    return args
+  }
+  if (input.action === 'rule') {
+    if (input.sub) args.push(input.sub)
+    if (input.name) args.push(input.name)
+    for (const key of [
+      'include_group',
+      'include_tag',
+      'include_skill',
+      'include_path',
+      'exclude_group',
+      'exclude_tag',
+      'exclude_skill',
+      'exclude_path',
+    ]) {
+      const values = input[key]
+      if (Array.isArray(values)) {
+        for (const value of values) args.push(`--${key.replace('_', '-')}`, String(value))
+      }
+    }
   }
   return args
 }
@@ -495,6 +538,8 @@ export default Plugin.define({
           urgency: { type: 'number' },
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
+          owner_acceptance: { type: 'boolean' },
+          reject: { type: 'boolean' },
           no_decisions: { type: 'boolean', description: 'submit: решений владельца нет' },
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
@@ -744,6 +789,26 @@ export default Plugin.define({
           as: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, tagArgs(input), context),
+      })
+
+      editor.add({
+        name: 'acceptance',
+        description: 'Приёмка владельцем: rule|check',
+        input: schema({
+          action: { type: 'string' },
+          sub: { type: 'string', description: 'rule: add|list|remove' },
+          id: { type: 'string' },
+          name: { type: 'string' },
+          include_group: { type: 'array', items: { type: 'string' } },
+          include_tag: { type: 'array', items: { type: 'string' } },
+          include_skill: { type: 'array', items: { type: 'string' } },
+          include_path: { type: 'array', items: { type: 'string' } },
+          exclude_group: { type: 'array', items: { type: 'string' } },
+          exclude_tag: { type: 'array', items: { type: 'string' } },
+          exclude_skill: { type: 'array', items: { type: 'string' } },
+          exclude_path: { type: 'array', items: { type: 'string' } },
+        }, ['action']),
+        execute: (input, context) => call(ctx, acceptanceArgs(input), context),
       })
 
       editor.add({

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { listCards } from './cards.ts'
+import { acceptancePaths, evaluateAcceptance } from './acceptance.ts'
 import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
@@ -10,6 +11,7 @@ import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
 import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 import { readSettings } from './settings.ts'
+import { tagExists } from './tags.ts'
 import { CONFLICTING_SKILLS_ADVICE, conflictingSkillsDisabled, SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
 
 export interface DoctorResult {
@@ -79,8 +81,61 @@ export function doctorData(
     findingsScope(settings, modelContext(process.env)),
     packageReviewRequired(settings, modelContext(process.env)),
   )
+  checkAcceptance(db, root, settings, warnings)
 
   return { errors, warnings, recommendations }
+}
+
+/** Приёмка: согласованность флага, статуса и правил проекта. */
+function checkAcceptance(
+  db: DatabaseSync,
+  root: string,
+  settings: ReturnType<typeof readSettings>,
+  warnings: string[],
+): void {
+  const cards = listCards(db)
+  const withoutFlag = cards.filter(
+    (card) => card.status === 'acceptance' && !card.ownerAcceptance,
+  )
+  if (withoutFlag.length > 0) {
+    warnings.push(
+      `в acceptance без флага приёмки: ${withoutFlag.map((card) => card.id).join(', ')}`,
+    )
+  }
+  const ownerFlag = cards.filter(
+    (card) => card.skill === 'owner' && card.ownerAcceptance,
+  )
+  if (ownerFlag.length > 0) {
+    warnings.push(
+      `флаг приёмки у owner-карточки: ${ownerFlag.map((card) => card.id).join(', ')}`,
+    )
+  }
+
+  const acceptance = settings.acceptance
+  const unknown = new Set<string>()
+  const collect = (conditions: { tags?: string[] } | undefined): void => {
+    for (const tag of conditions?.tags ?? []) {
+      if (!tagExists(db, tag)) unknown.add(tag)
+    }
+  }
+  collect(acceptance.exclude)
+  for (const rule of acceptance.rules) {
+    collect(rule.include)
+    collect(rule.exclude)
+  }
+  if (unknown.size > 0) {
+    warnings.push(`правила приёмки ссылаются на неизвестные теги: ${[...unknown].join(', ')}`)
+  }
+
+  for (const card of cards) {
+    if (card.ownerAcceptanceManual || card.skill === 'owner') continue
+    const decision = evaluateAcceptance(settings, card, acceptancePaths(root, card))
+    if (decision.required !== card.ownerAcceptance) {
+      warnings.push(
+        `приёмка ${card.id} расходится с правилами: флаг ${card.ownerAcceptance ? 'да' : 'нет'}, правила ${decision.required ? 'да' : 'нет'}`,
+      )
+    }
+  }
 }
 
 function branchExists(root: string, name: string): boolean {

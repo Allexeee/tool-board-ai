@@ -400,14 +400,16 @@ export function submitVerdict(
 
     const at = nowIso()
     if (verdict === 'done') {
+      const next = card.ownerAcceptance ? 'acceptance' : 'done'
       db.prepare('update cards set status = ?, done_at = ?, updated_at = ? where id = ?').run(
-        'done',
-        at,
+        next,
+        next === 'done' ? at : null,
         at,
         card.id,
       )
       if (card.runId) {
-        db.prepare("update run_cards set status = 'reviewed' where run_id = ? and card_id = ?").run(
+        db.prepare('update run_cards set status = ? where run_id = ? and card_id = ?').run(
+          next === 'acceptance' ? 'acceptance' : 'reviewed',
           card.runId,
           card.id,
         )

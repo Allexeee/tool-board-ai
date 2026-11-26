@@ -1,11 +1,14 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
 import { createCard, editCard, getCard, listCards, resolveCardId, type CardFilter, type CardPatch } from '../../core/cards.ts'
+import { recalculateAcceptance } from '../../core/acceptance.ts'
 import { openDb, tx } from '../../core/db.ts'
 import { addDep, isSatisfied, listDeps, removeDep } from '../../core/deps.ts'
 import { listDiscussion, type Discussion } from '../../core/discussion.ts'
 import { listEvents, type EventRecord } from '../../core/events.ts'
 import {
+  acceptCard,
+  rejectAcceptance,
   amendCard,
   applyShapeFile,
   approveCard,
@@ -86,6 +89,9 @@ export default async function command(args: ParsedArgs) {
     }
   }
 
+  const autoAcceptance = (card: Card): Card =>
+    recalculateAcceptance(db, project.root, card, settings)
+
   const add = (args: ParsedArgs): number => {
     const groups = listGroups(db)
     const known = groups.map((item) => item.prefix)
@@ -145,6 +151,11 @@ export default async function command(args: ParsedArgs) {
     if (scope.length > 0) patch.scope = scope
     const reviewFlag = switchFlag(args, 'review', 'no-review')
     const needsMergeFlag = switchFlag(args, 'needs-merge', 'no-needs-merge')
+    const acceptanceFlag = switchFlag(args, 'owner-acceptance', 'no-owner-acceptance')
+    if (acceptanceFlag !== undefined) {
+      patch.ownerAcceptance = acceptanceFlag
+      patch.ownerAcceptanceManual = true
+    }
     const effectiveNeedsMerge = needsMergeFlag ?? (skill !== 'owner' && settings.git)
     const profile = resolveReviewProfile(settings, reviewContext)
     const reviewDefault =
@@ -175,13 +186,15 @@ export default async function command(args: ParsedArgs) {
       waiveReview(db, { cardId: card.id, actor: 'owner', reason: waiverReason })
     }
     insertIntoQueue(db, card.id)
-    const created = getCard(db, card.id)!
+    let created = getCard(db, card.id)!
+    if (acceptanceFlag === undefined) created = autoAcceptance(created)
     ok(created, `${created.id} создана: ${created.title}`)
     return 0
   }
 
   const list = (args: ParsedArgs): number => {
     const filter: CardFilter = {}
+    if (boolFlag(args, 'acceptance-only')) filter.acceptance = true
     const phases = splitFlag(args, 'phase')
     if (phases.length > 0) filter.phase = phases as CardPhase[]
     const statuses = splitFlag(args, 'status')
@@ -229,7 +242,8 @@ export default async function command(args: ParsedArgs) {
         actor: stringFlag(args, 'as') ?? 'owner',
         patch: { tags: [...card.tags, name] },
       })
-      ok(updated, `${card.id}: + ${name}`)
+      const after = autoAcceptance(updated)
+      ok(after, `${card.id}: + ${name}`)
       return 0
     }
     if (!card.tags.includes(name)) {
@@ -241,7 +255,8 @@ export default async function command(args: ParsedArgs) {
       actor: stringFlag(args, 'as') ?? 'owner',
       patch: { tags: card.tags.filter((tagName) => tagName !== name) },
     })
-    ok(updated, `${card.id}: − ${name}`)
+    const after = autoAcceptance(updated)
+    ok(after, `${card.id}: − ${name}`)
     return 0
   }
 
@@ -309,6 +324,7 @@ export default async function command(args: ParsedArgs) {
 
     const needsMerge = switchFlag(args, 'needs-merge', 'no-needs-merge')
     const reviewRequired = switchFlag(args, 'review', 'no-review')
+    const acceptanceFlag = switchFlag(args, 'owner-acceptance', 'no-owner-acceptance')
     const existing = requireCard(id, 'board card edit UI-1')
     const effectiveNeedsMerge = needsMerge ?? existing.needsMerge
     const profile = resolveReviewProfile(settings, reviewContext)
@@ -333,6 +349,10 @@ export default async function command(args: ParsedArgs) {
       patch.reviewRequired = reviewRequired
     }
     if (needsMerge !== undefined) patch.needsMerge = needsMerge
+    if (acceptanceFlag !== undefined) {
+      patch.ownerAcceptance = acceptanceFlag
+      patch.ownerAcceptanceManual = true
+    }
 
     if (args.flags['scope'] !== undefined) patch.scope = stringsFlag(args, 'scope')
     if (args.flags.tag !== undefined) patch.tags = assertKnownTags(db, stringsFlag(args, 'tag'))
@@ -349,7 +369,24 @@ export default async function command(args: ParsedArgs) {
     if (waiverReason) {
       waiveReview(db, { cardId: card.id, actor: 'owner', reason: waiverReason })
     }
-    ok(card, `${card.id} изменена: ${card.title}`)
+    const updated = acceptanceFlag === undefined ? autoAcceptance(card) : card
+    ok(updated, `${updated.id} изменена: ${updated.title}`)
+    return 0
+  }
+
+  const accept = (args: ParsedArgs): number => {
+    const id = args.positionals[0]
+    if (!id) throw new UserError(3, 'использование: board card accept UI-1 [--note "..."] | --reject --reason "..."')
+    const actor = stringFlag(args, 'as') ?? 'owner'
+    if (boolFlag(args, 'reject')) {
+      const reason = stringFlag(args, 'reason')
+      if (!reason) throw new UserError(3, 'отклонение требует --reason «почему»')
+      const card = rejectAcceptance(db, { id, actor, reason })
+      ok(card, `${card.id} отклонена: ${reason}`)
+      return 0
+    }
+    const card = acceptCard(db, { id, actor, note: stringFlag(args, 'note') })
+    ok(card, `${card.id} принята`)
     return 0
   }
 
@@ -509,6 +546,7 @@ export default async function command(args: ParsedArgs) {
       if (tags.length > 0) {
         applied.card = editCard(db, { id, actor, patch: { tags } })
       }
+      applied.card = autoAcceptance(applied.card)
       return applied
     })
 
@@ -783,9 +821,10 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'scope') return scope(args)
     if (args.sub === 'resume') return resume(args)
     if (args.sub === 'tag') return tag(args)
+    if (args.sub === 'accept') return accept(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume|scope|tag',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume|scope|tag|accept',
     )
   } finally {
     db.close()
@@ -891,7 +930,7 @@ function formatCard(
     `${card.id} · ${card.title}`,
     `статус: ${card.status} · фаза: ${card.phase} · навык: ${value(card.skill)}`,
     `важность: ${value(card.importance)} · срочность: ${value(card.urgency)}`,
-    `мерж: ${card.needsMerge ? 'да' : 'нет'} · ревью: ${card.reviewRequired ? 'да' : 'нет'}`,
+    `мерж: ${card.needsMerge ? 'да' : 'нет'} · ревью: ${card.reviewRequired ? 'да' : 'нет'} · приёмка владельца: ${card.ownerAcceptance ? 'да' : 'нет'}${card.ownerAcceptanceManual ? ' (вручную)' : ''}`,
     `scope: ${card.scope.length > 0 ? card.scope.join(', ') : '-'}`,
     `tags: ${card.tags.length > 0 ? card.tags.join(', ') : '-'}`,
   ]
