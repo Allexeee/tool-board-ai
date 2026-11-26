@@ -161,7 +161,8 @@ export function moveCard(db: DatabaseSync, id: string, target: MoveTarget): void
 
     const queueClass = cardQueueClass(card)
     const queue = listQueue(db, { class: queueClass }, card.phase)
-    if (!queue.some((item) => item.id === id)) {
+    const oldIndex = queue.findIndex((item) => item.id === id)
+    if (oldIndex === -1) {
       throw new UserError(3, `карточка ${id} не в очереди`)
     }
 
@@ -191,6 +192,11 @@ export function moveCard(db: DatabaseSync, id: string, target: MoveTarget): void
       const at = others.findIndex((item) => item.id === before)
       if (at === -1) throw new UserError(3, `карточка ${before} не в очереди`)
       index = at
+    }
+
+    // Демон растёт только при ручном понижении, не при подъёме.
+    if (index > oldIndex) {
+      db.prepare('update cards set demons = demons + 1 where id = ?').run(id)
     }
 
     renumber(db, [

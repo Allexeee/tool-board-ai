@@ -166,6 +166,8 @@ board run note RUN-1 --text "итоги прохода" --as reviewer
 
 Owner-карточки стоят в отдельной очереди: своя нумерация `1..N`, `queue move --top/--bottom/--before` работает внутри неё. Перемещение owner-карточки не сдвигает очередь исполнителей; `now` и секция владельца в бэклоге сортируют по `position`.
 
+Ручное понижение карточки (`queue move --bottom` или `--before` ниже) увеличивает счётчик «демон». В бэклоге он виден как `ID 👿 N`; на оценку и выбор Рана пока не влияет.
+
 `take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` или `done`. Если `runReview.mode != none`, `finish` отправляет в review все карточки забега, включая `review_required=false`. Если plan требует нового файла, `card scope add` расширяет scope у карточки в работе; если нового поведения или acceptance — `block`/`ask`, затем `card amend` и повторное утверждение.
 
 Если нужен владелец — `block UI-1 --as developer --reason needs_decision --note "..."` или `ask UI-1 "вопрос" --as developer [--block]`. Ответ — `answer UI-1 "ответ"`.

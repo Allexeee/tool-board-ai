@@ -248,6 +248,23 @@ test('очередь запросов: вставка по оценке, move и
   assert.equal(listQueue(db, {}, 'request').some((card) => card.id === deferred.id), false)
 })
 
+test('демон растёт только при ручном понижении', (t) => {
+  const { db } = board(t)
+  const first = task(db, { position: 1 })
+  const second = task(db, { position: 2 })
+  const third = task(db, { position: 3 })
+
+  moveCard(db, first.id, { bottom: true })
+  assert.equal(getCard(db, first.id)!.demons, 1)
+
+  moveCard(db, first.id, { top: true })
+  assert.equal(getCard(db, first.id)!.demons, 1)
+
+  moveCard(db, second.id, { bottom: true })
+  assert.equal(getCard(db, second.id)!.demons, 1)
+  assert.equal(getCard(db, third.id)!.demons, 0)
+})
+
 test('owner-очередь: move внутри класса, исполнители не сдвигаются', (t) => {
   const { db } = board(t)
   const first = task(db, { skill: 'owner', position: 1 })

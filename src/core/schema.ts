@@ -1,7 +1,7 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { nowIso } from './clock.ts'
 
-export const SCHEMA_VERSION = 11
+export const SCHEMA_VERSION = 12
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -61,6 +61,7 @@ create table cards (
   main_commit text,
   owner_acceptance integer not null default 0,
   owner_acceptance_manual integer not null default 0,
+  demons integer not null default 0,
   in_dev integer not null default 0,
   in_main integer not null default 0,
   reverted_at text,
@@ -277,6 +278,11 @@ alter table cards add column owner_acceptance integer not null default 0;
 alter table cards add column owner_acceptance_manual integer not null default 0;
 `
 
+/** Демон: счётчик ручных понижений карточки. */
+const MIGRATE_V11_TO_V12 = `
+alter table cards add column demons integer not null default 0;
+`
+
 /** Наполняет реестр служебными тегами и тегами существующих карточек. */
 function seedTags(db: DatabaseSync): void {
   const hasCards = db
@@ -343,7 +349,8 @@ export function migrate(db: DatabaseSync): number {
       from !== 7 &&
       from !== 8 &&
       from !== 9 &&
-      from !== 10
+      from !== 10 &&
+      from !== 11
     ) {
       throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     }
@@ -377,6 +384,12 @@ export function migrate(db: DatabaseSync): number {
         .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
         .get()
       if (hasCards) db.exec(MIGRATE_V10_TO_V11)
+    }
+    if (from >= 1 && from < 12) {
+      const hasCards = db
+        .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+        .get()
+      if (hasCards) db.exec(MIGRATE_V11_TO_V12)
     }
 
     if (from === 1 || from === 2) {

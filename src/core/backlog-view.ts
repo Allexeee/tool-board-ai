@@ -127,9 +127,13 @@ function table(headers: string[], rows: string[][], classes: string[] = []): str
   return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
 }
 
+function idLabel(item: BacklogRow): string {
+  return item.demons > 0 ? `${item.id} 👿 ${item.demons}` : item.id
+}
+
 function rowsFor(rows: BacklogRow[]): string[][] {
   return rows.map((item) => [
-    `<td class="id">${esc(item.id)}</td>`,
+    `<td class="id">${esc(idLabel(item))}</td>`,
     `<td>${esc(item.title)}</td>`,
     `<td class="status">${esc(item.status)}</td>`,
     `<td class="note">${esc(item.note)}</td>`,
@@ -262,7 +266,7 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
 
   if (data.deferred.length > 0) {
     const rows = data.deferred.map((item) => [
-      `<td class="id">${esc(item.id)}</td>`,
+      `<td class="id">${esc(idLabel(item))}</td>`,
       `<td>${esc(item.title)}</td>`,
       `<td class="note reason"><div class="clamp2">${esc(item.reason ?? item.note)}</div></td>`,
     ])
