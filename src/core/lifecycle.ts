@@ -473,8 +473,8 @@ export function blockCard(
     db.prepare(
       `update cards set status = 'blocked', holder = null, position = null,
        run_id = case when phase = 'request' then run_id else null end,
-       lease_until = null, updated_at = ? where id = ?`,
-    ).run(at, card.id)
+       lease_until = null, note = ?, updated_at = ? where id = ?`,
+    ).run(note, at, card.id)
 
     // Карточка остаётся в забеге с пометкой blocked (§8.3): `run next` её
     // пропустит, `run end` снимет корректно.
@@ -527,8 +527,8 @@ export function deferCard(
 
     db.prepare(
       `update cards set status = 'deferred', holder = null, run_id = null, lease_until = null,
-       position = null, updated_at = ? where id = ?`,
-    ).run(nowIso(), card.id)
+       position = null, note = ?, updated_at = ? where id = ?`,
+    ).run(input.note?.trim() || null, nowIso(), card.id)
 
     // Отложенная карточка выпадает из очереди — дыр в позициях не оставляем.
     reorderQueue(db)
