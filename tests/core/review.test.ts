@@ -618,3 +618,75 @@ test('пакетное ревью: находка без cardId или с чуж
     /нет в пакете/,
   )
 })
+
+test('повтор находки после разбора не создаёт вторую', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  const finding = addFinding(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    severity: 'other',
+    text: 'нет теста на отказ',
+  })
+
+  // Разбор перезаписывает body находки; исходный текст остаётся в событии.
+  db.prepare("update cards set body = ?, status = 'shaping' where id = ?").run(
+    'переписанный spec',
+    finding.id,
+  )
+
+  const repeat = addFinding(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    severity: 'important',
+    text: 'нет теста на отказ',
+  })
+  assert.equal(repeat.id, finding.id)
+  assert.equal(getCard(db, finding.id)!.severity, 'important')
+})
+
+test('пакетное ревью атомарно: битая находка не оставляет карточек и записи', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'done' })
+  const packed = [{ id: card.id, title: card.title, commit: 'c'.repeat(40) }]
+  const before = db.prepare('select count(*) as n from review_packages').get() as { n: number }
+
+  assert.throws(
+    () =>
+      submitPackage(db, {
+        actor: 'reviewer-1',
+        verdict: 'done',
+        cards: packed,
+        findings: [
+          { severity: 'other', text: 'первая', cardId: card.id },
+          { severity: 'bad' as never, text: 'битая', cardId: card.id },
+        ],
+      }),
+    /severity/,
+  )
+
+  const after = db.prepare('select count(*) as n from review_packages').get() as { n: number }
+  assert.equal(after.n, before.n)
+  assert.equal(
+    listCards(db).filter((item) => item.originCardId === card.id).length,
+    0,
+  )
+})
+
+test('run review: находка с чужим cardId — ошибка', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  const other = seedCard(db, { phase: 'task', status: 'review' })
+
+  assert.throws(
+    () =>
+      submitVerdict(db, {
+        cardId: card.id,
+        reviewer: 'reviewer-1',
+        verdict: 'reopen',
+        note: 'x',
+        findings: [{ severity: 'other', text: 'мелочь', cardId: other.id }],
+      }),
+    /ревью карточки/,
+  )
+})

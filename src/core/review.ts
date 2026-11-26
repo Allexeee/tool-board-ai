@@ -202,7 +202,7 @@ export function submitPackage(db: DatabaseSync, input: SubmitPackageInput): Revi
         skill: item.skill,
         scope: item.scope,
       })
-      if (item.severity === 'critical') {
+      if (finding.severity === 'critical') {
         addDep(db, item.cardId!, finding.id, input.actor, 'критическая находка пакетного ревью')
       }
       findings.push({ ...item, findingId: finding.id })
@@ -298,6 +298,25 @@ function normalizeFindingText(text: string): string {
   return text.trim().replace(/\s+/g, ' ')
 }
 
+/** Исходный текст находки: снимок события `review.finding`, иначе текущее body. */
+function findingSourceText(db: DatabaseSync, card: Card): string {
+  const row = db
+    .prepare(
+      `select after from events
+       where subject = ? and type = 'review.finding' order by id limit 1`,
+    )
+    .get(card.id) as { after: string | null } | undefined
+  if (row?.after) {
+    try {
+      const after = JSON.parse(row.after) as { body?: unknown }
+      if (typeof after.body === 'string') return after.body
+    } catch {
+      // битый снимок: сравниваем по текущему body
+    }
+  }
+  return card.body
+}
+
 /** Открытая находка той же исходной карточки с тем же текстом, если она есть. */
 function findOpenFinding(db: DatabaseSync, originId: string, text: string): Card | null {
   const rows = db
@@ -309,7 +328,7 @@ function findOpenFinding(db: DatabaseSync, originId: string, text: string): Card
   const wanted = normalizeFindingText(text)
   for (const row of rows) {
     const card = getCard(db, row.id)
-    if (card && normalizeFindingText(card.body) === wanted) return card
+    if (card && normalizeFindingText(findingSourceText(db, card)) === wanted) return card
   }
   return null
 }
@@ -470,6 +489,14 @@ export function submitVerdict(
       throw new UserError(2, `карточка ${card.id}: лимит реревью исчерпан, нужно решение владельца`)
     }
 
+    for (const item of input.findings ?? []) {
+      if (item.cardId !== undefined && item.cardId !== card.id) {
+        throw new UserError(
+          3,
+          `находка для ${item.cardId}, а ревью карточки ${card.id}`,
+        )
+      }
+    }
     const findings = (input.findings ?? []).map((item) =>
       addFinding(db, {
         cardId: card.id,
