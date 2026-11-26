@@ -553,6 +553,8 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-work'), /Разобрал/)
   assert.match(read('board-work'), /Беру в работу \{ID\}/)
   assert.match(read('board-work'), /Понял\. Вношу/)
+  assert.match(read('board-spec'), /Беру в работу \{ID\}/)
+  assert.doesNotMatch(read('board-spec'), /Приступаю к выполнению/)
 })
 
 test('отчёт: шесть моментов и запрет отчёта по вызовам инструментов', () => {
