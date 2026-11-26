@@ -5,6 +5,7 @@ import {
   effectiveReviewerModel,
   findingsScope,
   modelContext,
+  packageReviewRequired,
   resolveReviewProfile,
   resolveRunReviewMode,
   resolveSpecReviewMode,
@@ -246,4 +247,11 @@ test('isLightRun: больше двух карточек — тяжёлый, д�
   )
   const light = seedRun(second.db, { cardIds: lightCards.map((card) => card.id) })
   assert.equal(isLightRun(second.db, light), true)
+})
+
+test('пакет ревью обязателен везде, кроме low', () => {
+  const low = { ...base, review: { ...base.review, profile: 'low' } }
+  const high = { ...base, review: { ...base.review, profile: 'high' } }
+  assert.equal(packageReviewRequired(low, context(null)), false)
+  assert.equal(packageReviewRequired(high, context(null)), true)
 })

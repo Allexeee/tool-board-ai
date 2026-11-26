@@ -5,8 +5,8 @@ import { listCards } from './cards.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { refreshMergeState, releaseToMain, tagRelease } from './git.ts'
-import { hasReviewVerdict, hasReviewWaiver } from './review.ts'
-import { findingsScope, modelContext } from './review-policy.ts'
+import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
+import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
 import { readSettings } from './settings.ts'
 import type { Card } from './types.ts'
 
@@ -29,12 +29,48 @@ function boardVersion(): string {
  * Карточки без merge-коммита (`needs_merge=false`) и отменённые
  * (`reverted_at` не null) гейт не трогают.
  */
+export interface ReleaseOptions {
+  /** Владелец явно отказался от ревью пакета; требуется reason. */
+  noReview?: boolean
+  reason?: string
+}
+
+/**
+ * Карточки без ревью: done в dev вне main, у которых нет вердикта, waiver
+ * и — когда профиль требует пакет — покрытия пакетным проходом.
+ */
+function reviewGap(
+  db: DatabaseSync,
+  cards: Card[],
+  packageRequired: boolean,
+): Card[] {
+  return cards.filter(
+    (card) =>
+      card.inDev &&
+      !card.inMain &&
+      card.status === 'done' &&
+      card.revertedAt === null &&
+      !hasReviewVerdict(db, card.id) &&
+      !hasReviewWaiver(db, card.id) &&
+      !(
+        packageRequired &&
+        card.mergeCommit !== null &&
+        packageCovers(db, card.mergeCommit)
+      ),
+  )
+}
+
 export function release(
   db: DatabaseSync,
   root: string,
   actor: string,
-): { commit: string; cards: Card[] } {
+  options: ReleaseOptions = {},
+): { commit: string; cards: Card[]; reviewWaived: boolean } {
   if (actor !== 'owner') throw new UserError(3, 'release — команда владельца')
+  const reason = options.reason?.trim() ?? ''
+  if (options.noReview && reason === '') {
+    throw new UserError(3, 'release --no-review требует --reason «почему без ревью»')
+  }
 
   const all = listCards(db)
 
@@ -52,7 +88,9 @@ export function release(
     throw new UserError(2, `релиз заблокирован: в dev есть карточки не done: ${detail}`)
   }
 
-  const scope = findingsScope(readSettings(root), modelContext(process.env))
+  const settings = readSettings(root)
+  const context = modelContext(process.env)
+  const scope = findingsScope(settings, context)
   const severities = scope === 'critical+important' ? ['critical', 'important'] : ['critical']
   const blocking = fresh.filter(
     (card) =>
@@ -66,18 +104,12 @@ export function release(
     throw new UserError(2, `релиз заблокирован: открыты находки: ${detail}`)
   }
 
-  const unreviewed = fresh.filter(
-    (card) =>
-      card.inDev &&
-      !card.inMain &&
-      card.status === 'done' &&
-      card.revertedAt === null &&
-      !hasReviewVerdict(db, card.id) &&
-      !hasReviewWaiver(db, card.id),
-  )
+  const packageRequired = packageReviewRequired(settings, context)
+  const unreviewed = options.noReview ? [] : reviewGap(db, fresh, packageRequired)
   if (unreviewed.length > 0) {
     const detail = unreviewed.map((card) => card.id).join(', ')
-    throw new UserError(2, `релиз заблокирован: нет ревью или waiver: ${detail}`)
+    const packageHint = packageRequired ? ' (нужен пакет: board review package)' : ''
+    throw new UserError(2, `релиз заблокирован: нет ревью, пакета или waiver: ${detail}${packageHint}`)
   }
 
   const commit = releaseToMain(root)
@@ -98,6 +130,16 @@ export function release(
       after: cards.map((card) => card.id),
     })
 
-    return { commit, cards }
+    if (options.noReview) {
+      appendEvent(db, {
+        type: 'release.review_waived',
+        actor,
+        subject: 'board',
+        note: reason,
+        after: { commit },
+      })
+    }
+
+    return { commit, cards, reviewWaived: options.noReview === true }
   })
 }

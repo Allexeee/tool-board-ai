@@ -210,3 +210,11 @@ export function findingsScope(
 ): ReviewProfile['findings'] {
   return resolveReviewProfile(settings, context).profile.findings
 }
+
+/** Требуется ли пакетное ревью перед релизом (low — нет). */
+export function packageReviewRequired(
+  settings: BoardSettings,
+  context: ModelContext,
+): boolean {
+  return resolveReviewProfile(settings, context).profile.package
+}

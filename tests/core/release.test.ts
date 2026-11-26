@@ -15,7 +15,7 @@ import {
 import { cancelCard, finishCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
-import { waiveReview } from '../../src/core/review.ts'
+import { collectPackage, submitPackage, waiveReview } from '../../src/core/review.ts'
 import { updateSettings } from '../../src/core/settings.ts'
 import type { Card } from '../../src/core/types.ts'
 import { seedCard } from '../helpers/board.ts'
@@ -291,6 +291,47 @@ test('finish после reopen мержит новые коммиты ветки
   const finished = finishCard(db, { id: card.id, actor: 'developer', summary: 'готово', root })
   assert.notEqual(finished.mergeCommit, first)
   assert.equal(isAncestor(root, tip, 'dev'), true)
+})
+
+test('release проходит с пакетным ревью вместо waiver', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+
+  const packed = collectPackage(db, root)
+  assert.deepEqual(packed.map((item) => item.id), [card.id])
+  assert.throws(() => release(db, root, 'owner'), /нет ревью/)
+
+  const pass = submitPackage(db, { actor: 'reviewer', verdict: 'done', cards: packed })
+  assert.equal(pass.commits.length, 1)
+  assert.deepEqual(collectPackage(db, root), [])
+  assert.equal(release(db, root, 'owner').commit.length, 40)
+})
+
+test('collectPackage --since отсекает коммиты старше базы', (t) => {
+  const { root, db } = repoBoard(t)
+  const first = merged(root, db, 'done', 'dev-a')
+  const second = merged(root, db, 'done', 'dev-b')
+
+  const since = collectPackage(db, root, { since: first.mergeCommit })
+  assert.deepEqual(since.map((item) => item.id), [second.id])
+  assert.equal(collectPackage(db, root).length, 2)
+})
+
+test('release --no-review требует reason и пишет отказ в журнал', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+
+  assert.throws(() => release(db, root, 'owner', { noReview: true }), /--reason/)
+
+  const result = release(db, root, 'owner', { noReview: true, reason: 'срочный фикс' })
+  assert.equal(result.reviewWaived, true)
+  const event = db
+    .prepare("select actor, note from events where type = 'release.review_waived' limit 1")
+    .get() as { actor: string; note: string } | undefined
+  assert.equal(event?.actor, 'owner')
+  assert.equal(event?.note, 'срочный фикс')
 })
 
 test('release ставит тег версии, повторный release не падает', (t) => {

@@ -2,7 +2,7 @@
 import { findProject } from '../../core/project.ts'
 import { release } from '../../core/release.ts'
 import type { Card } from '../../core/types.ts'
-import { stringFlag, type ParsedArgs } from '../args.ts'
+import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { ok } from '../output.ts'
 
@@ -13,7 +13,10 @@ export default async function command(args: ParsedArgs) {
 
   try {
     const actor = stringFlag(args, 'as') ?? 'owner'
-    const result = release(db, project.root, actor)
+    const result = release(db, project.root, actor, {
+      noReview: boolFlag(args, 'no-review'),
+      reason: stringFlag(args, 'reason'),
+    })
     ok(result, formatRelease(result))
     return 0
   } finally {
@@ -21,8 +24,9 @@ export default async function command(args: ParsedArgs) {
   }
 }
 
-function formatRelease(result: { commit: string; cards: Card[] }): string {
+function formatRelease(result: { commit: string; cards: Card[]; reviewWaived: boolean }): string {
   const lines = [`main ← dev: ${result.commit}`]
+  if (result.reviewWaived) lines.push('  ревью пропущено владельцем')
   if (result.cards.length === 0) {
     lines.push('  карточек в main нет')
   } else {
