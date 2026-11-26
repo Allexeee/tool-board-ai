@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { editCard, getCard, listCards } from '../../src/core/cards.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { listEvents } from '../../src/core/events.ts'
+import { moveCard } from '../../src/core/queue.ts'
 import {
   addToRun,
   dropFromRun,
@@ -149,6 +150,20 @@ test('suggestRuns учитывает навык, удержание, бронь,
 
   assert.throws(() => suggestRuns(db, 'nobody', 1), /не найден/)
   assert.throws(() => suggestRuns(db, 'developer', 0), /целое число от 1/)
+})
+
+test('suggestRuns: queue move меняет состав следующего Рана', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const first = task(db, { position: 1, title: 'Первая' })
+  const second = task(db, { position: 2, title: 'Вторая' })
+
+  assert.equal(suggestRuns(db, 'developer', 1)[0].cards[0].id, first.id)
+
+  moveCard(db, second.id, { top: true })
+  const [suggestion] = suggestRuns(db, 'developer', 1)
+  assert.equal(suggestion.cards[0].id, second.id)
+  assert.equal(suggestion.cards[0].position, 1)
 })
 
 test('suggestRuns ставит waiting-карточку после её зависимости внутри забега', (t) => {
