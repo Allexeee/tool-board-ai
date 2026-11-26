@@ -415,6 +415,7 @@ test('release ставит тег версии, повторный release не 
   ).version
   const tags = runGit(root, ['tag', '--list'])
   assert.match(tags, new RegExp(`^v${version.replace(/\./g, '\\.')}$`, 'm'))
+  assert.equal(runGit(root, ['rev-parse', `v${version}^{commit}`]).trim(), first.commit)
 
   const second = release(db, root, 'owner')
   assert.ok(second.commit)

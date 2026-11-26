@@ -164,7 +164,7 @@ export function release(
           scoped.map((card) => card.mergeCommit!).filter((commit) => commit !== null),
         )
   const version = boardVersion()
-  tagRelease(root, version)
+  tagRelease(root, version, commit)
 
   return tx(db, () => {
     if (selector !== null) {
