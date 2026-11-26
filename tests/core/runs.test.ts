@@ -991,13 +991,16 @@ test('owner-карточку нельзя взять в забег', (t) => {
 
   assert.throws(
     () => startRun(db, { executorId: 'owner', cardIds: [ownerCard.id], actor: 'owner' }),
-    /owner/,
+    /owner-карточка/,
   )
   assert.throws(
     () =>
       startRun(db, { executorId: 'developer', cardIds: [ownerCard.id], actor: 'developer' }),
-    /owner/,
+    /owner-карточка/,
   )
   assert.equal(getCard(db, ownerCard.id)!.status, 'ready')
-  assert.equal(getCard(db, devCard.id)!.status, 'ready')
+
+  // Обычная карточка тем же исполнителем берётся: проверка не блокирует всё подряд.
+  startRun(db, { executorId: 'developer', cardIds: [devCard.id], actor: 'developer' })
+  assert.equal(getCard(db, devCard.id)!.status, 'booked')
 })
