@@ -440,3 +440,20 @@ test('release с package.json требует версию новее после�
   assert.throws(() => release(db, root, 'owner'), /не новее/)
   assert.equal(runGit(root, ['rev-parse', 'main']), mainBefore)
 })
+
+test('critical из пакета блокирует релиз у done-карточки в dev', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'developer')
+
+  const packed = collectPackage(db, root)
+  assert.deepEqual(packed.map((item) => item.id), [card.id])
+
+  submitPackage(db, {
+    actor: 'reviewer-1',
+    verdict: 'done',
+    cards: packed,
+    findings: [{ severity: 'critical', text: 'нет теста на отказ', cardId: card.id }],
+  })
+
+  assert.throws(() => release(db, root, 'owner'), /находк/)
+})

@@ -448,10 +448,18 @@ test('две очереди навыков независимы: move одног
     listQueue(db, { class: 'marketing' }).map((card) => card.id),
     [mktSecond.id, mktFirst.id],
   )
+  assert.deepEqual(
+    listQueue(db, { class: 'marketing' }).map((card) => card.position),
+    [1, 2],
+  )
   assert.equal(getCard(db, mktFirst.id)!.demons, 1)
   assert.deepEqual(
     listQueue(db, { class: 'dev' }).map((card) => card.id),
     [devSecond.id, devFirst.id],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.position),
+    [1, 2],
   )
 })
 

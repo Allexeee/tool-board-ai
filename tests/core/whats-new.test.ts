@@ -89,3 +89,11 @@ test('markAnnouncedVersion: отметка переживает повторно
   markAnnouncedVersion(root, 'не версия')
   assert.equal(readAnnouncedVersion(root), '1.6.0')
 })
+
+test('npm-пакет включает docs/whats-new', () => {
+  const pkg = JSON.parse(
+    readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+  ) as { files: string[]; version: string }
+  assert.ok(pkg.files.includes('docs/whats-new'), 'файлы пакета без заметок')
+  assert.ok(readVersionNotes(pkg.version).length > 0, 'заметки текущей версии не читаются')
+})

@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 
 const bin = resolve('bin/board.ts')
@@ -139,4 +140,40 @@ test('review package: пустой пакет и запись без карто�
   const submit = run(root, ['review', 'package', '--verdict', 'done', '--reviewer', 'reviewer'])
   assert.equal(submit.code, 2)
   assert.match(submit.err, /пуст/)
+})
+
+test('review package: пустой cardId в findings.json — ошибка', (t) => {
+  const { root } = fixture(t)
+  const file = join(root, 'findings.json')
+  writeFileSync(
+    file,
+    JSON.stringify([{ severity: 'other', text: 'мелочь', cardId: '  ' }]),
+    'utf8',
+  )
+
+  const result = run(root, [
+    'review', 'package', '--verdict', 'done', '--reviewer', 'reviewer', '--findings', file,
+  ])
+  assert.equal(result.code, 3)
+  assert.match(result.err, /cardId/)
+})
+
+test('review submit считает уникальные находки при слиянии', (t) => {
+  const { root, db } = fixture(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  const file = join(root, 'findings.json')
+  writeFileSync(
+    file,
+    JSON.stringify([
+      { severity: 'other', text: 'одна и та же' },
+      { severity: 'important', text: 'одна  и  та же' },
+    ]),
+    'utf8',
+  )
+
+  const result = run(root, [
+    'review', 'submit', card.id, '--verdict', 'done', '--plan', 'done', '--reviewer', 'reviewer', '--findings', file,
+  ])
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /находок: 1/)
 })

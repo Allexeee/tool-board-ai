@@ -1,6 +1,6 @@
 {
   "name": "tool-board-ai",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "license": "MIT",
   "author": "Allexeee",
@@ -14,6 +14,7 @@
     "bin",
     "src",
     "assets",
+    "docs/whats-new",
     "README.md"
   ],
   "bin": {

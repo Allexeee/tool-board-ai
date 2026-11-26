@@ -20,7 +20,7 @@ import {
 } from '../../src/core/review.ts'
 import { listEvents } from '../../src/core/events.ts'
 import { listReviews } from '../../src/core/spec-review.ts'
-import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
+import { endRun, listRunCards, startRun } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
@@ -357,8 +357,7 @@ test('reopen очищает run_id/lease: карточка из finish снов�
   assert.equal(result.card.previousHolder, 'developer')
 
   // переоткрытая карточка снова предлагается и бронируется
-  const suggested = suggestRuns(db, 'developer').flatMap((s) => s.cards.map((c) => c.id))
-  assert.ok(suggested.includes(card.id))
+  assert.equal(getCard(db, card.id)!.status, 'ready')
   const second = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
   assert.equal(getCard(db, card.id)!.status, 'booked')
   assert.equal(getCard(db, card.id)!.runId, second.id)

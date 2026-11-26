@@ -133,7 +133,7 @@ export default async function command(args: ParsedArgs) {
       severity,
       text,
     })
-    ok(created, `${created.id} создана: находка ${severity} из ревью ${cardId}`)
+    ok(created, `${created.id} · находка ${created.severity} по ревью ${cardId}`)
     return 0
   }
 
@@ -186,7 +186,7 @@ export default async function command(args: ParsedArgs) {
     })
     ok(
       result,
-      `${cardId} ${verdict} · plan ${planCompliance}${result.findings.length > 0 ? `; находок: ${result.findings.length}` : ''}`,
+      `${cardId} ${verdict} · plan ${planCompliance}${countFindings(result.findings) > 0 ? `; находок: ${countFindings(result.findings)}` : ''}`,
     )
     return 0
   }
@@ -233,7 +233,7 @@ export default async function command(args: ParsedArgs) {
     })
     ok(
       result,
-      `пакет ${result.id}: ${verdict} · карточек ${result.cards.length} · коммитов ${result.commits.length}${result.findings.length > 0 ? ` · находок ${result.findings.length}` : ''}`,
+      `пакет ${result.id}: ${verdict} · карточек ${result.cards.length} · коммитов ${result.commits.length}${countFindings(result.findings) > 0 ? ` · находок ${countFindings(result.findings)}` : ''}`,
     )
     return 0
   }
@@ -289,6 +289,11 @@ function parseFindings(path: string): FindingInput[] {
 
 function value(text: string | null): string {
   return text === null || text === '' ? '—' : text
+}
+
+/** Число уникальных карточек-находок: повтор сливается в одну. */
+function countFindings(items: Array<{ id?: string; findingId?: string }>): number {
+  return new Set(items.map((item) => item.findingId ?? item.id).filter(Boolean)).size
 }
 
 function formatPackage(cards: PackageCard[]): string {
