@@ -18,7 +18,6 @@ import {
   noteRun,
   reclaimExpired,
   releaseRun,
-  suggestRuns,
   suggestVariantRuns,
   startRun,
 } from '../../src/core/runs.ts'
@@ -64,153 +63,14 @@ function fourTasks(db: DatabaseSync): Card[] {
 
 const ids = (cards: Card[]): string[] => cards.map((card) => card.id)
 
-test('suggestRuns собирает забег до run_size из карточек навыка исполнителя', (t) => {
-  const { db } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'], runSize: 3 })
-  fourTasks(db)
-
-  const suggestions = suggestRuns(db, 'developer', 2)
-  assert.equal(suggestions.length, 2)
-  assert.equal(suggestions[0].executorId, 'developer')
-  assert.equal(suggestions[0].group, 'UI')
-  assert.deepEqual(ids(suggestions[0].cards), ['UI-1', 'UI-2', 'UI-3'])
-  assert.ok(suggestions[0].cards.every((card) => card.skill === 'dev'))
-
-  // run_size — потолок: оставшаяся карточка образует забег из одной.
-  assert.deepEqual(ids(suggestions[1].cards), ['UI-4'])
-
-  const all = suggestions.flatMap((suggestion) => ids(suggestion.cards))
-  assert.equal(new Set(all).size, all.length, 'предложения не пересекаются')
-})
-
-test('suggestRuns: без позиции — после позиционных, по score и дате', (t) => {
-  const { db } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  const queued = seedCard(db, {
-    phase: 'task',
-    status: 'ready',
-    skill: 'dev',
-    position: 1,
-    importance: 1,
-    urgency: 1,
-  })
-  const high = seedCard(db, {
-    phase: 'task',
-    status: 'ready',
-    skill: 'dev',
-    importance: 3,
-    urgency: 3,
-  })
-  const low = seedCard(db, {
-    phase: 'task',
-    status: 'ready',
-    skill: 'dev',
-    importance: 1,
-    urgency: 2,
-  })
-
-  const [suggestion] = suggestRuns(db, 'developer', 1)
-  assert.deepEqual(ids(suggestion.cards), [queued.id, high.id, low.id])
-})
-
-test('owner-карточки не предлагаются и не бронируются', (t) => {
-  const { db } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  const ownerCard = seedCard(db, {
-    phase: 'task',
-    status: 'ready',
-    position: 1,
-    skill: 'owner',
-    title: 'Личная задача владельца',
-  })
-  const devCard = seedCard(db, { phase: 'task', status: 'ready', position: 2 })
-
-  const suggested = suggestRuns(db, 'owner', 3).flatMap((suggestion) =>
-    suggestion.cards.map((card) => card.id),
-  )
-  assert.ok(!suggested.includes(ownerCard.id), 'owner-карточка не предлагается')
-  assert.ok(suggested.includes(devCard.id), 'владелец может взять обычную карточку')
-
-  assert.throws(
-    () => startRun(db, { executorId: 'owner', cardIds: [ownerCard.id], actor: 'owner' }),
-    /owner-карточка/,
-  )
-  assert.throws(
-    () => startRun(db, { executorId: 'developer', cardIds: [ownerCard.id], actor: 'developer' }),
-    /owner-карточка/,
-  )
-  assert.equal(getCard(db, ownerCard.id)!.status, 'ready')
-  assert.equal(getCard(db, ownerCard.id)!.holder, null)
-
-  const run = startRun(db, { executorId: 'owner', cardIds: [devCard.id], actor: 'owner' })
-  assert.equal(run.status, 'active')
-  assert.equal(getCard(db, ownerCard.id)!.status, 'ready')
-})
-
-test('suggestRuns учитывает навык, удержание, бронь, фазу и позицию', (t) => {
-  const { db } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  seedExecutor(db, { id: 'marketer', skills: ['marketing'] })
-
-  const dev = task(db, { position: 1 })
-  task(db, { position: 2, skill: 'marketing', title: 'Маркетинг' })
-  const held = task(db, { position: 3 })
-  db.prepare("update cards set holder = 'marketer' where id = ?").run(held.id)
-  const booked = task(db, { position: 4 })
-  db.prepare("update cards set status = 'booked', run_id = 'RUN-9' where id = ?").run(booked.id)
-  seedCard(db, { phase: 'request', status: 'new', position: 0, title: 'Запрос' })
-
-  const suggestions = suggestRuns(db, 'developer', 3)
-  assert.deepEqual(ids(suggestions[0].cards), [dev.id])
-  assert.equal(suggestions.length, 1)
-
-  assert.throws(() => suggestRuns(db, 'nobody', 1), /не найден/)
-  assert.throws(() => suggestRuns(db, 'developer', 0), /целое число от 1/)
-})
-
-test('suggestRuns: queue move меняет состав следующего Рана', (t) => {
-  const { db } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  const first = task(db, { position: 1, title: 'Первая' })
-  const second = task(db, { position: 2, title: 'Вторая' })
-
-  assert.equal(suggestRuns(db, 'developer', 1)[0].cards[0].id, first.id)
-
-  moveCard(db, second.id, { top: true })
-  const [suggestion] = suggestRuns(db, 'developer', 1)
-  assert.equal(suggestion.cards[0].id, second.id)
-  assert.equal(suggestion.cards[0].position, 1)
-})
-
-test('suggestRuns ставит waiting-карточку после её зависимости внутри забега', (t) => {
-  const { db } = board(t)
-  seedExecutor(db, { id: 'developer', skills: ['dev'] })
-
-  const first = task(db, { position: 1 })
-  const second = task(db, { position: 2, status: 'waiting' })
-  addDep(db, second.id, first.id)
-
-  const [suggestion] = suggestRuns(db, 'developer', 1)
-  assert.deepEqual(ids(suggestion.cards), [first.id, second.id])
-
-  // waiting-карточка с зависимостью вне забега не предлагается.
-  const external = task(db, { position: 3, status: 'in_progress' })
-  const waiting = task(db, { position: 4, status: 'waiting' })
-  addDep(db, waiting.id, external.id)
-
-  const [next] = suggestRuns(db, 'developer', 1)
-  assert.ok(!ids(next.cards).includes(waiting.id))
-})
-
 test('startRun бронирует карточки и запрещает второй активный забег', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'], runSize: 3 })
-  fourTasks(db)
+  const cards = fourTasks(db)
 
-  const [suggestion] = suggestRuns(db, 'developer', 1)
   const run = startRun(db, {
     executorId: 'developer',
-    cardIds: ids(suggestion.cards),
+    cardIds: cards.slice(0, 3).map((card) => card.id),
     actor: 'developer',
   })
 
@@ -1072,4 +932,46 @@ test('run add возвращает карточку после block → answer 
 
   addToRun(db, { executorId: 'developer', cardId: card.id, actor: 'developer' })
   assert.equal(listRunCards(db, run.id).find((row) => row.cardId === card.id)!.status, 'booked')
+})
+
+test('suggestVariantRuns: две карточки без позиции — по score и дате', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'], runSize: 3 })
+  const low = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    importance: 1,
+    urgency: 1,
+    tags: ['new'],
+  })
+  const high = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    importance: 3,
+    urgency: 3,
+    tags: ['new'],
+  })
+
+  const [run] = suggestVariantRuns(db, 'developer')
+  assert.deepEqual(run.cards.map((card) => card.id), [high.id, low.id])
+})
+
+test('run add ставит позицию карточке без позиции', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const first = seedCard(db, { phase: 'task', status: 'ready', skill: 'dev', position: 1 })
+  const loose = seedCard(db, { phase: 'task', status: 'ready', skill: 'dev' })
+  const run = startRun(db, {
+    executorId: 'developer',
+    cardIds: [first.id],
+    actor: 'developer',
+  })
+
+  addToRun(db, { executorId: 'developer', cardId: loose.id, actor: 'developer' })
+
+  assert.equal(getCard(db, loose.id)!.status, 'booked')
+  assert.ok(getCard(db, loose.id)!.position)
+  assert.equal(listRunCards(db, run.id).length, 2)
 })

@@ -396,3 +396,28 @@ test('now 3: owner после --bottom идёт последним в своей
     [second.id, first.id, dev.id],
   )
 })
+
+test('now 1 показывает карточку без позиции после позиционных', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const queued = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 1,
+    importance: 1,
+    urgency: 1,
+  })
+  const loose = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    importance: 3,
+    urgency: 3,
+  })
+
+  const view = nowData(db, { view: 1, executorId: 'developer' })
+  const ids = (view.cards ?? []).map((card) => card.id)
+  assert.ok(ids.includes(loose.id))
+  assert.ok(ids.indexOf(queued.id) < ids.indexOf(loose.id))
+})
