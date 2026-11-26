@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { nowIso } from '../../src/core/clock.ts'
 import { ask } from '../../src/core/discussion.ts'
 import { nowData, renderNow } from '../../src/core/now.ts'
+import { moveCard } from '../../src/core/queue.ts'
 import { deferCard } from '../../src/core/lifecycle.ts'
 import { editCard } from '../../src/core/cards.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
@@ -364,4 +365,19 @@ test('now 0 показывает счётчик карточек на ревью
   const owner = nowData(db, { view: 0, executorId: 'owner' })
   assert.equal(owner.reviewCount, 1)
   assert.match(stripAnsi(renderNow(owner)), /НА РЕВЬЮ \(1\)/)
+})
+
+test('now 3: owner после --bottom идёт последним в своей очереди', (t) => {
+  const { db, root } = board(t)
+  const first = seedCard(db, { phase: 'task', status: 'ready', skill: 'owner', position: 1 })
+  const second = seedCard(db, { phase: 'task', status: 'ready', skill: 'owner', position: 2 })
+  const dev = readyCard(db, { position: 1 })
+
+  moveCard(db, first.id, { bottom: true })
+
+  const data = nowData(db, { view: 3, executorId: 'owner', root })
+  assert.deepEqual(
+    data.queue!.map((card) => card.id),
+    [second.id, first.id, dev.id],
+  )
 })
