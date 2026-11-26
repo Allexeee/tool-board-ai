@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { addDep } from '../../src/core/deps.ts'
 import { addIdea } from '../../src/core/cards.ts'
+import { deferCard } from '../../src/core/lifecycle.ts'
 import {
   BACKLOG_FONT_NAME,
   backlogStatePath,
@@ -12,7 +13,7 @@ import {
   writeBacklogHtml,
 } from '../../src/core/backlog.ts'
 import { readSettings, updateSettings } from '../../src/core/settings.ts'
-import { makeBoard, seedCard } from '../helpers/board.ts'
+import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -70,6 +71,23 @@ test('renderBacklog: статусы, группы, отложенные и го�
   assert.match(md, /## Готово за последние 12 часов/)
   assert.match(md, /Готово/)
   assert.doesNotMatch(md, /отменена/)
+})
+
+test('renderBacklog: причина отложенной приходит из defer --note', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  seedExecutor(board.db)
+  const card = seedCard(board.db, { phase: 'task', status: 'ready', position: 1 })
+
+  deferCard(board.db, {
+    id: card.id,
+    actor: 'developer',
+    note: 'Ждём макет. Вторая фраза не в колонку.',
+  })
+
+  const row = buildBacklog(board.db).deferred.find((item) => item.id === card.id)!
+  assert.equal(row.note, 'Ждём макет. Вторая фраза не в колонку.')
+  assert.equal(row.reason, 'Ждём макет.')
 })
 
 test('renderBacklog: приёмка — в начале задач владельца, без отдельной секции', (t) => {
