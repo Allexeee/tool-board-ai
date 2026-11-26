@@ -182,7 +182,7 @@ test('moveCard отказывает вне очереди, без цели и с
   assert.throws(() => moveCard(db, queued.id, { before: approval.id }), /не в очереди/)
 })
 
-test('reorderQueue сортирует по оценке, внутри равных сохраняет текущий порядок', (t) => {
+test('reorderQueue сохраняет ручной порядок и нумерует 1..N', (t) => {
   const { db } = board(t)
   const x = task(db, { importance: 2, urgency: 2 }) // 4
   const y = task(db, { importance: 2, urgency: 2 }) // 4
@@ -197,7 +197,7 @@ test('reorderQueue сортирует по оценке, внутри равны
   assert.deepEqual(ids(listQueue(db)), [y.id, z.id, x.id])
 
   reorderQueue(db)
-  assert.deepEqual(ids(listQueue(db)), [z.id, y.id, x.id])
+  assert.deepEqual(ids(listQueue(db)), [y.id, z.id, x.id])
   assert.deepEqual(positions(listQueue(db)), [1, 2, 3])
 })
 
@@ -246,6 +246,15 @@ test('очередь запросов: вставка по оценке, move и
   insertIntoQueue(db, deferred.id)
   db.prepare("update cards set status = 'deferred', position = null where id = ?").run(deferred.id)
   assert.equal(listQueue(db, {}, 'request').some((card) => card.id === deferred.id), false)
+})
+
+test('blocked без позиции не попадает в очередь', (t) => {
+  const { db } = board(t)
+  const blocked = task(db, { status: 'blocked', position: null })
+  const ready = task(db, { position: 1 })
+
+  assert.deepEqual(listQueue(db).map((card) => card.id), [ready.id])
+  assert.equal(getCard(db, blocked.id)!.position, null)
 })
 
 test('демон растёт только при ручном понижении', (t) => {
