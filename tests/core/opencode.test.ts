@@ -88,6 +88,26 @@ test('закоммиченные .opencode файлы совпадают с ша
   assert.ok(agents.includes(AGENTS_BLOCK), 'AGENTS.md: блок board совпадает')
 })
 
+test('после обновления агент пересказывает «Что нового» и предлагает adopt', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = pluginSource(root)
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+  const hook = plugin.slice(
+    plugin.indexOf("ctx.session.hook('context'"),
+    plugin.indexOf('ctx.tool.transform'),
+  )
+
+  for (const text of [hook, agents]) {
+    assert.match(text, /board upgrade/)
+    assert.match(text, /init --refresh/)
+    assert.match(text, /Что нового/)
+    assert.match(text, /без флагов и CLI-жаргона/)
+    assert.match(text, /изменений нет/i)
+    assert.match(text, /board adopt --check/)
+  }
+})
+
 test('навыки ссылаются на terminology.md и на порядок работы', () => {
   const root = tmp()
   writeOpenCodeFiles(root)

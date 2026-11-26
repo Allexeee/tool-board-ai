@@ -16,6 +16,16 @@ function run(dir: string, args: string[]) {
   })
 }
 
+/** Обходит локальный CLI: в тесте он заглушка без «Что нового». */
+function runGlobal(dir: string, args: string[]) {
+  return spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
+    windowsHide: true,
+  })
+}
+
 test('init в git-проекте ставит submodule и генерирует .opencode', (t) => {
   const repo = makeRepo()
   t.after(repo.close)
@@ -34,17 +44,50 @@ test('init в git-проекте ставит submodule и генерирует 
 
   const data = JSON.parse(result.stdout) as {
     boardVersion: string
+    from: string | null
+    to: string | null
+    whatsNew: Array<{ version: string; points: string[] }>
     proposal: unknown
     proposalWarning: string | null
     recommendations: string[]
   }
   assert.equal(data.boardVersion, '1.1.0')
+  assert.equal(data.from, null)
+  assert.equal(data.to, '1.1.0')
+  assert.deepEqual(data.whatsNew.map((entry) => entry.version), ['1.0.0', '1.1.0'])
   assert.equal(data.proposal, null)
   assert.match(data.proposalWarning ?? '', /не совместима/)
   assert.ok(data.recommendations.includes(data.proposalWarning!))
   assert.equal(currentBoardVersion(repo.root), '1.1.0')
   assert.ok(existsSync(join(repo.root, 'tools', 'board', 'bin', 'board.ts')))
   assert.ok(existsSync(join(repo.root, '.opencode', 'plugins', 'board', 'index.ts')))
+})
+
+test('init --refresh не повторяет уже показанное «Что нового»', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+  const source = makeBoardSource()
+  t.after(source.close)
+
+  const first = run(repo.root, [
+    'init', '--board-version', 'v1.1.0', '--board-source', source.source, '--json',
+  ])
+  assert.equal(first.status, 0, first.stderr || first.stdout)
+
+  const refreshed = runGlobal(repo.root, ['init', '--refresh', '--json'])
+  assert.equal(refreshed.status, 0, refreshed.stderr || refreshed.stdout)
+  const data = JSON.parse(refreshed.stdout) as {
+    from: string | null
+    to: string | null
+    whatsNew: Array<{ version: string }>
+  }
+  assert.equal(data.from, '1.1.0')
+  assert.equal(data.to, '1.1.0')
+  assert.deepEqual(data.whatsNew, [])
+
+  const text = runGlobal(repo.root, ['init', '--refresh'])
+  assert.equal(text.status, 0, text.stderr || text.stdout)
+  assert.match(text.stdout, /Что нового: изменений нет\./)
 })
 
 test('init в репозитории board не добавляет submodule', (t) => {
