@@ -65,7 +65,7 @@ test('renderBacklog: статусы, группы, отложенные и го�
   assert.match(md, /ждёт другие карточки/)
   assert.match(md, /\| Ждёт \|.*ждёт: /)
   assert.match(md, /в работе/)
-  assert.match(md, /проходит ревью/)
+  assert.match(md, /ждёт финального ревью/)
   assert.match(md, /заблокирована/)
   assert.match(md, /## Отложенные/)
   assert.match(md, /позже/)
