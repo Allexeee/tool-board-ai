@@ -148,11 +148,18 @@ test('renderBacklogPage: автообновление, кнопка и круп�
   assert.match(html, /Обновить/)
   assert.match(html, /авто 5 с/)
   assert.match(html, /meta name="board-revision"/)
-  assert.match(html, /fetch\(location\.href, \{ cache: 'no-store' \}\)/)
+  assert.match(html, /fetch\(location\.href, options\)/)
   assert.match(html, /DOMParser/)
   assert.match(html, /replaceWith\(document\.importNode/)
+  assert.match(html, /stopAuto/)
+  assert.match(html, /AbortController/)
+  assert.match(html, /· F5/)
+  assert.match(html, /currentStyle\.textContent = nextStyle\.textContent/)
+  for (const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+    assert.doesNotThrow(() => new Function(script[1]), 'inline script синтаксически валиден')
+  }
   const interval = html.slice(html.lastIndexOf('setInterval('))
-  assert.match(interval, /window\.boardRefresh\(\)/)
+  assert.match(interval, /refresh\(false\)/)
   assert.doesNotMatch(interval, /location\.reload/)
 
   const staticHtml = renderBacklogPage(buildBacklog(board.db), 0)
