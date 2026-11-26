@@ -474,6 +474,8 @@ export function suggestRuns(
     .filter((card) => canTake(executor, card))
     .sort(
       (left, right) =>
+        (executor.skills.indexOf(left.skill ?? '') + 1 || 999) -
+          (executor.skills.indexOf(right.skill ?? '') + 1 || 999) ||
         left.position! - right.position! ||
         left.createdAt.localeCompare(right.createdAt) ||
         left.id.localeCompare(right.id),
@@ -542,6 +544,8 @@ export function suggestVariantRuns(
     .filter((card) => card.runId === null && (card.holder === null || card.holder === executorId))
     .sort(
       (left, right) =>
+        (executor.skills.indexOf(left.skill ?? '') + 1 || 999) -
+          (executor.skills.indexOf(right.skill ?? '') + 1 || 999) ||
         (left.position ?? Number.MAX_SAFE_INTEGER) -
           (right.position ?? Number.MAX_SAFE_INTEGER) ||
         left.createdAt.localeCompare(right.createdAt) ||
@@ -564,6 +568,8 @@ export function suggestVariantRuns(
     )
     .sort(
       (left, right) =>
+        (executor.skills.indexOf(left.skill ?? '') + 1 || 999) -
+          (executor.skills.indexOf(right.skill ?? '') + 1 || 999) ||
         left.position! - right.position! ||
         left.createdAt.localeCompare(right.createdAt) ||
         left.id.localeCompare(right.id),

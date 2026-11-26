@@ -13,6 +13,7 @@ import {
   writeBacklogHtml,
 } from '../../src/core/backlog.ts'
 import { readSettings, updateSettings } from '../../src/core/settings.ts'
+import { renderBacklogPage } from '../../src/core/backlog-view.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -64,13 +65,28 @@ test('renderBacklog: статусы, группы, отложенные и го�
   assert.match(md, /ждёт другие карточки/)
   assert.match(md, /\| Ждёт \|.*ждёт: /)
   assert.match(md, /в работе/)
-  assert.match(md, /проходит ревью/)
+  assert.match(md, /ждёт финального ревью/)
   assert.match(md, /заблокирована/)
   assert.match(md, /## Отложенные/)
   assert.match(md, /позже/)
   assert.match(md, /## Готово за последние 12 часов/)
   assert.match(md, /Готово/)
   assert.doesNotMatch(md, /отменена/)
+})
+
+test('бэклог показывает демона в ID', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const card = seedCard(board.db, { phase: 'task', status: 'ready', position: 1 })
+  board.db.prepare('update cards set demons = 2 where id = ?').run(card.id)
+
+  const md = renderBacklog(board.db)
+  const html = renderBacklogPage(buildBacklog(board.db))
+  assert.match(md, new RegExp(`${card.id} 👿 2`))
+  assert.match(html, new RegExp(`${card.id} 👿 2`))
+
+  board.db.prepare('update cards set demons = 0 where id = ?').run(card.id)
+  assert.doesNotMatch(renderBacklog(board.db), /👿/)
 })
 
 test('renderBacklog: причина отложенной приходит из defer --note', (t) => {

@@ -1,7 +1,7 @@
 import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { findProject } from '../../core/project.ts'
-import { listQueue, moveCard, reorderQueue } from '../../core/queue.ts'
+import { cardQueueClass, listQueue, moveCard, reorderQueue } from '../../core/queue.ts'
 import type { Card } from '../../core/types.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
@@ -26,7 +26,7 @@ export default async function command(args: ParsedArgs) {
     moveCard(db, id, { before, top: boolFlag(args, 'top'), bottom: boolFlag(args, 'bottom') })
 
     const card = getCard(db, id)!
-    ok(card, `${card.id} · позиция ${card.position} в очереди`)
+    ok(card, `${card.id} · позиция ${card.position} · ${cardQueueClass(card)}`)
     return 0
   }
 
@@ -56,5 +56,5 @@ export default async function command(args: ParsedArgs) {
 }
 
 function formatQueueRow(card: Card): string {
-  return `  ${String(card.position).padStart(2)}  ${card.id.padEnd(8)} ${card.status}`
+  return `  ${String(card.position).padStart(2)}  ${card.id.padEnd(8)} ${card.status}  · ${cardQueueClass(card)}`
 }

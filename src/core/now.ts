@@ -165,6 +165,8 @@ function ownerView(
   )
   const ownerCards = listCards(db, { skill: 'owner', status: ['ready', 'waiting'] }).sort(
     (left, right) =>
+      (left.position ?? Number.MAX_SAFE_INTEGER) -
+        (right.position ?? Number.MAX_SAFE_INTEGER) ||
       (right.importance ?? -1) - (left.importance ?? -1) ||
       left.createdAt.localeCompare(right.createdAt) ||
       left.id.localeCompare(right.id),
@@ -363,7 +365,7 @@ const STATUS_WORDS: Record<CardStatus, string> = {
   in_progress: 'в работе',
   blocked: 'заблокирована',
   deferred: 'отложена',
-  review: 'проходит ревью',
+  review: 'ждёт финального ревью',
   acceptance: 'требует приёмки',
   done: 'сделано',
   cancelled: 'отменена',
@@ -491,7 +493,7 @@ function renderOpen(lines: string[], data: NowView, painter: Painter): void {
       const holder = card.holder ? ` ${painter(card.holder, agentColor(card.holder))}` : ''
       lines.push(
         `  ${String(card.position).padStart(2)}  ${card.id.padEnd(7)} ${card.title}  ` +
-          `${statusWord(card, painter)}${holder}`,
+          `${statusWord(card, painter)}${holder}  · ${card.skill ?? 'executors'}`,
       )
     }
     if (data.moreQueue) lines.push('  ...')

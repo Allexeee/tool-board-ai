@@ -84,6 +84,7 @@ interface Row {
   importance: number | null
   urgency: number | null
   position: number | null
+  demons: number
   needs_merge: number
   review_required: number
   plan_waived: number
@@ -133,6 +134,7 @@ const toCard = (row: Row): Card => ({
   importance: row.importance,
   urgency: row.urgency,
   position: row.position,
+  demons: row.demons ?? 0,
   needsMerge: row.needs_merge === 1,
   reviewRequired: row.review_required === 1,
   planWaived: row.plan_waived === 1,
@@ -229,14 +231,14 @@ function insertCard(db: DatabaseSync, card: CardInsert): void {
        severity, origin_card_id, summary, holder, run_id, branch, attempt,
        spec_rev, review_reopens, merge_commit, in_dev, in_main, reverted_at,
        revert_commit, waive_deps, lease_until, previous_holder, created_at,
-       updated_at, shaped_at, approved_at, done_at, cancel_reason, note
+       updated_at, shaped_at, approved_at, done_at, cancel_reason, note, demons
      ) values (
        ?, ?, ?, ?, ?, ?, ?, ?, ?,
        null, null, null, ?, 0, '[]', ?,
        null, null, null, null, null, null, 1,
        1, 0, null, 0, 0, null,
        null, 0, null, null, ?, ?,
-       null, null, null, null, null
+       null, null, null, null, null, 0
      )`,
   ).run(
     card.id,
@@ -431,15 +433,14 @@ export function editCard(
         }
         sets.push('skill = ?')
         params.push(skill)
-        // Owner-карточки не стоят ни в одной очереди: позиция сбрасывается.
         if (skill === OWNER_SKILL) {
-          // Owner-карточка — сразу задача владельца: без мержа, ревью и очереди.
+          // Owner-карточка — сразу задача владельца: без мержа и ревью.
+          // Позиция остаётся: owner-очередь отдельная, порядок сохраняется.
           sets.push('phase = ?')
           params.push('task')
           sets.push('status = ?')
           params.push('ready')
           sets.push('review_required = 0')
-          sets.push('position = null')
           // Держатель, lease и забег снимаются: задачу владельца никто не держит.
           sets.push('holder = null')
           sets.push('lease_until = null')

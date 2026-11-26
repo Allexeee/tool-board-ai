@@ -22,7 +22,7 @@ test('находка по owner-карточке создаётся как dev-�
   assert.equal(finding.skill, 'dev')
 })
 
-test('reorder снимает застрявшую позицию у owner-карточки', (t) => {
+test('reorder нормализует позицию owner-карточки в её очереди', (t) => {
   const board = makeBoard()
   t.after(board.close)
   const owner = seedCard(board.db, { phase: 'task', status: 'ready' })
@@ -32,7 +32,7 @@ test('reorder снимает застрявшую позицию у owner-кар
 
   reorderQueue(board.db)
 
-  assert.equal(getCard(board.db, owner.id)!.position, null)
+  assert.equal(getCard(board.db, owner.id)!.position, 1)
 })
 
 test('amend owner-карточки возвращает в new без держателя и lease', (t) => {

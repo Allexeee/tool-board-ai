@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import type { DatabaseSync } from 'node:sqlite'
 import { editCard, getCard } from '../../src/core/cards.ts'
 import {
+  ensureSkillQueues,
   insertIntoQueue,
   listQueue,
   moveCard,
@@ -182,7 +183,7 @@ test('moveCard отказывает вне очереди, без цели и с
   assert.throws(() => moveCard(db, queued.id, { before: approval.id }), /не в очереди/)
 })
 
-test('reorderQueue сортирует по оценке, внутри равных сохраняет текущий порядок', (t) => {
+test('reorderQueue сохраняет ручной порядок и нумерует 1..N', (t) => {
   const { db } = board(t)
   const x = task(db, { importance: 2, urgency: 2 }) // 4
   const y = task(db, { importance: 2, urgency: 2 }) // 4
@@ -197,7 +198,7 @@ test('reorderQueue сортирует по оценке, внутри равны
   assert.deepEqual(ids(listQueue(db)), [y.id, z.id, x.id])
 
   reorderQueue(db)
-  assert.deepEqual(ids(listQueue(db)), [z.id, y.id, x.id])
+  assert.deepEqual(ids(listQueue(db)), [y.id, z.id, x.id])
   assert.deepEqual(positions(listQueue(db)), [1, 2, 3])
 })
 
@@ -248,16 +249,78 @@ test('очередь запросов: вставка по оценке, move и
   assert.equal(listQueue(db, {}, 'request').some((card) => card.id === deferred.id), false)
 })
 
+test('blocked без позиции не попадает в очередь', (t) => {
+  const { db } = board(t)
+  const blocked = task(db, { status: 'blocked', position: null })
+  const ready = task(db, { position: 1 })
+
+  assert.deepEqual(listQueue(db).map((card) => card.id), [ready.id])
+  assert.equal(getCard(db, blocked.id)!.position, null)
+})
+
+test('демон растёт только при ручном понижении', (t) => {
+  const { db } = board(t)
+  const first = task(db, { position: 1 })
+  const second = task(db, { position: 2 })
+  const third = task(db, { position: 3 })
+
+  moveCard(db, first.id, { bottom: true })
+  assert.equal(getCard(db, first.id)!.demons, 1)
+
+  moveCard(db, first.id, { top: true })
+  assert.equal(getCard(db, first.id)!.demons, 1)
+
+  moveCard(db, second.id, { bottom: true })
+  assert.equal(getCard(db, second.id)!.demons, 1)
+  assert.equal(getCard(db, third.id)!.demons, 0)
+})
+
+test('owner-очередь: move внутри класса, исполнители не сдвигаются', (t) => {
+  const { db } = board(t)
+  const first = task(db, { skill: 'owner', position: 1 })
+  const second = task(db, { skill: 'owner', position: 2 })
+  const dev = task(db, { position: 1 })
+
+  moveCard(db, first.id, { bottom: true })
+  assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.id), [second.id, first.id])
+  assert.deepEqual(listQueue(db, { class: 'dev' }).map((card) => card.id), [dev.id])
+  assert.equal(listQueue(db, { class: 'owner' })[0].position, 1)
+  assert.equal(listQueue(db, { class: 'owner' })[1].position, 2)
+})
+
+test('owner-очередь: --before через классы даёт ошибку', (t) => {
+  const { db } = board(t)
+  const owner = task(db, { skill: 'owner', position: 1 })
+  const dev = task(db, { position: 1 })
+
+  assert.throws(() => moveCard(db, dev.id, { before: owner.id }), /разных очередях/)
+})
+
+test('owner-очередь: insert ставит в конец, reorder нумерует оба класса', (t) => {
+  const { db } = board(t)
+  const first = task(db, { skill: 'owner', position: 1 })
+  const second = task(db, { skill: 'owner', position: null, importance: 3, urgency: 3 })
+  const dev = task(db, { position: 1 })
+
+  insertIntoQueue(db, second.id)
+  assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.id), [first.id, second.id])
+
+  reorderQueue(db)
+  assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.position), [1, 2])
+  assert.deepEqual(listQueue(db, { class: 'dev' }).map((card) => card.position), [1])
+  assert.equal(getCard(db, dev.id)!.position, 1)
+})
+
 test('owner-карточка не ставится в очередь запросов', (t) => {
   const { db } = board(t)
   const owner = task(db, { phase: 'request', status: 'new', skill: 'owner' })
 
   insertIntoQueue(db, owner.id)
   assert.equal(getCard(db, owner.id)!.position, null)
-  assert.equal(listQueue(db, {}, 'request').length, 0)
+  assert.equal(listQueue(db, { class: 'dev' }, 'request').length, 0)
 })
 
-test('смена навыка на owner убирает позицию из очереди', (t) => {
+test('смена навыка на owner переносит карточку в owner-очередь', (t) => {
   const { db } = board(t)
   const card = task(db, { phase: 'request', status: 'new', importance: 2, urgency: 2 })
   insertIntoQueue(db, card.id)
@@ -265,11 +328,15 @@ test('смена навыка на owner убирает позицию из оч
 
   editCard(db, { id: card.id, actor: 'owner', patch: { skill: 'owner', needsMerge: false } })
   const edited = getCard(db, card.id)!
-  assert.equal(edited.position, null)
+  assert.ok(edited.position)
   assert.equal(edited.phase, 'task')
   assert.equal(edited.status, 'ready')
   assert.equal(edited.reviewRequired, false)
   assert.equal(listQueue(db, {}, 'request').length, 0)
+  assert.deepEqual(
+    listQueue(db, { class: 'owner' }).map((item) => item.id),
+    [card.id],
+  )
 })
 
 test('queue reorder нумерует запросы без позиции и идемпотентен', (t) => {
@@ -300,6 +367,34 @@ test('queue reorder не нумерует owner-запросы', (t) => {
   reorderQueue(db)
 
   assert.equal(getCard(db, owner.id)!.position, null)
-  assert.equal(listQueue(db, {}, 'request').some((card) => card.id === owner.id), false)
+  assert.equal(
+    listQueue(db, { class: 'dev' }, 'request').some((card) => card.id === owner.id),
+    false,
+  )
   assert.equal(getCard(db, normal.id)!.position, 1)
+})
+
+test('ensureSkillQueues нумерует 1..N внутри навыка для всех статусов очереди', (t) => {
+  const { db } = board(t)
+  const devReady = task(db, { skill: 'dev', position: 1 })
+  const devReview = task(db, { status: 'review', skill: 'dev', position: 5 })
+  const devBooked = task(db, { status: 'booked', skill: 'dev', position: 9 })
+  const uiReview = task(db, { status: 'review', skill: 'ui', position: 4 })
+  const blocked = task(db, { status: 'blocked', skill: 'dev', position: null })
+
+  ensureSkillQueues(db)
+
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.position),
+    [1, 2, 3],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'ui' }).map((card) => card.position),
+    [1],
+  )
+  assert.equal(getCard(db, devReady.id)!.position, 1)
+  assert.equal(getCard(db, blocked.id)!.position, null)
+  assert.ok(listQueue(db, { class: 'dev' }).some((card) => card.id === devReview.id))
+  assert.ok(listQueue(db, { class: 'dev' }).some((card) => card.id === devBooked.id))
+  assert.equal(getCard(db, uiReview.id)!.position, 1)
 })

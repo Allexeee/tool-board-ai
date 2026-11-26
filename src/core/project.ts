@@ -22,6 +22,7 @@ import {
   runGit,
 } from './git.ts'
 import { writeOpenCodeFiles } from './opencode.ts'
+import { ensureSkillQueues } from './queue.ts'
 import { ensureSettings } from './settings.ts'
 import { ensureTerminology } from './terminology.ts'
 
@@ -248,6 +249,7 @@ export function initProject(
     db.prepare(
       "insert or ignore into executors (id, kind, skills) values ('owner', 'human', '[\"owner\"]')",
     ).run()
+    ensureSkillQueues(db)
   } finally {
     db.close()
   }
