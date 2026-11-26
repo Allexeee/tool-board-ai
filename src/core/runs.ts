@@ -9,7 +9,7 @@ import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
 import { runGit } from './git.ts'
 import { allocateId } from './ids.ts'
-import { insertIntoQueue } from './queue.ts'
+import { insertIntoQueue, score } from './queue.ts'
 import { RUN_VARIANTS, variantOf } from './tags.ts'
 import type {
   Card,
@@ -468,7 +468,6 @@ export function suggestRuns(
   }
 
   const candidates = listCards(db, { phase: 'task', status: ['ready', 'waiting'] })
-    .filter((card) => card.position !== null)
     .filter((card) => card.skill !== OWNER)
     .filter((card) => card.holder === null && card.runId === null)
     .filter((card) => canTake(executor, card))
@@ -476,7 +475,9 @@ export function suggestRuns(
       (left, right) =>
         (executor.skills.indexOf(left.skill ?? '') + 1 || 999) -
           (executor.skills.indexOf(right.skill ?? '') + 1 || 999) ||
-        left.position! - right.position! ||
+        Number(left.position === null) - Number(right.position === null) ||
+        (left.position ?? 0) - (right.position ?? 0) ||
+        score(right) - score(left) ||
         left.createdAt.localeCompare(right.createdAt) ||
         left.id.localeCompare(right.id),
     )

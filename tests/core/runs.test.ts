@@ -83,18 +83,34 @@ test('suggestRuns собирает забег до run_size из карточе�
   assert.equal(new Set(all).size, all.length, 'предложения не пересекаются')
 })
 
-test('suggestRuns не предлагает карточки без позиции в очереди', (t) => {
+test('suggestRuns: без позиции — после позиционных, по score и дате', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
-  seedCard(db, { phase: 'task', status: 'ready' })
-  seedCard(db, { phase: 'task', status: 'ready' })
-  seedCard(db, { phase: 'task', status: 'ready' })
+  const queued = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 1,
+    importance: 1,
+    urgency: 1,
+  })
+  const high = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    importance: 3,
+    urgency: 3,
+  })
+  const low = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    importance: 1,
+    urgency: 2,
+  })
 
-  assert.deepEqual(suggestRuns(db, 'developer', 1), [])
-
-  const queued = seedCard(db, { phase: 'task', status: 'ready', position: 1 })
   const [suggestion] = suggestRuns(db, 'developer', 1)
-  assert.deepEqual(ids(suggestion.cards), [queued.id])
+  assert.deepEqual(ids(suggestion.cards), [queued.id, high.id, low.id])
 })
 
 test('owner-карточки не предлагаются и не бронируются', (t) => {
