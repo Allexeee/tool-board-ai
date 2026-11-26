@@ -123,6 +123,7 @@ test('initProject создаёт docs/board и дописывает .gitignore �
   const lines = readFileSync(join(root, '.gitignore'), 'utf8').split(/\r?\n/)
   assert.equal(lines.filter((line) => line === '.board/').length, 1)
   assert.equal(lines.filter((line) => line === '.worktrees/').length, 1)
+  assert.ok(lines.includes('docs/board/Inter.ttf'))
   assert.ok(lines.includes('node_modules/'))
 })
 
