@@ -8,6 +8,7 @@ import {
   renameTag,
 } from '../../src/core/tags.ts'
 import { getCard } from '../../src/core/cards.ts'
+import { readSettings, updateSettings } from '../../src/core/settings.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 
 test('реестр тегов: add, list, rename обновляет карточки', (t) => {
@@ -39,6 +40,24 @@ test('реестр тегов: занятый и служебный тег не 
   assert.equal(cleared.changes, 1)
   assert.equal(removeTag(board.db, { name: 'ui' }).name, 'ui')
   assert.throws(() => removeTag(board.db, { name: 'new' }), /служебный/)
+})
+
+test('renameTag обновляет правила приёмки и не трогает служебные', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  addTag(board.db, { name: 'ui' })
+  updateSettings(board.root, {
+    acceptance: {
+      rules: [{ name: 'visual', include: { tags: ['ui'] } }],
+      exclude: { tags: ['ui'] },
+    },
+  })
+
+  renameTag(board.db, { from: 'ui', to: 'interface', root: board.root })
+  const settings = readSettings(board.root)
+  assert.deepEqual(settings.acceptance.rules[0].include.tags, ['interface'])
+  assert.deepEqual(settings.acceptance.exclude?.tags, ['interface'])
+  assert.throws(() => renameTag(board.db, { from: 'new', to: 'fresh' }), /служебн/)
 })
 
 test('assertKnownTags нормализует и отвергает неизвестный тег', (t) => {
