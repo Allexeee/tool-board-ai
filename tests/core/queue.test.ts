@@ -258,6 +258,27 @@ test('blocked без позиции не попадает в очередь', (t
   assert.equal(getCard(db, blocked.id)!.position, null)
 })
 
+test('--before ниже увеличивает демона, выше — нет', (t) => {
+  const { db } = board(t)
+  const first = task(db, { skill: 'dev', position: 1 })
+  const second = task(db, { skill: 'dev', position: 2 })
+  const third = task(db, { skill: 'dev', position: 3 })
+
+  moveCard(db, third.id, { before: first.id })
+  assert.equal(getCard(db, third.id)!.demons, 0)
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [third.id, first.id, second.id],
+  )
+
+  moveCard(db, third.id, { before: second.id })
+  assert.equal(getCard(db, third.id)!.demons, 1)
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [first.id, third.id, second.id],
+  )
+})
+
 test('демон растёт только при ручном понижении', (t) => {
   const { db } = board(t)
   const first = task(db, { position: 1 })
@@ -397,4 +418,63 @@ test('ensureSkillQueues нумерует 1..N внутри навыка для �
   assert.ok(listQueue(db, { class: 'dev' }).some((card) => card.id === devReview.id))
   assert.ok(listQueue(db, { class: 'dev' }).some((card) => card.id === devBooked.id))
   assert.equal(getCard(db, uiReview.id)!.position, 1)
+})
+
+test('две очереди навыков независимы: move одного не двигает другой', (t) => {
+  const { db } = board(t)
+  const devFirst = task(db, { skill: 'dev', position: 1, importance: 3, urgency: 3 })
+  const devSecond = task(db, { skill: 'dev', position: 2, importance: 1, urgency: 1 })
+  const mktFirst = task(db, { skill: 'marketing', position: 1, importance: 3, urgency: 3 })
+  const mktSecond = task(db, { skill: 'marketing', position: 2, importance: 1, urgency: 1 })
+
+  moveCard(db, devSecond.id, { top: true })
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [devSecond.id, devFirst.id],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'marketing' }).map((card) => card.id),
+    [mktFirst.id, mktSecond.id],
+  )
+
+  assert.throws(
+    () => moveCard(db, mktFirst.id, { before: devFirst.id }),
+    /разных очередях/,
+  )
+
+  // Владелец переставляет карточку любого навыка: двигается только эта очередь.
+  moveCard(db, mktFirst.id, { bottom: true })
+  assert.deepEqual(
+    listQueue(db, { class: 'marketing' }).map((card) => card.id),
+    [mktSecond.id, mktFirst.id],
+  )
+  assert.equal(getCard(db, mktFirst.id)!.demons, 1)
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [devSecond.id, devFirst.id],
+  )
+})
+
+test('reorder нумерует каждую очередь навыка отдельно, сохраняя порядок', (t) => {
+  const { db } = board(t)
+  const devFirst = task(db, { skill: 'dev', position: 1 })
+  const devSecond = task(db, { skill: 'dev', position: 2 })
+  const mkt = task(db, { skill: 'marketing', position: 7 })
+
+  moveCard(db, devSecond.id, { top: true })
+  reorderQueue(db)
+
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [devSecond.id, devFirst.id],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.position),
+    [1, 2],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'marketing' }).map((card) => card.position),
+    [1],
+  )
+  assert.equal(getCard(db, mkt.id)!.position, 1)
 })

@@ -135,3 +135,18 @@ test('база v2 мигрирует tags и помечает находки rev
   assert.deepEqual(JSON.parse(rows[0].tags), ['review'])
   assert.deepEqual(JSON.parse(rows[1].tags), [])
 })
+
+test('база v11 получает cards.demons=0', () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(`create table meta (key text primary key, value text not null);
+    create table cards (id text primary key);
+    insert into meta values ('schemaVersion', '11');
+    insert into cards (id) values ('UI-1');`)
+
+  assert.equal(migrate(db), 12)
+  assert.ok(columns(db, 'cards').includes('demons'))
+  const row = db.prepare('select demons from cards where id = ?').get('UI-1') as {
+    demons: number
+  }
+  assert.equal(row.demons, 0)
+})

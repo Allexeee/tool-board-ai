@@ -13,6 +13,7 @@ import {
   writeBacklogHtml,
 } from '../../src/core/backlog.ts'
 import { readSettings, updateSettings } from '../../src/core/settings.ts'
+import { moveCard } from '../../src/core/queue.ts'
 import { renderBacklogPage } from '../../src/core/backlog-view.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { existsSync, readFileSync } from 'node:fs'
@@ -198,4 +199,31 @@ test('flushBacklog: флаг по ревизии, без изменений фа
 
   updateSettings(board.root, { backlog: { auto: false } })
   assert.equal(flushBacklog(board.db, board.root).path, null)
+})
+
+test('бэклог: owner после --bottom идёт последним в секции', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+
+  const first = seedCard(board.db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'owner',
+    position: 1,
+  })
+  const second = seedCard(board.db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'owner',
+    position: 2,
+  })
+  seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev', position: 1 })
+
+  moveCard(board.db, first.id, { bottom: true })
+
+  const owner = buildBacklog(board.db).skills.find((section) => section.skill === 'owner')!
+  assert.deepEqual(
+    owner.rows.map((row) => row.id).slice(0, 2),
+    [second.id, first.id],
+  )
 })

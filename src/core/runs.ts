@@ -9,7 +9,7 @@ import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
 import { runGit } from './git.ts'
 import { allocateId } from './ids.ts'
-import { insertIntoQueue } from './queue.ts'
+import { insertIntoQueue, score } from './queue.ts'
 import { RUN_VARIANTS, variantOf } from './tags.ts'
 import type {
   Card,
@@ -297,6 +297,9 @@ function bookCard(
   position: number,
   actor: string,
 ): void {
+  // Карточка без позиции (например, из fallback предложения) получает место в
+  // очереди навыка, иначе после брони она выпадет из очередей.
+  if (card.phase === 'task' && card.position === null) insertIntoQueue(db, card.id)
   const updatedAt = nowIso()
   db.prepare(
     `update cards set status = 'booked', holder = ?, run_id = ?, lease_until = ?, updated_at = ?
@@ -468,7 +471,6 @@ export function suggestRuns(
   }
 
   const candidates = listCards(db, { phase: 'task', status: ['ready', 'waiting'] })
-    .filter((card) => card.position !== null)
     .filter((card) => card.skill !== OWNER)
     .filter((card) => card.holder === null && card.runId === null)
     .filter((card) => canTake(executor, card))
@@ -476,7 +478,9 @@ export function suggestRuns(
       (left, right) =>
         (executor.skills.indexOf(left.skill ?? '') + 1 || 999) -
           (executor.skills.indexOf(right.skill ?? '') + 1 || 999) ||
-        left.position! - right.position! ||
+        Number(left.position === null) - Number(right.position === null) ||
+        (left.position ?? 0) - (right.position ?? 0) ||
+        score(right) - score(left) ||
         left.createdAt.localeCompare(right.createdAt) ||
         left.id.localeCompare(right.id),
     )
@@ -560,7 +564,6 @@ export function suggestVariantRuns(
   })
     .filter(
       (card) =>
-        card.position !== null &&
         card.holder === null &&
         card.runId === null &&
         card.skill !== OWNER &&
@@ -570,7 +573,9 @@ export function suggestVariantRuns(
       (left, right) =>
         (executor.skills.indexOf(left.skill ?? '') + 1 || 999) -
           (executor.skills.indexOf(right.skill ?? '') + 1 || 999) ||
-        left.position! - right.position! ||
+        Number(left.position === null) - Number(right.position === null) ||
+        (left.position ?? 0) - (right.position ?? 0) ||
+        score(right) - score(left) ||
         left.createdAt.localeCompare(right.createdAt) ||
         left.id.localeCompare(right.id),
     )
