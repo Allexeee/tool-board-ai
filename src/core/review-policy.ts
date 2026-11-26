@@ -18,6 +18,8 @@ export interface ReviewResolution {
     | 'large-spec'
     | 'default-self'
     | 'no-reviewer-model'
+    | 'light-run'
+    | 'heavy-run'
   reviewerModel: string | null
 }
 

@@ -133,6 +133,7 @@ export async function runSetupWizard(
       reviewer: { model: reviewerModel },
       specReview: { mode: specMode, maxSpecChars, largeSpecChars },
       runReview: { mode: runMode },
+      review: { profile: 'custom' },
     })
   } finally {
     rl.close()

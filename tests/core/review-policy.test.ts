@@ -10,6 +10,8 @@ import {
   resolveSpecReviewMode,
 } from '../../src/core/review-policy.ts'
 import type { BoardSettings } from '../../src/core/settings.ts'
+import { isLightRun } from '../../src/core/runs.ts'
+import { makeBoard, seedCard, seedRun } from '../helpers/board.ts'
 
 const base: BoardSettings = {
   version: 2,
@@ -226,4 +228,22 @@ test('findings: high/max блокируют important, default — только 
   assert.equal(findingsScope(withProfile('default'), context(null)), 'critical')
   assert.equal(findingsScope(withProfile('high'), context(null)), 'critical+important')
   assert.equal(findingsScope(withProfile('max'), context(null)), 'critical+important')
+})
+
+test('isLightRun: больше двух карточек — тяжёлый, две без merge — лёгкий', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  const cards = [1, 2, 3].map(() =>
+    seedCard(fixture.db, { phase: 'task', status: 'ready', needsMerge: true }),
+  )
+  const heavy = seedRun(fixture.db, { cardIds: cards.map((card) => card.id) })
+  assert.equal(isLightRun(fixture.db, heavy), false)
+
+  const second = makeBoard()
+  t.after(second.close)
+  const lightCards = [1, 2].map(() =>
+    seedCard(second.db, { phase: 'task', status: 'ready', needsMerge: false }),
+  )
+  const light = seedRun(second.db, { cardIds: lightCards.map((card) => card.id) })
+  assert.equal(isLightRun(second.db, light), true)
 })

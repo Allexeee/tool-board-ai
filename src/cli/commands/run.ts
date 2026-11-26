@@ -182,7 +182,7 @@ export default async function command(args: ParsedArgs) {
 
     if (reviewMode === 'auto') {
       reviewMode = isLightRun(db, run, project.root) ? 'self' : 'subagent'
-      reviewReason = reviewMode === 'self' ? 'light-run' : 'model-max-high'
+      reviewReason = reviewMode === 'self' ? 'light-run' : 'heavy-run'
       if (reviewMode === 'subagent' && effectiveReviewerModel(settings, context) === null) {
         reviewMode = 'self'
       }

@@ -155,6 +155,9 @@ export default async function command(args: ParsedArgs) {
     let waiverReason: string | null = null
     if (reviewFlag === undefined) {
       if (reviewDefault) patch.reviewRequired = true
+      else if (profile.profile.card === 'never' && effectiveNeedsMerge) {
+        waiverReason = `профиль ${profile.name}`
+      }
     } else if (reviewFlag === false && effectiveNeedsMerge) {
       waiverReason = requireNoReview(args)
       patch.reviewRequired = false
@@ -277,7 +280,12 @@ export default async function command(args: ParsedArgs) {
           : effectiveNeedsMerge
     let waiverReason: string | null = null
     if (reviewRequired === undefined) {
-      if (needsMerge !== undefined) patch.reviewRequired = reviewDefault
+      if (needsMerge !== undefined) {
+        patch.reviewRequired = reviewDefault
+        if (!reviewDefault && profile.profile.card === 'never' && effectiveNeedsMerge) {
+          waiverReason = `профиль ${profile.name}`
+        }
+      }
     } else if (reviewRequired === false && effectiveNeedsMerge) {
       waiverReason = requireNoReview(args)
       patch.reviewRequired = false

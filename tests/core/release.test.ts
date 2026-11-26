@@ -16,6 +16,7 @@ import { cancelCard, finishCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import { waiveReview } from '../../src/core/review.ts'
+import { updateSettings } from '../../src/core/settings.ts'
 import type { Card } from '../../src/core/types.ts'
 import { seedCard } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
@@ -83,6 +84,19 @@ test('release блокируется на done без ревью и waiver', (t)
   db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
 
   assert.throws(() => release(db, root, 'owner'), /нет ревью/)
+})
+
+test('профиль high блокирует открытый important', (t) => {
+  const { root, db } = repoBoard(t)
+  merged(root, db, 'done', 'dev-a')
+  const important = seedCard(db, { phase: 'request', status: 'new', skill: 'dev' })
+  db.prepare("update cards set severity = 'important' where id = ?").run(important.id)
+  updateSettings(root, { review: { profile: 'high' } })
+
+  assert.throws(() => release(db, root, 'owner'), /находк/)
+
+  db.prepare("update cards set status = 'done' where id = ?").run(important.id)
+  assert.equal(release(db, root, 'owner').commit.length, 40)
 })
 
 test('критическая находка блокирует release, пока не закрыта', (t) => {

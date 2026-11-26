@@ -107,6 +107,7 @@ test('runSetupWizard: собирает все ответы', async (t) => {
   assert.deepEqual(next.specReview, { mode: 'self', maxSpecChars: 2000, largeSpecChars: 4000 })
   assert.deepEqual(next.runReview, { mode: 'subagent' })
   assert.deepEqual(next.reviewer, { model: 'opencode-go/deepseek-v4.1-flash' })
+  assert.equal(next.review.profile, 'custom')
   assert.ok(next.setupAt)
   assert.deepEqual(readSettings(root), next)
 })
@@ -128,6 +129,7 @@ test('runSetupWizard: пустые ответы оставляют текущи�
   assert.deepEqual(next.specReview, { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 })
   assert.deepEqual(next.runReview, { mode: 'none' })
   assert.deepEqual(next.reviewer, { model: null })
+  assert.equal(next.review.profile, 'custom')
   assert.ok(next.setupAt)
 })
 
