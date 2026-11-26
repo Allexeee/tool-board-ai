@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { UserError } from '../cli/errors.ts'
 import { listCards } from './cards.ts'
 import { nowIso } from './clock.ts'
@@ -10,18 +11,38 @@ import {
   refreshMergeState,
   releasePackageToMain,
   releaseToMain,
+  runGit,
   tagRelease,
 } from './git.ts'
+import { compareSemver, parseSemver } from './version.ts'
 import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
 import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
 import { readSettings } from './settings.ts'
 import type { Card } from './types.ts'
 
-/** Версия пакета board (package.json рядом с src), по ней ставится тег релиза. */
-function boardVersion(): string {
-  const raw = readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+/** Версия проекта из package.json; если его нет — версия пакета board. */
+function projectVersion(root: string): string {
+  const local = join(root, 'package.json')
+  const path = existsSync(local) ? local : new URL('../../package.json', import.meta.url)
+  const raw = readFileSync(path, 'utf8')
   const parsed = JSON.parse(raw) as { version?: string }
   return parsed.version?.trim() || '0.0.0'
+}
+
+/** Самый старший локальный тег vX.Y.Z. */
+function latestReleaseTag(root: string): string | null {
+  let tags: string[] = []
+  try {
+    tags = runGit(root, ['tag', '--list', 'v*'])
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((tag) => tag.replace(/^v/, ''))
+      .filter((tag) => parseSemver(tag) !== null)
+  } catch {
+    return null
+  }
+  return tags.sort(compareSemver).at(-1) ?? null
 }
 
 /**
@@ -163,7 +184,17 @@ export function release(
           root,
           scoped.map((card) => card.mergeCommit!).filter((commit) => commit !== null),
         )
-  const version = boardVersion()
+  const version = projectVersion(root)
+  if (!parseSemver(version)) {
+    throw new UserError(2, `версия ${version} не semver: нужен X.Y.Z`)
+  }
+  const last = latestReleaseTag(root)
+  if (last !== null && compareSemver(version, last) <= 0) {
+    throw new UserError(
+      2,
+      `версия ${version} не новее последнего тега v${last}: выполните board bump`,
+    )
+  }
   tagRelease(root, version, commit)
 
   return tx(db, () => {
