@@ -77,8 +77,27 @@ test('take → finish через CLI мержит в dev', (t) => {
   assert.equal(finished.inDev, true)
 })
 
-test('finish без --as и --summary отказывает', (t) => {
+test('finish печатает «ждёт финального ревью»', (t) => {
   const { root, cardId } = repoProject(t)
+  const db = openDb(join(root, '.board', 'board.db'))
+  db.prepare('update cards set review_required = 1 where id = ?').run(cardId)
+  db.close()
+
+  run(root, ['run', 'start', '--as', 'developer', '--cards', cardId])
+  json(root, ['take', cardId, '--as', 'developer', '--no-plan'])
+
+  const wt = join(root, '.worktrees', 'developer')
+  mkdirSync(join(wt, 'src'), { recursive: true })
+  writeFileSync(join(wt, 'src', 'app.ts'), 'export const x = 1\n')
+  runGit(wt, ['add', '.'])
+  runGit(wt, ['commit', '-m', 'add app'])
+
+  const finished = run(root, ['finish', cardId, '--as', 'developer', '--summary', 'готово'])
+  assert.equal(finished.code, 0, finished.err)
+  assert.match(finished.out, /ждёт финального ревью/)
+})
+
+test('finish без --as и --summary отказывает', (t) => {  const { root, cardId } = repoProject(t)
   run(root, ['run', 'start', '--as', 'developer', '--cards', cardId])
   json(root, ['take', cardId, '--as', 'developer'])
 
