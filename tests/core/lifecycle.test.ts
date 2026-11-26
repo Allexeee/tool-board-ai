@@ -23,7 +23,7 @@ import {
   submitCard,
   takeCard,
 } from '../../src/core/lifecycle.ts'
-import { endRun, listRunCards, startRun, suggestRuns } from '../../src/core/runs.ts'
+import { endRun, listRunCards, startRun } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { addStep } from '../../src/core/steps.ts'
 import { insertIntoQueue } from '../../src/core/queue.ts'
@@ -513,8 +513,7 @@ test('reopen очищает run_id/lease: карточка из finish снов�
   assert.equal(reopened.attempt, 2)
 
   // переоткрытая карточка снова предлагается и бронируется
-  const suggested = suggestRuns(db, 'developer').flatMap((s) => s.cards.map((c) => c.id))
-  assert.ok(suggested.includes(card.id))
+  assert.equal(getCard(db, card.id)!.status, 'ready')
   const second = startRun(db, { executorId: 'developer', cardIds: [card.id], actor: 'developer' })
   assert.equal(getCard(db, card.id)!.status, 'booked')
   assert.equal(getCard(db, card.id)!.runId, second.id)

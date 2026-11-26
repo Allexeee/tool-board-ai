@@ -258,7 +258,6 @@ function cardsForAgent(
   }).filter(
     (card) =>
       card.holder === null &&
-      card.position !== null &&
       card.skill !== null &&
       skills.includes(card.skill),
   )
@@ -283,7 +282,10 @@ function cardsForAgent(
 function byCardOrder(left: Card, right: Card): number {
   return (
     (CARD_ORDER[left.status] ?? 9) - (CARD_ORDER[right.status] ?? 9) ||
+    Number(left.position === null) - Number(right.position === null) ||
     (left.position ?? 0) - (right.position ?? 0) ||
+    (right.importance ?? 0) * (right.urgency ?? 0) -
+      (left.importance ?? 0) * (left.urgency ?? 0) ||
     left.createdAt.localeCompare(right.createdAt) ||
     left.id.localeCompare(right.id)
   )
