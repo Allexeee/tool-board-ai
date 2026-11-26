@@ -443,7 +443,9 @@ export function isAncestor(root: string, commit: string, ref: string): boolean {
 export function refreshMergeState(db: DatabaseSync, root: string, card: Card): Card {
   const { main, dev } = resolveBranches(root)
   const inDev = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, dev)
-  const inMain = card.mergeCommit !== null && isAncestor(root, card.mergeCommit, main)
+  const inMain =
+    (card.mergeCommit !== null && isAncestor(root, card.mergeCommit, main)) ||
+    (card.mainCommit !== null && isAncestor(root, card.mainCommit, main))
   const at = nowIso()
 
   db.prepare('update cards set in_dev = ?, in_main = ?, updated_at = ? where id = ?').run(
@@ -524,4 +526,92 @@ export function releaseToMain(root: string): string {
     () => runGit(root, ['merge', '--abort']),
     `конфликт слияния ${dev} в ${main}`,
   )
+}
+
+/** Порядок выбранных merge-коммитов по истории dev; незнакомые — в конец. */
+export function orderReleaseCommits(root: string, commits: string[]): string[] {
+  if (commits.length === 0) return []
+  const { main, dev } = resolveBranches(root)
+  const wanted = new Set(commits)
+  const ordered: string[] = []
+  try {
+    for (const line of runGit(root, ['rev-list', '--reverse', `${main}..${dev}`]).split('\n')) {
+      const commit = line.trim()
+      if (wanted.delete(commit)) ordered.push(commit)
+    }
+  } catch {
+    // нет истории — ниже добавим как есть
+  }
+  for (const commit of commits) if (wanted.delete(commit)) ordered.push(commit)
+  return ordered
+}
+
+/**
+ * Релиз пакета: временная ветка от `main`, в неё переносятся только выбранные
+ * merge-коммиты (`cherry-pick -m 1`), затем ветка мержится в `main`.
+ * Конфликт откатывает всё: `main` остаётся нетронутым.
+ */
+export function releasePackageToMain(root: string, commits: string[]): string {
+  if (!isRepo(root)) throw new UserError(3, `не git-репозиторий: ${root}`)
+  if (commits.length === 0) throw new UserError(1, 'пакет пуст: нечего переносить в main')
+  const { main } = resolveBranches(root)
+  requireClean(root)
+  const original = currentBranch(root)
+  const temp = `release/package-${Date.now()}`
+  const ordered = orderReleaseCommits(root, commits)
+
+  const pick = (commit: string): void => {
+    const parents = runGit(root, ['rev-list', '--parents', '-n', '1', commit]).trim().split(/\s+/)
+    if (parents.length > 2) runGit(root, ['cherry-pick', '-m', '1', commit])
+    else runGit(root, ['cherry-pick', commit])
+  }
+
+  try {
+    runGit(root, ['checkout', '-b', temp, main])
+    for (const commit of ordered) pick(commit)
+    runGit(root, ['checkout', main])
+    runGit(root, ['merge', '--no-ff', temp, '-m', `release package: ${ordered.length}`])
+  } catch (error) {
+    const conflicted = listUnmerged(root)
+    try {
+      runGit(root, ['cherry-pick', '--abort'])
+    } catch {
+      /* не cherry-pick */
+    }
+    try {
+      runGit(root, ['reset', '--hard', 'HEAD'])
+    } catch {
+      /* уже чисто */
+    }
+    try {
+      runGit(root, ['checkout', main])
+    } catch {
+      /* уже на main */
+    }
+    try {
+      runGit(root, ['branch', '-D', temp])
+    } catch {
+      /* ветки нет */
+    }
+    if (original && original !== main) {
+      try {
+        runGit(root, ['checkout', original])
+      } catch {
+        /* ветку вернуть не удалось */
+      }
+    }
+    throw new UserError(
+      2,
+      `конфликт переноса пакета в ${main}: ${conflicted.join(', ') || 'см. git'}; main не изменён`,
+    )
+  }
+
+  const commit = runGit(root, ['rev-parse', 'HEAD'])
+  try {
+    runGit(root, ['branch', '-D', temp])
+  } catch {
+    /* ветка уже удалена */
+  }
+  if (original && original !== main) runGit(root, ['checkout', original])
+  return commit
 }

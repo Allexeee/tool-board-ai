@@ -2,9 +2,16 @@ import type { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
 import { UserError } from '../cli/errors.ts'
 import { listCards } from './cards.ts'
+import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
-import { refreshMergeState, releaseToMain, tagRelease } from './git.ts'
+import { getExecutor } from './executors.ts'
+import {
+  refreshMergeState,
+  releasePackageToMain,
+  releaseToMain,
+  tagRelease,
+} from './git.ts'
 import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
 import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
 import { readSettings } from './settings.ts'
@@ -33,6 +40,21 @@ export interface ReleaseOptions {
   /** Владелец явно отказался от ревью пакета; требуется reason. */
   noReview?: boolean
   reason?: string
+  /** Релиз только карточек исполнителя (или навыка): остальное остаётся в dev. */
+  package?: string | null
+}
+
+/** Карточки пакета: навык входит в навыки исполнителя; неизвестное имя — сам навык. */
+function selectPackage(db: DatabaseSync, cards: Card[], selector: string): Card[] {
+  const executor = getExecutor(db, selector)
+  const skills = executor ? executor.skills : [selector]
+  return cards.filter(
+    (card) =>
+      card.skill !== null &&
+      skills.includes(card.skill) &&
+      card.mergeCommit !== null &&
+      card.revertedAt === null,
+  )
 }
 
 /**
@@ -80,7 +102,13 @@ export function release(
     card.mergeCommit === null ? card : refreshMergeState(db, root, card),
   )
 
-  const inDevNotDone = fresh.filter(
+  const selector = options.package?.trim() || null
+  const scoped = selector === null ? fresh : selectPackage(db, fresh, selector)
+  if (selector !== null && scoped.length === 0) {
+    throw new UserError(1, `в пакете ${selector} нет карточек в dev вне main`)
+  }
+
+  const inDevNotDone = scoped.filter(
     (card) => card.inDev && card.status !== 'done' && card.revertedAt === null,
   )
   if (inDevNotDone.length > 0) {
@@ -92,12 +120,16 @@ export function release(
   const context = modelContext(process.env)
   const scope = findingsScope(settings, context)
   const severities = scope === 'critical+important' ? ['critical', 'important'] : ['critical']
+  const selectedIds = new Set(scoped.map((card) => card.id))
   const blocking = fresh.filter(
     (card) =>
       card.severity !== null &&
       severities.includes(card.severity) &&
       card.status !== 'done' &&
-      card.status !== 'cancelled',
+      card.status !== 'cancelled' &&
+      (selector === null ||
+        selectedIds.has(card.id) ||
+        (card.originCardId !== null && selectedIds.has(card.originCardId))),
   )
   if (blocking.length > 0) {
     const detail = blocking.map((card) => `${card.id} (${card.severity})`).join(', ')
@@ -105,21 +137,41 @@ export function release(
   }
 
   const packageRequired = packageReviewRequired(settings, context)
-  const unreviewed = options.noReview ? [] : reviewGap(db, fresh, packageRequired)
+  const unreviewed = options.noReview ? [] : reviewGap(db, scoped, packageRequired)
   if (unreviewed.length > 0) {
     const detail = unreviewed.map((card) => card.id).join(', ')
     const packageHint = packageRequired ? ' (нужен пакет: board review package)' : ''
     throw new UserError(2, `релиз заблокирован: нет ревью, пакета или waiver: ${detail}${packageHint}`)
   }
 
-  const commit = releaseToMain(root)
+  const commit =
+    selector === null
+      ? releaseToMain(root)
+      : releasePackageToMain(
+          root,
+          scoped.map((card) => card.mergeCommit!).filter((commit) => commit !== null),
+        )
   const version = boardVersion()
   tagRelease(root, version)
 
   return tx(db, () => {
+    if (selector !== null) {
+      const at = nowIso()
+      for (const card of scoped) {
+        db.prepare('update cards set main_commit = ?, updated_at = ? where id = ?').run(
+          commit,
+          at,
+          card.id,
+        )
+      }
+    }
+
     const cards: Card[] = []
     for (const card of fresh) {
-      if (card.mergeCommit !== null) cards.push(refreshMergeState(db, root, card))
+      if (card.mergeCommit === null) continue
+      const withMain =
+        selector !== null && selectedIds.has(card.id) ? { ...card, mainCommit: commit } : card
+      cards.push(refreshMergeState(db, root, withMain))
     }
 
     appendEvent(db, {
@@ -127,7 +179,8 @@ export function release(
       actor,
       subject: 'board',
       note: commit,
-      after: cards.map((card) => card.id),
+      before: selector === null ? undefined : { package: selector },
+      after: cards.filter((card) => card.inMain).map((card) => card.id),
     })
 
     if (options.noReview) {

@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -51,6 +51,7 @@ create table cards (
   spec_rev integer not null default 1,
   review_reopens integer not null default 0,
   merge_commit text,
+  main_commit text,
   in_dev integer not null default 0,
   in_main integer not null default 0,
   reverted_at text,
@@ -247,6 +248,11 @@ create table review_packages (
 );
 `
 
+/** Пакетный релиз: коммит main, которым карточка попала в main через cherry-pick. */
+const MIGRATE_V8_TO_V9 = `
+alter table cards add column main_commit text;
+`
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -281,7 +287,7 @@ export function migrate(db: DatabaseSync): number {
       db.exec(MIGRATE_V4_TO_V5)
     } else if (from === 4) {
       db.exec(MIGRATE_V4_TO_V5)
-    } else if (from !== 5 && from !== 6 && from !== 7) {
+    } else if (from !== 5 && from !== 6 && from !== 7 && from !== 8) {
       throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     }
 
@@ -299,6 +305,12 @@ export function migrate(db: DatabaseSync): number {
       if (hasCards) db.exec(MIGRATE_V6_TO_V7)
     }
     if (from >= 1 && from < 8) db.exec(MIGRATE_V7_TO_V8)
+    if (from >= 1 && from < 9) {
+      const hasCards = db
+        .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+        .get()
+      if (hasCards) db.exec(MIGRATE_V8_TO_V9)
+    }
 
     if (from === 1 || from === 2) {
       const hasOrigin = (db.prepare('pragma table_info(cards)').all() as Array<{ name: string }>).some(

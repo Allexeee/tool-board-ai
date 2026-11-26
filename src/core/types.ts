@@ -118,6 +118,7 @@ export interface Card {
   specRev: number
   reviewReopens: number
   mergeCommit: string | null
+  mainCommit: string | null
   inDev: boolean
   inMain: boolean
   revertedAt: string | null

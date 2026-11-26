@@ -16,6 +16,7 @@ export default async function command(args: ParsedArgs) {
     const result = release(db, project.root, actor, {
       noReview: boolFlag(args, 'no-review'),
       reason: stringFlag(args, 'reason'),
+      package: stringFlag(args, 'package'),
     })
     ok(result, formatRelease(result))
     return 0

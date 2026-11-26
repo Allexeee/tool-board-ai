@@ -18,7 +18,7 @@ import { release } from '../../src/core/release.ts'
 import { collectPackage, submitPackage, waiveReview } from '../../src/core/review.ts'
 import { updateSettings } from '../../src/core/settings.ts'
 import type { Card } from '../../src/core/types.ts'
-import { seedCard } from '../helpers/board.ts'
+import { seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
 interface RepoBoard {
@@ -43,8 +43,14 @@ function repoBoard(t: { after: (fn: () => void) => void }): RepoBoard {
  * Реальный merge карточки в dev: ветка, коммит, mergeToDev. Возвращает карточку
  * с `merge_commit` и `in_dev=1` в нужном статусе.
  */
-function merged(root: string, db: DatabaseSync, status: Card['status'], executor: string): Card {
-  const card = seedCard(db, { phase: 'task', status: 'booked', skill: 'dev' })
+function merged(
+  root: string,
+  db: DatabaseSync,
+  status: Card['status'],
+  executor: string,
+  skill = 'dev',
+): Card {
+  const card = seedCard(db, { phase: 'task', status: 'booked', skill })
   const { branch, worktree } = startCardBranch(root, executor, card)
   mkdirSync(join(worktree, 'src'), { recursive: true })
   writeFileSync(join(worktree, 'src', `${card.id}.txt`), `${card.id}\n`)
@@ -332,6 +338,57 @@ test('release --no-review требует reason и пишет отказ в жу
     .get() as { actor: string; note: string } | undefined
   assert.equal(event?.actor, 'owner')
   assert.equal(event?.note, 'срочный фикс')
+})
+
+test('release --package переносит только выбранного исполнителя', (t) => {
+  const { root, db } = repoBoard(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const devCard = merged(root, db, 'done', 'dev-a')
+  const content = merged(root, db, 'done', 'content-a', 'content')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(content.id)
+  const stillInReview = merged(root, db, 'review', 'content-b', 'content')
+
+  const result = release(db, root, 'owner', { package: 'developer' })
+  assert.equal(result.commit.length, 40)
+  assert.equal(getCard(db, devCard.id)!.inMain, true)
+  assert.equal(getCard(db, content.id)!.inMain, false)
+  assert.equal(getCard(db, stillInReview.id)!.inMain, false)
+
+  assert.match(runGit(root, ['show', `main:src/${devCard.id}.txt`]), new RegExp(devCard.id))
+  assert.throws(() => runGit(root, ['show', `main:src/${content.id}.txt`]))
+  assert.throws(() => runGit(root, ['show', `main:src/${stillInReview.id}.txt`]))
+})
+
+test('release --package: конфликт переноса не меняет main', (t) => {
+  const { root, db } = repoBoard(t)
+  seedExecutor(db, { id: 'content', skills: ['content'] })
+  const card = seedCard(db, { phase: 'task', status: 'booked', skill: 'content' })
+  const { branch, worktree } = startCardBranch(root, 'content-a', card)
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src', 'conflict.txt'), 'dev\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', card.id])
+  const merge = mergeToDev(root, branch, card.id)
+  db.prepare('update cards set status = ?, merge_commit = ?, in_dev = 1 where id = ?').run(
+    'done',
+    merge,
+    card.id,
+  )
+  waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'test: package conflict' })
+
+  // main уходит вперёд независимо: тот же файл, другая строка.
+  mkdirSync(join(root, 'src'), { recursive: true })
+  writeFileSync(join(root, 'src', 'conflict.txt'), 'main\n')
+  runGit(root, ['add', '.'])
+  runGit(root, ['commit', '-m', 'main side'])
+  const before = runGit(root, ['rev-parse', 'HEAD'])
+
+  assert.throws(
+    () => release(db, root, 'owner', { package: 'content' }),
+    /конфликт переноса/,
+  )
+  assert.equal(runGit(root, ['rev-parse', 'HEAD']), before)
+  assert.equal(runGit(root, ['show', 'main:src/conflict.txt']).trim(), 'main')
 })
 
 test('release ставит тег версии, повторный release не падает', (t) => {
