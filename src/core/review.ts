@@ -37,14 +37,18 @@ export function hasReviewVerdict(db: DatabaseSync, cardId: string): boolean {
   )
 }
 
-/** Владелец явно отказался от ревью: есть событие card.review_waived. */
+/** Владелец явно отказался от ревью: событие card.review_waived, в том числе по старому ID. */
 export function hasReviewWaiver(db: DatabaseSync, cardId: string): boolean {
+  const card = getCard(db, cardId)
+  const ids = [cardId, ...(card?.legacyIds ?? [])]
+  const placeholders = ids.map(() => '?').join(', ')
   return (
     db
       .prepare(
-        "select 1 as found from events where subject = ? and type = 'card.review_waived' limit 1",
+        `select 1 as found from events
+         where type = 'card.review_waived' and subject in (${placeholders}) limit 1`,
       )
-      .get(cardId) !== undefined
+      .get(...ids) !== undefined
   )
 }
 

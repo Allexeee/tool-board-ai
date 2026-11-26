@@ -16,7 +16,7 @@ export default async function command(args: ParsedArgs) {
     throw new UserError(3, USAGE)
   }
 
-  const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
+  const db = openDb(project.dbPath)
   try {
     if (args.sub === 'add') {
       const prefix = args.positionals[0]

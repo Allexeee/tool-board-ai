@@ -4,6 +4,7 @@ import { getCard, resolveCardId } from '../../src/core/cards.ts'
 import { listGroups, renameGroup } from '../../src/core/groups.ts'
 import { addRef, listRefs } from '../../src/core/refs.ts'
 import { addStep, listSteps } from '../../src/core/steps.ts'
+import { hasReviewWaiver, waiveReview } from '../../src/core/review.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 
 test('renameGroup: переносит карточки, шаги и ссылки, сохраняет legacy', (t) => {
@@ -19,6 +20,7 @@ test('renameGroup: переносит карточки, шаги и ссылки
     value: 'https://example.com',
     actor: 'owner',
   })
+  waiveReview(board.db, { cardId: seo.id, actor: 'owner', reason: 'ревью пакета' })
 
   const result = renameGroup(board.db, {
     old: 'SEO',
@@ -33,9 +35,14 @@ test('renameGroup: переносит карточки, шаги и ссылки
   assert.equal(listSteps(board.db, 'SITE-2').length, 1)
   assert.equal(listRefs(board.db, 'SITE-2').length, 1)
   assert.equal(resolveCardId(board.db, 'SEO-1'), 'SITE-2')
+  assert.equal(hasReviewWaiver(board.db, 'SITE-2'), true)
   assert.deepEqual(
     listGroups(board.db).map((group) => [group.prefix, group.count]),
     [['SITE', 2]],
+  )
+  assert.equal(
+    seedCard(board.db, { group: 'SITE', title: 'next', status: 'ready' }).id,
+    'SITE-3',
   )
 })
 

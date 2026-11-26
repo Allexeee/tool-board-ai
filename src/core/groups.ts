@@ -97,6 +97,9 @@ export function renameGroup(db: DatabaseSync, input: GroupRenameInput): GroupRen
     throw new UserError(3, `группа ${to} уже есть: для слияния нужен --merge`)
   }
 
+  const oldName = (
+    db.prepare('select name from groups where prefix = ?').get(from) as { name: string | null }
+  ).name
   const cards = listCards(db, { group: from })
   const active = cards.filter((card) => ACTIVE_FOR_REKEY.includes(card.status))
   if (active.length > 0) {
@@ -142,10 +145,27 @@ export function renameGroup(db: DatabaseSync, input: GroupRenameInput): GroupRen
   return tx(db, () => {
     // FK на cards(id) без cascade: обновляем родителя и детей в одной транзакции.
     db.exec('pragma defer_foreign_keys = on')
+    const current = listCards(db, { group: from })
+    if (current.length !== mapping.length) {
+      throw new UserError(2, 'состав группы изменился во время rename: повторите')
+    }
+    const stillActive = current.filter((card) => ACTIVE_FOR_REKEY.includes(card.status))
+    if (stillActive.length > 0) {
+      throw new UserError(
+        2,
+        `нельзя переименовать: карточки в работе ${stillActive.map((card) => card.id).join(', ')}`,
+      )
+    }
+    for (const item of mapping) {
+      if (getCard(db, item.to)) {
+        throw new UserError(3, `ID ${item.to} уже занят: повторите rename`)
+      }
+    }
+
     const at = nowIso()
     for (const item of mapping) {
       const card = getCard(db, item.cardId)!
-      const legacy = [...card.legacyIds, card.id]
+      const legacy = [...card.legacyIds.filter((id) => id !== item.to), card.id]
       db.prepare(
         'update cards set id = ?, group_prefix = ?, group_seq = ?, legacy_ids = ?, updated_at = ? where id = ?',
       ).run(item.to, to, item.seq, JSON.stringify(legacy), at, item.from)
@@ -168,7 +188,7 @@ export function renameGroup(db: DatabaseSync, input: GroupRenameInput): GroupRen
       })
     }
 
-    const name = input.name?.trim() ? input.name.trim() : null
+    const name = input.name?.trim() ? input.name.trim() : exists ? null : oldName
     if (!exists) {
       db.prepare('insert into groups (prefix, next_seq, name, created_at) values (?, ?, ?, ?)').run(
         to,
