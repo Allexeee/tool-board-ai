@@ -473,7 +473,7 @@ export default Plugin.define({
       })
       event.system.push({
         type: 'text',
-        text: 'После board upgrade или board init --refresh перескажи блок «Что нового» в чате человеческим языком: 3–5 пунктов, без флагов и CLI-жаргона. Если изменений нет — так и скажи. Затем одно действие: предложи board adopt --check, если проект ещё не приводили в порядок. adopt --check ничего не создаёт: покажи план, получи согласие и примени его обычными командами; повторный --check показывает остаток.',
+        text: 'После board upgrade или board init --refresh перескажи блок «Что нового» в чате человеческим языком: 3–5 пунктов, без флагов и CLI-жаргона. Если изменений нет — так и скажи. Затем одно действие: предложи board_adopt (он же board adopt --check), если проект ещё не приводили в порядок. adopt --check ничего не создаёт: покажи план, получи согласие и примени его обычными командами; повторный --check показывает остаток.',
       })
     })
 
@@ -511,6 +511,13 @@ export default Plugin.define({
           }
           return { content: 'неизвестное действие setup: ' + action, isError: true }
         },
+      })
+
+      editor.add({
+        name: 'adopt',
+        description: 'Доска: план обновления проекта (adopt --check), ничего не создаёт',
+        input: schema({}),
+        execute: (_input, context) => call(ctx, ['adopt', '--check'], context),
       })
 
       editor.add({

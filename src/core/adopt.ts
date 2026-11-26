@@ -95,8 +95,20 @@ const SUGGESTED_TAGS = [
 const TYPE_PREFIX = /^(feat|fix|perf|sec|docs|test|chore|review):\s*/i
 const SKIP_DIRS = new Set(['.git', '.board', '.worktrees', 'node_modules', 'tools'])
 
+/**
+ * План печатает готовые shell-команды: убираем подстановку и экранирование,
+ * иначе заголовок из заметки может выполнить чужой код при копировании.
+ */
+function shellText(value: string): string {
+  return value
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\\`"$]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function quote(value: string): string {
-  return `"${value.replace(/"/g, "'")}"`
+  return `"${shellText(value)}"`
 }
 
 function summarizeConditions(conditions: AcceptanceConditions): string {
@@ -146,13 +158,22 @@ function looksLikeSameTask(source: string, card: string): boolean {
 
 function markdownTitle(path: string): string | null {
   const lines = readFileSync(path, 'utf8').split(/\r?\n/)
-  for (const line of lines) {
-    const heading = /^#\s+(.+?)\s*$/.exec(line)
+
+  // YAML front matter не заголовок: пропускаем блок между первыми ---.
+  let start = 0
+  if (lines[0]?.trim() === '---') {
+    const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---')
+    if (end > 0) start = end + 1
+  }
+
+  for (const line of lines.slice(start)) {
+    const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line)
     if (heading) return heading[1].replace(/[*_`]/g, '').trim()
   }
-  for (const line of lines) {
+  for (const line of lines.slice(start)) {
     const text = line.trim()
     if (text === '' || text === '---' || text.startsWith('<!--')) continue
+    if (/^[A-Za-z_][\w-]*\s*:/.test(text)) continue
     return text.replace(/^[-*]\s+/, '').replace(/[*_`]/g, '').trim()
   }
   return null
@@ -174,7 +195,17 @@ function walkMarkdown(dir: string, root: string, depth = 0): string[] {
   return found
 }
 
-/** Источники задач: docs/inbox и файлы-чеклисты; шаблоны и бэклог не трогаем. */
+function isTemplatePath(path: string): boolean {
+  const name = basename(path).toLowerCase()
+  return (
+    name === 'readme.md' ||
+    name.startsWith('_') ||
+    name.startsWith('.') ||
+    /^(template|шаблон)/.test(name)
+  )
+}
+
+/** Источники задач: docs/inbox и файлы-чеклисты; README, шаблоны и бэклог не трогаем. */
 export function findAdoptSources(root: string): string[] {
   const paths = new Set<string>(walkMarkdown(join(root, 'docs', 'inbox'), root))
   for (const path of walkMarkdown(join(root, 'docs'), root)) {
@@ -183,7 +214,7 @@ export function findAdoptSources(root: string): string[] {
   for (const name of ['CHECKLIST.md', 'checklist.md']) {
     if (existsSync(join(root, name))) paths.add(name)
   }
-  return [...paths].sort()
+  return [...paths].filter((path) => !isTemplatePath(path)).sort()
 }
 
 function suggestedGroup(groups: CardGroup[]): string {
@@ -192,9 +223,9 @@ function suggestedGroup(groups: CardGroup[]): string {
 
 function suggestedSkill(executors: Array<{ id: string; kind: string; skills: string[] }>): string {
   const developer = executors.find((executor) => executor.id === 'developer')
-  if (developer) return 'developer'
+  if (developer) return developer.skills[0] ?? 'dev'
   const agent = executors.find((executor) => executor.kind === 'agent')
-  return agent?.skills[0] ?? 'developer'
+  return agent?.skills[0] ?? 'dev'
 }
 
 function sourceSteps(
@@ -222,7 +253,7 @@ function sourceSteps(
       title: cardTitle,
       group,
       skill,
-      command: `board card add --group ${group} --title ${quote(cardTitle)} --skill ${skill}`,
+      command: `board card add --group ${group} --title ${quote(cardTitle)} --skill ${quote(skill)}`,
     })
   }
   return sources
