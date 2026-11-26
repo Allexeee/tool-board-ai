@@ -17,7 +17,7 @@ export const STATUS_LABEL: Record<CardStatus, string> = {
   ready: 'в очереди',
   booked: 'забронирована',
   in_progress: 'в работе',
-  review: 'ждет финального ревью',
+  review: 'проходит ревью',
   acceptance: 'требует приёмки владельцем',
   blocked: 'заблокирована',
   deferred: 'отложена',

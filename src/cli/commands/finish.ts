@@ -41,7 +41,7 @@ export default async function command(args: ParsedArgs) {  const project = findP
     })
     const state =
       card.status === 'review'
-        ? 'ждет финального ревью'
+        ? 'проходит ревью'
         : card.status === 'acceptance'
           ? 'ждёт приёмки владельцем'
           : 'закрыта'
