@@ -7,6 +7,13 @@ import { buildSetupProposal, type SetupProposal } from '../../core/setup.ts'
 import { ensureSettings, updateSettings, type BoardSettings } from '../../core/settings.ts'
 import { SUPERPOWERS_ADVICE, superpowersConfigured } from '../../core/superpowers.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
+import {
+  collectWhatsNew,
+  markAnnouncedVersion,
+  readAnnouncedVersion,
+  whatsNewDir,
+  whatsNewLines,
+} from '../../core/whats-new.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok, isJsonMode } from '../output.ts'
 
@@ -37,6 +44,12 @@ export default async function command(args: ParsedArgs) {
     settings = await runSetupWizard(root, settings)
     writeReviewerAgent(root, settings, true)
   }
+
+  // Блок «Что нового» относится к человеку: upgrade запускает init внутри себя,
+  // поэтому отметку о показанном ставит только внешний вызов.
+  const announced = readAnnouncedVersion(root)
+  const whatsNew = collectWhatsNew(announced, boardVersion, whatsNewDir(root))
+  if (process.env.BOARD_DELEGATED !== '1') markAnnouncedVersion(root, boardVersion ?? '')
 
   const lines: string[] = []
   if (created.length > 0) {
@@ -81,6 +94,7 @@ export default async function command(args: ParsedArgs) {
   if (recommendations.length > 0) {
     lines.push('', ...recommendations.map((item) => '*   ' + item))
   }
+  if (boardVersion !== null) lines.push('', ...whatsNewLines(whatsNew))
   lines.push('', 'Проект: ' + root)
 
   const setupRequired = settings.setupAt === null
@@ -90,6 +104,9 @@ export default async function command(args: ParsedArgs) {
       created,
       updated,
       boardVersion,
+      from: whatsNew.from,
+      to: whatsNew.to,
+      whatsNew: whatsNew.whatsNew,
       settings,
       setupRequired,
       recommendations,
