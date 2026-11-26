@@ -360,6 +360,21 @@ test('два процесса не бронируют одну карточку 
   )
 })
 
+test('run start --suggest предлагает карточку без позиции после позиционных', (t) => {
+  const { root, db, cards } = project(t)
+  db.prepare('update cards set position = null where id in (?, ?)').run(
+    cards[2].id,
+    cards[3].id,
+  )
+
+  const started = json(root, ['run', 'start', '--as', 'developer', '--suggest', '1']) as {
+    id: string
+  }
+  const held = listRunCards(db, started.id).map((row) => row.cardId)
+  assert.deepEqual(held, [cards[0].id, cards[1].id, cards[2].id])
+  assert.ok(getCard(db, cards[2].id)!.position)
+})
+
 test('run start --suggest выбирает вариант по номеру', (t) => {
   const { root, db } = project(t)
   db.prepare('update cards set tags = ?').run('["improve"]')
