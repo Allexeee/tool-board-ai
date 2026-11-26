@@ -258,8 +258,28 @@ test('blocked без позиции не попадает в очередь', (t
   assert.equal(getCard(db, blocked.id)!.position, null)
 })
 
-test('демон растёт только при ручном понижении', (t) => {
+test('--before ниже увеличивает демона, выше — нет', (t) => {
   const { db } = board(t)
+  const first = task(db, { skill: 'dev', position: 1 })
+  const second = task(db, { skill: 'dev', position: 2 })
+  const third = task(db, { skill: 'dev', position: 3 })
+
+  moveCard(db, third.id, { before: first.id })
+  assert.equal(getCard(db, third.id)!.demons, 0)
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [third.id, first.id, second.id],
+  )
+
+  moveCard(db, third.id, { before: second.id })
+  assert.equal(getCard(db, third.id)!.demons, 1)
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [first.id, third.id, second.id],
+  )
+})
+
+test('демон растёт только при ручном понижении', (t) => {  const { db } = board(t)
   const first = task(db, { position: 1 })
   const second = task(db, { position: 2 })
   const third = task(db, { position: 3 })
