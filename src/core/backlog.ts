@@ -96,7 +96,7 @@ function row(db: DatabaseSync, card: Card): BacklogRow {
   return {
     id: card.id,
     title: card.title,
-    status: STATUS_LABEL[card.status],
+    status: STATUS_LABEL[card.status] ?? String(card.status),
     statusKey: card.status,
     note: noteFor(db, card),
   }

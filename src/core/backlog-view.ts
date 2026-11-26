@@ -54,13 +54,13 @@ tr.status-shaping { --row: #7dd3fc; }
 tr.status-approval { --row: #f59e0b; }
 tr.status-waiting { --row: #94a3b8; }
 tr.status-ready { --row: #34d399; }
-tr.status-booked { --row: #22d3ee; }
+tr.status-booked { --row: #34d399; }
 tr.status-in_progress { --row: #60a5fa; }
 tr.status-review { --row: #a78bfa; }
 tr.status-acceptance { --row: #fb923c; }
 tr.status-blocked { --row: #f87171; }
 tr.status-deferred { --row: #6b7280; }
-tr.status-done { --row: #4ade80; }
+tr.status-done { --row: #16a34a; }
 tr.status-idea { --row: #2dd4bf; }
 tr[class*="status-"] td { background: color-mix(in srgb, var(--row) 7%, var(--panel)); }
 tr[class*="status-"] td:first-child { box-shadow: inset 3px 0 0 var(--row); }
@@ -69,13 +69,13 @@ span.status-shaping { --row: #7dd3fc; }
 span.status-approval { --row: #f59e0b; }
 span.status-waiting { --row: #94a3b8; }
 span.status-ready { --row: #34d399; }
-span.status-booked { --row: #22d3ee; }
+span.status-booked { --row: #34d399; }
 span.status-in_progress { --row: #60a5fa; }
 span.status-review { --row: #a78bfa; }
 span.status-acceptance { --row: #fb923c; }
 span.status-blocked { --row: #f87171; }
 span.status-deferred { --row: #6b7280; }
-span.status-done { --row: #4ade80; }
+span.status-done { --row: #16a34a; }
 span.status-idea { --row: #2dd4bf; }
 `
 

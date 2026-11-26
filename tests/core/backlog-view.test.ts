@@ -35,6 +35,20 @@ test('renderBacklogPage: цвета статусов и легенда', (t) => 
   assert.match(html, /class="status-review"/)
   assert.match(html, /class="status-acceptance"/)
   assert.match(html, /tr\.status-ready/)
+  assert.match(html, /tr\.status-booked \{ --row: #34d399; \}/)
+  assert.match(html, /tr\.status-done \{ --row: #16a34a; \}/)
+})
+
+test('неизвестный статус не ломает бэклог', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const card = seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev' })
+  board.db.prepare("update cards set status = 'weird' where id = ?").run(card.id)
+
+  const data = buildBacklog(board.db)
+  const row = data.skills.flatMap((section) => section.rows).find((item) => item.id === card.id)
+  assert.equal(row?.status, 'weird')
+  assert.doesNotThrow(() => renderBacklogPage(data))
 })
 
 test('buildBacklog: waiting и blocked после доступных', (t) => {
