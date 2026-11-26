@@ -401,7 +401,7 @@ test('release ждёт приёмку владельцем и проходит �
   assert.equal(release(db, root, 'owner').commit.length, 40)
 })
 
-test('release ставит тег версии, повторный release не падает', (t) => {
+test('release ставит тег версии и требует bump перед повторным релизом', (t) => {
   const { root, db } = repoBoard(t)
   merged(root, db, 'done', 'developer')
 
@@ -417,8 +417,7 @@ test('release ставит тег версии, повторный release не 
   assert.match(tags, new RegExp(`^v${version.replace(/\./g, '\\.')}$`, 'm'))
   assert.equal(runGit(root, ['rev-parse', `v${version}^{commit}`]).trim(), first.commit)
 
-  const second = release(db, root, 'owner')
-  assert.ok(second.commit)
+  assert.throws(() => release(db, root, 'owner'), /не новее/)
   const after = runGit(root, ['tag', '--list']).trim().split('\n').filter(Boolean)
   assert.equal(after.filter((tag) => tag === `v${version}`).length, 1)
 })

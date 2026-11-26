@@ -43,6 +43,7 @@ const HELP = `board — доска карточек для людей и аге�
   idea add|list|edit|drop   идеи: карточки вне очереди, мержа и ревью
   tag add|list|rename|remove  реестр тегов карточек
   release [--package <executor|skill>] [--no-review --reason "..."] / now / doctor / backup / export / sync
+  bump patch|minor|major  поднять версию проекта и CHANGELOG
   backlog [--out <path>] [--html] [--open]  md- или html-бэклог; --open — в браузере
 
   --json                  машинный вывод
@@ -100,6 +101,7 @@ const COMMAND_HELP: Record<string, string> = {
   'acceptance check': 'board acceptance check <ID>',
   'card tag': 'board card tag add|remove|list <ID> [тег] [--as <id>]',
   'release': 'board release [--package <executor|skill>] [--no-review --reason "..."] --as owner',
+  'bump': 'board bump patch|minor|major',
   setup:
     'board setup [--show] [--defaults] [--profile auto|low|default|high|max|custom] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
