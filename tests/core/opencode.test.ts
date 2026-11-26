@@ -180,7 +180,8 @@ test('плагин держит правила отчёта в системно�
 
   for (const rule of [
     'Начинаю RUN-',
-    'Приступаю к {ID}',
+    'Беру в работу {ID}',
+    'Понял. Вношу',
     'Сделал {ID}',
     'только «Сделал»',
     'Завершил {RUN}',
@@ -198,7 +199,7 @@ test('плагин держит правила отчёта в системно�
   ]) {
     assert.ok(hook.includes(rule), rule)
   }
-  assert.doesNotMatch(hook, /Беру в работу|Перехожу/)
+  assert.doesNotMatch(hook, /Перехожу/)
   assert.doesNotMatch(hook, /7–10 карточк|больше 10|Настоятельно рекомендую/)
 })
 
@@ -516,7 +517,7 @@ test('четыре навыка: разные description и свои прави
   }
   assert.match(read('board-work'), /Сделал \{ID\}/)
   assert.match(read('board-work'), /Начинаю RUN-/)
-  assert.doesNotMatch(read('board-work'), /Беру в работу|Перехожу/)
+  assert.doesNotMatch(read('board-work'), /Перехожу/)
   assert.match(read('board-run'), /Завершил \{RUN\}/)
   assert.match(read('board-run'), /Что сделано/)
   assert.match(read('board-run'), /Решения, которые я принял сам/)
@@ -536,7 +537,7 @@ test('четыре навыка: разные description и свои прави
   assert.match(agents, /Ревью обнаружило n критичных/)
   assert.match(agents, /не пиши «suite»/)
   assert.match(agents, /Начинаю RUN-/)
-  assert.doesNotMatch(agents, /Беру в работу|Перехожу/)
+  assert.doesNotMatch(agents, /Перехожу/)
   assert.doesNotMatch(agents, /7–10 карточк|больше 10|Настоятельно рекомендую/)
   const review = readFileSync(join(root, '.opencode', 'command', 'review.md'), 'utf8')
   assert.match(review, /Ревьюер закончил работу/)
@@ -548,9 +549,10 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-run'), /7 находок/)
   assert.match(read('board-run'), /## Ран/)
   assert.match(read('board-run'), /Начинаю RUN-/)
-  assert.doesNotMatch(read('board-run'), /Беру в работу|Перехожу/)
+  assert.doesNotMatch(read('board-run'), /Перехожу/)
   assert.match(read('board-work'), /Разобрал/)
-  assert.match(read('board-work'), /Приступаю/)
+  assert.match(read('board-work'), /Беру в работу \{ID\}/)
+  assert.match(read('board-work'), /Понял\. Вношу/)
 })
 
 test('отчёт: шесть моментов и запрет отчёта по вызовам инструментов', () => {
@@ -561,9 +563,9 @@ test('отчёт: шесть моментов и запрет отчёта по 
 
   const report = `${read('board-work')}\n${read('board-run')}`
   assert.match(report, /Начинаю RUN-/)
-  assert.doesNotMatch(report, /Беру в работу|Перехожу/)
+  assert.doesNotMatch(report, /Перехожу/)
   assert.match(report, /Разобрал/)
-  assert.match(report, /Приступаю/)
+  assert.match(report, /Беру в работу/)
   assert.match(report, /Сделал/)
   assert.match(report, /Снял/)
   assert.match(report, /Завершил \{RUN\}/)
