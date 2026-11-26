@@ -147,6 +147,7 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
   var revisionMeta = document.querySelector('meta[name="board-revision"]')
   var revision = revisionMeta ? revisionMeta.content : ''
   var busy = false
+  var autoTimer = null
 
   function saveScroll() {
     try { sessionStorage.setItem(scrollKey, String(window.scrollY)) } catch (e) {}
@@ -156,6 +157,21 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
       var y = sessionStorage.getItem(scrollKey)
       if (y !== null) window.scrollTo(0, Number(y))
     } catch (e) {}
+  }
+  function manualMode() {
+    var updated = document.querySelector('.updated')
+    if (updated) updated.textContent = updated.textContent.replace(/·.*$/, '· F5')
+    var hint = document.querySelector('.hint')
+    if (hint) {
+      hint.textContent = 'Собрано из .board/board.db. Доска пересобирает файл после каждой команды. Обновить вручную — кнопка «Обновить» или F5.'
+    }
+  }
+  function stopAuto() {
+    if (autoTimer) {
+      clearInterval(autoTimer)
+      autoTimer = null
+    }
+    manualMode()
   }
   function bindDeferred() {
     var details = document.getElementById('deferred')
@@ -180,6 +196,14 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
     var currentDetails = document.getElementById('deferred')
     if (currentDetails) wasOpen = currentDetails.open
 
+    var nextStyle = doc.querySelector('style')
+    var currentStyle = document.querySelector('style')
+    if (nextStyle && currentStyle && nextStyle.textContent !== currentStyle.textContent) {
+      currentStyle.textContent = nextStyle.textContent
+    }
+    var nextTitle = doc.querySelector('title')
+    if (nextTitle) document.title = nextTitle.textContent
+
     currentWrap.replaceWith(document.importNode(nextWrap, true))
     revision = nextRevision
     if (revisionMeta) revisionMeta.content = nextRevision
@@ -192,11 +216,21 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
   function refresh(force) {
     if (busy) return
     busy = true
-    fetch(location.href, { cache: 'no-store' })
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    var abortTimer = controller ? setTimeout(function () { controller.abort() }, 4000) : null
+    var options = { cache: 'no-store' }
+    if (controller) options.signal = controller.signal
+    fetch(location.href, options)
       .then(function (response) { return response.text() })
       .then(function (html) { apply(html, force === true) })
-      .catch(function () { if (force === true) location.reload() })
-      .then(function () { busy = false })
+      .catch(function () {
+        if (force === true) location.reload()
+        else stopAuto()
+      })
+      .then(function () {
+        if (abortTimer) clearTimeout(abortTimer)
+        busy = false
+      })
   }
 
   window.boardReload = function () { saveScroll(); refresh(true) }
@@ -205,16 +239,13 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
   window.addEventListener('pagehide', saveScroll)
   restoreScroll()
   bindDeferred()
+  ${auto ? `autoTimer = setInterval(function () {
+    if (document.visibilityState !== 'visible') return
+    refresh(false)
+  }, ${Math.round(refreshSeconds) * 1000})
+  refresh(false)` : ''}
 })()
-</script>` +
-    (auto
-      ? `<script>
-setInterval(function () {
-  if (document.visibilityState !== 'visible') return
-  window.boardRefresh()
-}, ${Math.round(refreshSeconds) * 1000})
 </script>`
-      : '')
   const parts: string[] = []
   for (const section of data.skills) {
     parts.push(
