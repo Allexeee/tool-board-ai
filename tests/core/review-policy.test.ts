@@ -1,8 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  countWords,
   effectiveReviewerModel,
+  findingsScope,
   modelContext,
+  resolveReviewProfile,
   resolveRunReviewMode,
   resolveSpecReviewMode,
 } from '../../src/core/review-policy.ts'
@@ -13,6 +16,11 @@ const base: BoardSettings = {
   reviewer: { model: 'opencode-go/deepseek-v4.1-flash' },
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
+  review: {
+    profile: 'custom',
+    modelMap: { low: 'low', default: 'default', high: 'high', max: 'max' },
+    profiles: {},
+  },
   branches: { main: null, dev: null },
   git: true,
   sync: { remote: null },
@@ -168,4 +176,54 @@ test('run review: none по умолчанию, auto учитывает моде
     resolveRunReviewMode({ settings: explicit, context: context('max') }).mode,
     'subagent',
   )
+})
+
+test('профили auto по варианту модели', () => {
+  const settings = { ...base, review: { ...base.review, profile: 'auto' as const } }
+  const at = (variant: string | null) =>
+    resolveReviewProfile(settings, context(variant)).name
+
+  assert.equal(at('low'), 'low')
+  assert.equal(at('high'), 'high')
+  assert.equal(at('max'), 'max')
+  assert.equal(at(null), 'default')
+  assert.equal(at('default'), 'default')
+})
+
+test('spec auto: default 350 слов, high 150', () => {
+  const words = (count: number) => Array.from({ length: count }, () => 'слово').join(' ')
+  const settings = { ...base, review: { ...base.review, profile: 'default' as const } }
+
+  const exact = words(350)
+  assert.equal(countWords(exact), 350)
+  assert.equal(
+    resolveSpecReviewMode({ settings, specLength: exact.length, specText: exact, context: context(null) })
+      .mode,
+    'subagent',
+  )
+  const below = words(349)
+  assert.equal(
+    resolveSpecReviewMode({ settings, specLength: below.length, specText: below, context: context(null) })
+      .mode,
+    'self',
+  )
+
+  const high = { ...settings, review: { ...settings.review, profile: 'high' as const } }
+  const highExact = words(150)
+  assert.equal(
+    resolveSpecReviewMode({
+      settings: high,
+      specLength: highExact.length,
+      specText: highExact,
+      context: context('high'),
+    }).mode,
+    'subagent',
+  )
+})
+
+test('findings: high/max блокируют important, default — только critical', () => {
+  const withProfile = (profile: string) => ({ ...base, review: { ...base.review, profile } })
+  assert.equal(findingsScope(withProfile('default'), context(null)), 'critical')
+  assert.equal(findingsScope(withProfile('high'), context(null)), 'critical+important')
+  assert.equal(findingsScope(withProfile('max'), context(null)), 'critical+important')
 })

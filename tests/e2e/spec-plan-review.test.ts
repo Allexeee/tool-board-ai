@@ -110,7 +110,7 @@ test('spec → plan → run review → findings → fix run', (t) => {
 
   const blocked = run(root, ['release'])
   assert.equal(blocked.code, 2)
-  assert.match(blocked.err, /критическ/)
+  assert.match(blocked.err, /находк/)
 
   // important/other не блокируют release, critical блокирует.
   ok(root, ['card', 'cancel', critical.id, '--reason', 'не актуально', '--as', 'owner'])

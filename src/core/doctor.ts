@@ -7,6 +7,7 @@ import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
 import { hasReviewVerdict, hasReviewWaiver } from './review.ts'
+import { findingsScope, modelContext } from './review-policy.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 import { readSettings } from './settings.ts'
 import { CONFLICTING_SKILLS_ADVICE, conflictingSkillsDisabled, SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
@@ -72,7 +73,7 @@ export function doctorData(
     checkWorktrees(root, warnings)
   }
 
-  checkCards(db, warnings)
+  checkCards(db, warnings, findingsScope(settings, modelContext(process.env)))
 
   return { errors, warnings, recommendations }
 }
@@ -131,7 +132,11 @@ function registeredWorktrees(root: string): string[] {
 }
 
 /** Карточки, мешающие релизу: код в dev без done, критические находки, ревью. */
-function checkCards(db: DatabaseSync, warnings: string[]): void {
+function checkCards(
+  db: DatabaseSync,
+  warnings: string[],
+  findings: 'critical' | 'critical+important' = 'critical',
+): void {
   const cards = listCards(db)
 
   const inDevNotDone = cards.filter(
@@ -148,6 +153,20 @@ function checkCards(db: DatabaseSync, warnings: string[]): void {
   )
   if (critical.length > 0) {
     warnings.push(`открыты критические находки (critical): ${critical.map((c) => c.id).join(', ')}`)
+  }
+
+  if (findings === 'critical+important') {
+    const important = cards.filter(
+      (card) =>
+        card.severity === 'important' &&
+        card.status !== 'done' &&
+        card.status !== 'cancelled',
+    )
+    if (important.length > 0) {
+      warnings.push(
+        `открыты важные находки (important): ${important.map((c) => c.id).join(', ')}`,
+      )
+    }
   }
 
   const review = cards.filter((card) => card.status === 'review')

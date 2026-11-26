@@ -6,6 +6,8 @@ import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
 import { refreshMergeState, releaseToMain, tagRelease } from './git.ts'
 import { hasReviewVerdict, hasReviewWaiver } from './review.ts'
+import { findingsScope, modelContext } from './review-policy.ts'
+import { readSettings } from './settings.ts'
 import type { Card } from './types.ts'
 
 /** Версия пакета board (package.json рядом с src), по ней ставится тег релиза. */
@@ -50,12 +52,18 @@ export function release(
     throw new UserError(2, `релиз заблокирован: в dev есть карточки не done: ${detail}`)
   }
 
-  const critical = fresh.filter(
-    (card) => card.severity === 'critical' && card.status !== 'done' && card.status !== 'cancelled',
+  const scope = findingsScope(readSettings(root), modelContext(process.env))
+  const severities = scope === 'critical+important' ? ['critical', 'important'] : ['critical']
+  const blocking = fresh.filter(
+    (card) =>
+      card.severity !== null &&
+      severities.includes(card.severity) &&
+      card.status !== 'done' &&
+      card.status !== 'cancelled',
   )
-  if (critical.length > 0) {
-    const detail = critical.map((card) => card.id).join(', ')
-    throw new UserError(2, `релиз заблокирован: открыты критические находки: ${detail}`)
+  if (blocking.length > 0) {
+    const detail = blocking.map((card) => `${card.id} (${card.severity})`).join(', ')
+    throw new UserError(2, `релиз заблокирован: открыты находки: ${detail}`)
   }
 
   const unreviewed = fresh.filter(

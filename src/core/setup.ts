@@ -80,6 +80,7 @@ export function applySetupDefaults(db: DatabaseSync, root: string): SetupDefault
     backlog: { auto: true, refreshSeconds: 5 },
     specReview: { mode: 'auto' },
     runReview: { mode: 'auto' },
+    review: { profile: 'auto' },
     ...(model !== current.reviewer.model ? { reviewer: { model } } : {}),
   })
 

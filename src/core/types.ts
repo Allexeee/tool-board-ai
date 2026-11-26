@@ -19,7 +19,7 @@ export type Severity = 'critical' | 'important' | 'other'
 export type ExecutorKind = 'human' | 'agent'
 
 export type RunStatus = 'active' | 'ended' | 'cancelled' | 'lease_expired'
-export type RunReviewMode = 'none' | 'self' | 'subagent'
+export type RunReviewMode = 'none' | 'self' | 'subagent' | 'auto'
 
 export type RunCardStatus =
   | 'planned'

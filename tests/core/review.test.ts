@@ -65,7 +65,7 @@ test('reopen с критической находкой: карточка ждё
   assert.equal(result.findings[0].originCardId, card.id)
   assert.deepEqual(listDeps(db, card.id), [result.findings[0].id])
 
-  assert.throws(() => release(db, root, 'owner'), /критич/)
+  assert.throws(() => release(db, root, 'owner'), /находк/)
 })
 
 test('done с important/other не блокирует release, critical — блокирует', (t) => {
@@ -97,7 +97,7 @@ test('done с important/other не блокирует release, critical — бл
   assert.equal(result.findings[0].severity, 'critical')
 
   // critical находка открыта — release блокируется
-  assert.throws(() => release(db, root, 'owner'), /критич/)
+  assert.throws(() => release(db, root, 'owner'), /находк/)
 
   // закрываем находку — release проходит
   db.prepare("update cards set status = 'done' where id = ?").run(result.findings[0].id)

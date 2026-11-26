@@ -28,6 +28,7 @@ function human(settings: BoardSettings, effectiveModel: string | null): string {
         : ', без автообновления'
     }`,
     `Ревью в конце забега: ${settings.runReview.mode}`,
+    `Профиль ревью: ${settings.review.profile}`,
     `Модель ревьюера: ${effectiveModel ?? 'не задана'} (default-вариант)`,
     settings.setupAt
       ? `Мастер настроек: ${settings.setupAt}`
@@ -64,6 +65,7 @@ export default async function command(args: ParsedArgs) {
   const backlogAuto = boolFlag(args, 'backlog-auto')
   const noBacklogAuto = boolFlag(args, 'no-backlog-auto')
   const reviewerModel = stringFlag(args, 'reviewer-model')
+  const profile = stringFlag(args, 'profile')
 
   if (runMode !== undefined && (reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, 'не сочетайте --run-review с устаревшими --review-after-run/--no-review-after-run')
@@ -82,6 +84,7 @@ export default async function command(args: ParsedArgs) {
     backlogAuto ||
     noBacklogAuto ||
     reviewerModel !== undefined ||
+    profile !== undefined ||
     reviewAfterRun ||
     noReviewAfterRun
 
@@ -120,6 +123,7 @@ export default async function command(args: ParsedArgs) {
 
   const patch: Parameters<typeof updateSettings>[1] = {}
   if (reviewerModel !== undefined) patch.reviewer = { model: reviewerModel }
+  if (profile !== undefined) patch.review = { profile }
   if (specMode !== undefined) patch.specReview = { mode: specMode as SpecReviewSetting }
   if (largeSpec !== undefined) {
     patch.specReview = { ...patch.specReview, largeSpecChars: largeSpec }
@@ -140,6 +144,19 @@ export default async function command(args: ParsedArgs) {
   if (runMode !== undefined) patch.runReview = { mode: runMode as RunReviewSetting }
   if (reviewAfterRun) patch.runReview = { mode: 'subagent' }
   if (noReviewAfterRun) patch.runReview = { mode: 'none' }
+
+  // Старые отдельные флаги ревью переключают проект на custom-профиль.
+  if (
+    profile === undefined &&
+    (specMode !== undefined ||
+      runMode !== undefined ||
+      largeSpec !== undefined ||
+      maxSpec !== undefined ||
+      reviewAfterRun ||
+      noReviewAfterRun)
+  ) {
+    patch.review = { profile: 'custom' }
+  }
 
   if (Object.keys(patch).length > 0) {
     const next = updateSettings(project.root, patch)

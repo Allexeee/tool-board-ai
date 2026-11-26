@@ -126,6 +126,7 @@ test('run start --cards, add, drop, next и end --review', (t) => {
 
 test('run end: ревью после забега берётся из настройки, флаги перекрывают', (t) => {
   const { root, db, cards } = project(t)
+  json(root, ['setup', '--profile', 'custom'])
 
   json(root, ['run', 'start', '--as', 'developer', '--cards', cards[0].id])
   const plain = run(root, ['run', 'end', '--as', 'developer'])

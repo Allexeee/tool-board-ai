@@ -80,7 +80,7 @@ const COMMAND_HELP: Record<string, string> = {
     'board review submit <ID> --plan done|failed [--acceptance done|failed] --verdict done|reopen --reviewer <id> --note "..."',
   'review waive': 'board review waive <ID> --reason "..." --as owner',
   setup:
-    'board setup [--show] [--defaults] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
+    'board setup [--show] [--defaults] [--profile auto|low|default|high|max|custom] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
   export: 'board export [--format json|md] [--out path] [--md]',
   'sync push': 'board sync push — копия базы в приватный git',

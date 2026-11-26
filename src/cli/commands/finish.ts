@@ -28,7 +28,7 @@ export default async function command(args: ParsedArgs) {  const project = findP
       settings: readSettings(project.root),
       context: modelContext(process.env),
     }).mode
-    const forceReview = run !== null && resolvedMode !== 'none'
+    const forceReview = run !== null && resolvedMode !== 'none' && resolvedMode !== 'auto'
 
     const card = finishCard(db, {
       id,

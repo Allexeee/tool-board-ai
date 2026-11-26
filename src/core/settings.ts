@@ -6,12 +6,36 @@ import { nowIso } from './clock.ts'
 export type SpecReviewSetting = 'auto' | 'none' | 'self' | 'subagent'
 export type RunReviewSetting = 'auto' | 'none' | 'self' | 'subagent'
 
+export type ReviewCardMode = 'never' | 'needs_merge' | 'always'
+export type ReviewFindings = 'critical' | 'critical+important'
+
+/** Профиль ревью: один набор правил вместо разрозненных настроек. */
+export interface ReviewProfile {
+  spec: 'auto' | 'none' | 'self' | 'subagent'
+  /** Порог auto в словах; 0 — всегда self. */
+  specWords: number
+  card: ReviewCardMode
+  /** Сколько раз не-владелец может переоткрыть карточку; -1 — без лимита. */
+  reopens: number
+  run: 'auto' | 'none' | 'self' | 'subagent'
+  findings: ReviewFindings
+  /** Требуется ревью пакета перед релизом. */
+  package: boolean
+}
+
+export interface ReviewSettings {
+  profile: 'auto' | 'custom' | string
+  modelMap: { low: string; default: string; high: string; max: string }
+  profiles: Record<string, ReviewProfile>
+}
+
 /** Локальные настройки доски: файл `.board/settings.json`, не база. */
 export interface BoardSettings {
   version: 2
   reviewer: { model: string | null }
   specReview: { mode: SpecReviewSetting; maxSpecChars: number; largeSpecChars: number }
   runReview: { mode: RunReviewSetting }
+  review: ReviewSettings
   /** Имена веток; null — определить по git. */
   branches: { main: string | null; dev: string | null }
   /** Ведётся ли проект в git; false — доска без мержа и веток. */
@@ -24,11 +48,18 @@ export interface BoardSettings {
   setupAt: string | null
 }
 
+export const DEFAULT_REVIEW: ReviewSettings = {
+  profile: 'auto',
+  modelMap: { low: 'low', default: 'default', high: 'high', max: 'max' },
+  profiles: {},
+}
+
 export const DEFAULT_SETTINGS: BoardSettings = {
   version: 2,
   reviewer: { model: null },
   specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
   runReview: { mode: 'none' },
+  review: structuredClone(DEFAULT_REVIEW),
   branches: { main: null, dev: null },
   git: true,
   sync: { remote: null },
@@ -42,6 +73,68 @@ export function settingsPath(root: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+const PROFILE_NAME = /^[a-z][a-z0-9-]*$/
+
+function profileValue(raw: unknown): ReviewProfile | null {
+  if (!isRecord(raw)) return null
+  const spec = raw.spec
+  if (spec !== 'auto' && spec !== 'none' && spec !== 'self' && spec !== 'subagent') return null
+  const card = raw.card
+  if (card !== 'never' && card !== 'needs_merge' && card !== 'always') return null
+  const run = raw.run
+  if (run !== 'auto' && run !== 'none' && run !== 'self' && run !== 'subagent') return null
+  const findings = raw.findings
+  if (findings !== 'critical' && findings !== 'critical+important') return null
+  const specWords =
+    typeof raw.specWords === 'number' && Number.isInteger(raw.specWords) && raw.specWords >= 0
+      ? raw.specWords
+      : 0
+  const reopens =
+    typeof raw.reopens === 'number' && Number.isInteger(raw.reopens) && (raw.reopens >= -1 && raw.reopens <= 100)
+      ? raw.reopens
+      : 1
+  return {
+    spec,
+    specWords,
+    card,
+    reopens,
+    run,
+    findings,
+    package: raw.package === true,
+  }
+}
+
+function normalizeReview(raw: unknown): ReviewSettings {
+  // Старый settings.json без review сохраняет поведение прежних настроек.
+  if (!isRecord(raw)) return { ...structuredClone(DEFAULT_REVIEW), profile: 'custom' }
+
+  const profile =
+    typeof raw.profile === 'string' && PROFILE_NAME.test(raw.profile.trim())
+      ? raw.profile.trim()
+      : 'auto'
+  const map = isRecord(raw.modelMap) ? raw.modelMap : {}
+  const name = (value: unknown, fallback: string): string =>
+    typeof value === 'string' && PROFILE_NAME.test(value.trim()) ? value.trim() : fallback
+  const profiles: Record<string, ReviewProfile> = {}
+  if (isRecord(raw.profiles)) {
+    for (const [key, value] of Object.entries(raw.profiles)) {
+      if (!PROFILE_NAME.test(key)) continue
+      const profileValueResult = profileValue(value)
+      if (profileValueResult) profiles[key] = profileValueResult
+    }
+  }
+  return {
+    profile,
+    modelMap: {
+      low: name(map.low, 'low'),
+      default: name(map.default, 'default'),
+      high: name(map.high, 'high'),
+      max: name(map.max, 'max'),
+    },
+    profiles,
+  }
 }
 
 function setupAtValue(raw: unknown): string | null {
@@ -102,6 +195,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       reviewer: { model: null },
       specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
       runReview: { mode: raw.reviewAfterRun === true ? 'subagent' : 'none' },
+      review: { ...structuredClone(DEFAULT_REVIEW), profile: 'custom' },
       branches: { main: null, dev: null },
       git: true,
       sync: { remote: null },
@@ -123,6 +217,7 @@ function normalizeSettings(raw: unknown): BoardSettings {
       largeSpecChars: charLimitValue(spec.largeSpecChars, 6000),
     },
     runReview: { mode: runModeValue(run.mode, 'none') },
+    review: normalizeReview(raw.review),
     branches: {
       main: branchValue(branches.main),
       dev: branchValue(branches.dev),
@@ -229,6 +324,17 @@ function validateRefreshSeconds(raw: number): number {
   return raw
 }
 
+const BUILTIN_PROFILE_NAMES = ['low', 'default', 'high', 'max']
+
+function validateProfileName(raw: string): string {
+  const value = raw.trim()
+  if (value === 'auto' || value === 'custom' || BUILTIN_PROFILE_NAMES.includes(value)) return value
+  if (!PROFILE_NAME.test(value)) {
+    throw new UserError(3, 'профиль: auto|low|default|high|max|custom или имя из review.profiles')
+  }
+  return value
+}
+
 /** Меняет выбранные поля и отмечает, что мастер настроек завершён. */
 export function updateSettings(
   root: string,
@@ -240,10 +346,28 @@ export function updateSettings(
     git?: boolean
     sync?: { remote?: string | null }
     backlog?: { path?: string; auto?: boolean; refreshSeconds?: number }
+    review?: {
+      profile?: string
+      modelMap?: Partial<ReviewSettings['modelMap']>
+      profiles?: Record<string, ReviewProfile>
+    }
   },
   now: () => string = nowIso,
 ): BoardSettings {
   const current = readSettings(root)
+  const profileName =
+    patch.review?.profile !== undefined
+      ? validateProfileName(patch.review.profile)
+      : current.review.profile
+  const profileMap = { ...current.review.profiles, ...patch.review?.profiles }
+  if (
+    profileName !== 'auto' &&
+    profileName !== 'custom' &&
+    !BUILTIN_PROFILE_NAMES.includes(profileName) &&
+    !profileMap[profileName]
+  ) {
+    throw new UserError(3, `профиль ${profileName} не определён в review.profiles`)
+  }
   const next: BoardSettings = {
     version: 2,
     reviewer: {
@@ -271,6 +395,11 @@ export function updateSettings(
         patch.runReview?.mode !== undefined
           ? validateRunMode(patch.runReview.mode)
           : current.runReview.mode,
+    },
+    review: {
+      profile: profileName,
+      modelMap: { ...current.review.modelMap, ...patch.review?.modelMap },
+      profiles: profileMap,
     },
     branches: {
       main:

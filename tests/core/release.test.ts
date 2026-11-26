@@ -91,7 +91,7 @@ test('критическая находка блокирует release, пока
   const critical = seedCard(db, { phase: 'request', status: 'new', skill: 'dev' })
   db.prepare("update cards set severity = 'critical' where id = ?").run(critical.id)
 
-  assert.throws(() => release(db, root, 'owner'), /критич/)
+  assert.throws(() => release(db, root, 'owner'), /находк/)
 
   db.prepare("update cards set status = 'done' where id = ?").run(critical.id)
   assert.equal(release(db, root, 'owner').commit.length, 40)
