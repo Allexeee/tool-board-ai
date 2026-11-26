@@ -1,7 +1,14 @@
 import type { BacklogData, BacklogRow } from './backlog.ts'
 
-/** Тёмная тема в духе панели OpenCode: фон, моноширинные ID, спокойные таблицы. */
+/** Тёмная тема в духе панели OpenCode: Inter рядом с HTML, моноширинные ID, спокойные таблицы. */
 const STYLE = `
+@font-face {
+  font-family: "Inter";
+  src: url("Inter.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   --bg: #0f0f10;
   --panel: #171718;
@@ -11,13 +18,14 @@ const STYLE = `
   --accent: #7aa2f7;
 }
 * { box-sizing: border-box; }
+html { zoom: 0.8; }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.6 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font: 16px/1.6 "Inter", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
-.wrap { max-width: 1040px; margin: 0 auto; padding: 32px 28px 72px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 32px 28px 72px; }
 header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 h1 { font-size: 30px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.01em; }
 .meta { display: flex; align-items: center; gap: 14px; }
@@ -35,20 +43,43 @@ h1 { font-size: 30px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.01em
 .refresh:hover { border-color: var(--accent); color: var(--accent); }
 .refresh:active { transform: translateY(1px); }
 .hint { color: var(--muted); font-size: 13px; margin: 6px 0 24px; }
-.hint code { font-family: "SF Mono", Consolas, monospace; font-size: 13px; }
+.hint code { font-family: "IBM Plex Mono", "SF Mono", Consolas, monospace; font-size: 13px; }
 section { margin-top: 28px; }
-h2 { font-size: 17px; font-weight: 600; margin: 0 0 10px; color: var(--text); }
-table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 15px; }
+h2 { font-size: 20px; font-weight: 600; margin: 0 0 10px; color: var(--text); }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 16px; }
 th { text-align: left; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
 tr:last-child td { border-bottom: none; }
-td.id { font-family: "SF Mono", Consolas, monospace; font-size: 14px; color: var(--text); white-space: nowrap; }
+td.id { font-family: "IBM Plex Mono", "SF Mono", Consolas, monospace; font-size: 20px; color: var(--text); white-space: nowrap; }
 td.status { white-space: nowrap; }
 td.note { color: var(--muted); }
+td.reason { color: var(--muted); width: 28ch; }
+td.reason .clamp2 { max-width: 28ch; }
+.clamp2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .empty { color: var(--muted); }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 6px; color: var(--muted); font-size: 13px; }
-.legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--row, var(--muted)); }
+.deferred details > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: var(--text);
+}
+.deferred details > summary::-webkit-details-marker { display: none; }
+.deferred details > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1.2em;
+  color: var(--muted);
+}
+.deferred details[open] > summary::before { content: "▾"; }
+.deferred details > summary:hover { color: var(--accent); }
+.deferred details:not([open]) > table { display: none; }
 tr.status-new { --row: #7dd3fc; }
 tr.status-shaping { --row: #7dd3fc; }
 tr.status-approval { --row: #f59e0b; }
@@ -64,19 +95,6 @@ tr.status-done { --row: #16a34a; }
 tr.status-idea { --row: #2dd4bf; }
 tr[class*="status-"] td { background: color-mix(in srgb, var(--row) 7%, var(--panel)); }
 tr[class*="status-"] td:first-child { box-shadow: inset 3px 0 0 var(--row); }
-span.status-new { --row: #7dd3fc; }
-span.status-shaping { --row: #7dd3fc; }
-span.status-approval { --row: #f59e0b; }
-span.status-waiting { --row: #94a3b8; }
-span.status-ready { --row: #34d399; }
-span.status-booked { --row: #34d399; }
-span.status-in_progress { --row: #60a5fa; }
-span.status-review { --row: #a78bfa; }
-span.status-acceptance { --row: #fb923c; }
-span.status-blocked { --row: #f87171; }
-span.status-deferred { --row: #6b7280; }
-span.status-done { --row: #16a34a; }
-span.status-idea { --row: #2dd4bf; }
 `
 
 function esc(value: string): string {
@@ -118,28 +136,6 @@ function rowsFor(rows: BacklogRow[]): string[][] {
   ])
 }
 
-/** Подписи цветов: статус остаётся текстом, цвет — только подсказка. */
-const LEGEND: Array<[string, string]> = [
-  ['ready', 'в очереди'],
-  ['booked', 'забронирована'],
-  ['in_progress', 'в работе'],
-  ['review', 'ждет финального ревью'],
-  ['acceptance', 'требует приёмки'],
-  ['approval', 'на утверждении'],
-  ['waiting', 'ждёт'],
-  ['blocked', 'заблокирована'],
-  ['deferred', 'отложена'],
-  ['done', 'готово'],
-  ['idea', 'идея'],
-]
-
-function legend(): string {
-  return `<div class="legend">${LEGEND.map(
-    ([key, label]) =>
-      `<span class="legend-item"><span class="dot status-${key}"></span>${esc(label)}</span>`,
-  ).join('')}</div>`
-}
-
 /** Самодостаточный HTML-снимок бэклога. refreshSeconds > 0 — страница сама перезагружается. */
 export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string {
   const auto = refreshSeconds > 0
@@ -153,6 +149,14 @@ export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string
   window.addEventListener('scroll', save, { passive: true })
   window.addEventListener('pagehide', save)
   restore()
+  var deferred = document.getElementById('deferred')
+  if (deferred) {
+    var deferredKey = 'board-deferred-open'
+    try { if (sessionStorage.getItem(deferredKey) === '1') deferred.open = true } catch (e) {}
+    deferred.addEventListener('toggle', function () {
+      try { sessionStorage.setItem(deferredKey, deferred.open ? '1' : '0') } catch (e) {}
+    })
+  }
 })()
 </script>` +
     (auto
@@ -181,14 +185,14 @@ setInterval(function () {
     const rows = data.deferred.map((item) => [
       `<td class="id">${esc(item.id)}</td>`,
       `<td>${esc(item.title)}</td>`,
-      `<td class="note">${esc(item.note)}</td>`,
+      `<td class="note reason"><div class="clamp2">${esc(item.reason ?? item.note)}</div></td>`,
     ])
     parts.push(
-      `<section><h2>Отложенные</h2>${table(
+      `<section class="deferred"><details id="deferred"><summary>Отложенные (${data.deferred.length})</summary>${table(
         ['ID', 'Заголовок', 'Причина'],
         rows,
         data.deferred.map(() => 'status-deferred'),
-      )}</section>`,
+      )}</details></section>`,
     )
   }
 
@@ -210,7 +214,7 @@ setInterval(function () {
   if (data.ideas.length > 0) {
     const rows = data.ideas.map((item) => [
       `<td class="id">${esc(item.id)}</td>`,
-      `<td>${esc(item.text)}</td>`,
+      `<td class="idea-text"><div class="clamp2">${esc(item.title)}</div></td>`,
       `<td class="note">${fmt(item.updatedAt)}</td>`,
     ])
     parts.push(
@@ -244,7 +248,6 @@ setInterval(function () {
 <p class="hint">Собрано из <code>.board/board.db</code>. Доска пересобирает файл после каждой команды. ${
     auto ? 'Страница обновляется сама' : 'Обновить вручную'
   } — кнопка «Обновить»${auto ? '' : ' или F5'}.</p>
-${legend()}
 ${parts.join('\n')}
 </div>
 ${scripts}

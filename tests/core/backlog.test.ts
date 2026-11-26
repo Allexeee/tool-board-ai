@@ -3,16 +3,18 @@ import assert from 'node:assert/strict'
 import { addDep } from '../../src/core/deps.ts'
 import { addIdea } from '../../src/core/cards.ts'
 import {
+  BACKLOG_FONT_NAME,
   backlogStatePath,
   buildBacklog,
   flushBacklog,
   renderBacklog,
   writeBacklog,
+  writeBacklogHtml,
 } from '../../src/core/backlog.ts'
 import { readSettings, updateSettings } from '../../src/core/settings.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 function card(
   board: ReturnType<typeof makeBoard>,
@@ -98,10 +100,16 @@ test('renderBacklog: идеи — отдельная таблица в конц�
   t.after(board.close)
   card(board, 'deferred', { note: 'обычная', title: 'Отложенная задача' })
   const idea = addIdea(board.db, { text: 'Идея на будущее', actor: 'owner' })
+  const detailed = addIdea(board.db, {
+    text: 'Короткий заголовок\nПодробный текст идеи для md.',
+    title: 'Короткий заголовок',
+    actor: 'owner',
+  })
 
   const md = renderBacklog(board.db)
   assert.match(md, /## Идеи/)
   assert.match(md, new RegExp(`\\| ${idea.id} \\| Идея на будущее \\|`))
+  assert.match(md, new RegExp(`\\| ${detailed.id} \\| Короткий заголовок Подробный текст идеи для md\\. \\|`))
   const beforeIdeas = md.split('## Идеи')[0]
   assert.doesNotMatch(beforeIdeas, /Идея на будущее/)
   assert.match(beforeIdeas, /Отложенная задача/)
@@ -117,6 +125,16 @@ test('writeBacklog: путь из настроек, файл создаётся'
 
   assert.equal(path, join(board.root, 'docs/board/BACKLOG.md'))
   assert.match(readFileSync(path, 'utf8'), /Одна/)
+})
+
+test('writeBacklogHtml: Inter.ttf копируется рядом с HTML', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  card(board, 'ready', { title: 'Со шрифтом' })
+
+  const path = writeBacklogHtml(board.db, board.root, readSettings(board.root))
+  assert.ok(existsSync(join(dirname(path), BACKLOG_FONT_NAME)))
+  assert.match(readFileSync(path, 'utf8'), /url\("Inter\.ttf"\)/)
 })
 
 test('flushBacklog: флаг по ревизии, без изменений файлы не трогает', (t) => {
