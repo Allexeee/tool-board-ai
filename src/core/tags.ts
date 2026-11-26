@@ -3,6 +3,11 @@ import { UserError } from '../cli/errors.ts'
 import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { appendEvent } from './events.ts'
+import {
+  readSettings,
+  updateSettings,
+  type AcceptanceConditions,
+} from './settings.ts'
 import type { Card } from './types.ts'
 
 /** Три варианта забега: тег карточки и подпись. */
@@ -132,12 +137,15 @@ export function listTags(db: DatabaseSync): Tag[] {
 /** Переименование обновляет и реестр, и tags у всех карточек. */
 export function renameTag(
   db: DatabaseSync,
-  input: { from: string; to: string; actor?: string },
+  input: { from: string; to: string; actor?: string; root?: string },
 ): Tag {
   return tx(db, () => {
     const from = normalizeTagName(input.from)
     const to = normalizeTagName(input.to)
     if (from === to) return requireTag(db, from)
+    if ((SERVICE_TAGS as readonly string[]).includes(from)) {
+      throw new UserError(3, `служебный тег «${from}» переименовать нельзя`)
+    }
     if (!tagExists(db, from)) throw new UserError(3, `тег «${from}» не найден`)
     if (tagExists(db, to)) throw new UserError(3, `тег «${to}» уже есть`)
     const actor = input.actor?.trim() || 'owner'
@@ -158,6 +166,25 @@ export function renameTag(
         at,
         card.id,
       )
+    }
+
+    if (input.root) {
+      const current = readSettings(input.root)
+      const mapConditions = (
+        conditions: AcceptanceConditions | undefined,
+      ): AcceptanceConditions | undefined => {
+        if (!conditions?.tags) return conditions
+        return { ...conditions, tags: conditions.tags.map((tag) => (tag === from ? to : tag)) }
+      }
+      const rules = current.acceptance.rules.map((rule) => ({
+        name: rule.name,
+        include: mapConditions(rule.include)!,
+        ...(rule.exclude ? { exclude: mapConditions(rule.exclude) } : {}),
+      }))
+      const exclude = mapConditions(current.acceptance.exclude)
+      updateSettings(input.root, {
+        acceptance: { rules, ...(exclude ? { exclude } : {}) },
+      })
     }
 
     appendEvent(db, {

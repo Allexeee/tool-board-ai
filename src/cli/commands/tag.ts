@@ -31,7 +31,7 @@ export default async function command(args: ParsedArgs) {
   const rename = (args: ParsedArgs): number => {
     const [from, to] = args.positionals
     if (!from || !to) throw new UserError(3, USAGE)
-    const tag = renameTag(db, { from, to, actor })
+    const tag = renameTag(db, { from, to, actor, root: project.root })
     ok(tag, `${from} → ${tag.name}`)
     return 0
   }
