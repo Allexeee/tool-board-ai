@@ -165,6 +165,8 @@ function ownerView(
   )
   const ownerCards = listCards(db, { skill: 'owner', status: ['ready', 'waiting'] }).sort(
     (left, right) =>
+      (left.position ?? Number.MAX_SAFE_INTEGER) -
+        (right.position ?? Number.MAX_SAFE_INTEGER) ||
       (right.importance ?? -1) - (left.importance ?? -1) ||
       left.createdAt.localeCompare(right.createdAt) ||
       left.id.localeCompare(right.id),
