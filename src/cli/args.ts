@@ -23,7 +23,7 @@ const KNOWN_FLAGS = new Set([
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge', 'no-plan', 'new-group',
   'backlog-path', 'backlog-auto', 'no-backlog-auto', 'backlog-refresh', 'html', 'open',
-  'no-decisions', 'defaults', 'name', 'profile', 'merge', 'dry-run', 'since',
+  'no-decisions', 'defaults', 'name', 'profile', 'merge', 'dry-run', 'since', 'package',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
   'large-spec', 'max-spec', 'branch-main', 'branch-dev', 'no-git', 'standalone', 'sync', 'run-review', 'board-version', 'board-source', 'allow-downgrade',

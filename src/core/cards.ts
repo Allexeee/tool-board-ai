@@ -96,6 +96,7 @@ interface Row {
   spec_rev: number
   review_reopens: number
   merge_commit: string | null
+  main_commit: string | null
   in_dev: number
   in_main: number
   reverted_at: string | null
@@ -141,6 +142,7 @@ const toCard = (row: Row): Card => ({
   specRev: row.spec_rev,
   reviewReopens: row.review_reopens,
   mergeCommit: row.merge_commit,
+  mainCommit: row.main_commit,
   inDev: row.in_dev === 1,
   inMain: row.in_main === 1,
   revertedAt: row.reverted_at,
