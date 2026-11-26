@@ -358,7 +358,7 @@ const STATUS_WORDS: Record<CardStatus, string> = {
   shaping: 'разбор',
   approval: 'на утверждении',
   waiting: 'ждёт',
-  ready: 'доступна',
+  ready: 'в очереди',
   booked: 'забронирована',
   in_progress: 'в работе',
   blocked: 'заблокирована',

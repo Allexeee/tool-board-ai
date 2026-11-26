@@ -13,8 +13,8 @@ export const STATUS_LABEL: Record<CardStatus, string> = {
   shaping: 'разбор',
   approval: 'ждёт утверждения владельцем',
   waiting: 'ждёт другие карточки',
-  ready: 'готов к работе',
-  booked: 'готов к работе',
+  ready: 'в очереди',
+  booked: 'забронирована',
   in_progress: 'в работе',
   review: 'ждет финального ревью',
   acceptance: 'требует приёмки владельцем',
@@ -37,6 +37,7 @@ export interface BacklogRow {
   id: string
   title: string
   status: string
+  statusKey: CardStatus
   note: string
 }
 
@@ -96,13 +97,20 @@ function row(db: DatabaseSync, card: Card): BacklogRow {
     id: card.id,
     title: card.title,
     status: STATUS_LABEL[card.status],
+    statusKey: card.status,
     note: noteFor(db, card),
   }
+}
+
+/** waiting и blocked в конце секции: очередь не разрывается, зависимые не лезут вперёд. */
+function statusRank(card: Card): number {
+  return card.status === 'waiting' || card.status === 'blocked' ? 1 : 0
 }
 
 function sortCards(cards: Card[]): Card[] {
   return [...cards].sort(
     (left, right) =>
+      statusRank(left) - statusRank(right) ||
       score(right) - score(left) ||
       (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER) ||
       (left.importance ?? 0) - (right.importance ?? 0) ||
