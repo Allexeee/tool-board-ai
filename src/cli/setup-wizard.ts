@@ -129,11 +129,18 @@ export async function runSetupWizard(
       },
     )
 
+    const changed =
+      specMode !== current.specReview.mode ||
+      maxSpecChars !== current.specReview.maxSpecChars ||
+      largeSpecChars !== current.specReview.largeSpecChars ||
+      runMode !== current.runReview.mode ||
+      reviewerModel !== current.reviewer.model
+
     return updateSettings(root, {
       reviewer: { model: reviewerModel },
       specReview: { mode: specMode, maxSpecChars, largeSpecChars },
       runReview: { mode: runMode },
-      review: { profile: 'custom' },
+      ...(changed ? { review: { profile: 'custom' } } : {}),
     })
   } finally {
     rl.close()

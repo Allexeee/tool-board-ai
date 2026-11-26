@@ -234,7 +234,7 @@ test('isLightRun: больше двух карточек — тяжёлый, д�
   const fixture = makeBoard()
   t.after(fixture.close)
   const cards = [1, 2, 3].map(() =>
-    seedCard(fixture.db, { phase: 'task', status: 'ready', needsMerge: true }),
+    seedCard(fixture.db, { phase: 'task', status: 'ready', needsMerge: false }),
   )
   const heavy = seedRun(fixture.db, { cardIds: cards.map((card) => card.id) })
   assert.equal(isLightRun(fixture.db, heavy), false)
