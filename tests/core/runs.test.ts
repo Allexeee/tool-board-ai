@@ -975,3 +975,32 @@ test('run add ставит позицию карточке без позиции
   assert.ok(getCard(db, loose.id)!.position)
   assert.equal(listRunCards(db, run.id).length, 2)
 })
+
+test('owner-карточку нельзя взять в забег', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const ownerCard = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'owner',
+    position: 1,
+  })
+  const devCard = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 2,
+  })
+
+  assert.throws(
+    () => startRun(db, { executorId: 'owner', cardIds: [ownerCard.id], actor: 'owner' }),
+    /owner/,
+  )
+  assert.throws(
+    () =>
+      startRun(db, { executorId: 'developer', cardIds: [ownerCard.id], actor: 'developer' }),
+    /owner/,
+  )
+  assert.equal(getCard(db, ownerCard.id)!.status, 'ready')
+  assert.equal(getCard(db, devCard.id)!.status, 'ready')
+})
