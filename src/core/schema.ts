@@ -1,6 +1,7 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
+import { nowIso } from './clock.ts'
 
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -19,6 +20,12 @@ create table groups (
   prefix text primary key,
   next_seq integer not null default 1,
   name text,
+  created_at text not null
+);
+
+create table tags (
+  name text primary key,
+  description text,
   created_at text not null
 );
 
@@ -253,6 +260,41 @@ const MIGRATE_V8_TO_V9 = `
 alter table cards add column main_commit text;
 `
 
+/** Реестр тегов: свободные строки карточек получают словарь проекта. */
+const MIGRATE_V9_TO_V10 = `
+create table if not exists tags (
+  name text primary key,
+  description text,
+  created_at text not null
+);
+`
+
+/** Наполняет реестр служебными тегами и тегами существующих карточек. */
+function seedTags(db: DatabaseSync): void {
+  const hasCards = db
+    .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+    .get()
+  const hasTags = hasCards
+    ? (db.prepare('pragma table_info(cards)').all() as Array<{ name: string }>).some(
+        (row) => row.name === 'tags',
+      )
+    : false
+
+  const insert = db.prepare(
+    'insert or ignore into tags (name, description, created_at) values (?, null, ?)',
+  )
+  const at = nowIso()
+  for (const name of ['new', 'improve', 'review', 'idea']) insert.run(name, at)
+
+  if (!hasTags) return
+  const rows = db
+    .prepare('select distinct value from cards, json_each(cards.tags)')
+    .all() as Array<{ value: string }>
+  for (const row of rows) {
+    if (row.value.trim() !== '') insert.run(row.value.trim().toLowerCase(), at)
+  }
+}
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -287,7 +329,7 @@ export function migrate(db: DatabaseSync): number {
       db.exec(MIGRATE_V4_TO_V5)
     } else if (from === 4) {
       db.exec(MIGRATE_V4_TO_V5)
-    } else if (from !== 5 && from !== 6 && from !== 7 && from !== 8) {
+    } else if (from !== 5 && from !== 6 && from !== 7 && from !== 8 && from !== 9) {
       throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     }
 
@@ -310,6 +352,10 @@ export function migrate(db: DatabaseSync): number {
         .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
         .get()
       if (hasCards) db.exec(MIGRATE_V8_TO_V9)
+    }
+    if (from < 10) {
+      db.exec(MIGRATE_V9_TO_V10)
+      seedTags(db)
     }
 
     if (from === 1 || from === 2) {

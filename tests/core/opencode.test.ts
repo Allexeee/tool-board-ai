@@ -117,6 +117,8 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   assert.match(plugin, /name: 'setup'/)
   assert.match(plugin, /name: 'idea'/)
   assert.match(plugin, /ideaArgs/)
+  assert.match(plugin, /name: 'tag'/)
+  assert.match(plugin, /tagArgs/)
   assert.match(plugin, /'setup', '--show'/)
   assert.match(plugin, /review-after-run/)
   assert.match(plugin, /no-review-after-run/)

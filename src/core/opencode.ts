@@ -34,6 +34,7 @@ export const AGENTS_BLOCK = [
   '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
   '- «Открой/покажи бэклог» — `board backlog --open`; если доступен инструмент браузера, открой `docs/board/BACKLOG.html` в панели Review (`browser.preview`). В чат HTML не вставляй.',
   '- Идеи — `board idea add|list|edit|drop` (или `board_idea`): карточки IDEA, вне очереди, мержа и ревью; в бэклоге отдельная таблица.',
+  '- Теги — реестр `board tag add|list|rename|remove` (или `board_tag`); на `card shape` теги берутся из дизайна задачи, `card tag add|remove` — точечно.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `writing-plans`, `executing-plans` и другие конкурирующие навыки superpowers в проекте выключены правами OpenCode: план — steps карточки, отдельного plan-файла нет.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
@@ -86,7 +87,7 @@ description: Доска: разобрать запрос в spec и утверд
 
 1. Запрос → разбор: \`board card shape <ID> --as <исполнитель> [--from card.json]\`.
 2. Решение владельца спрашивай **окном выбора** с 2–4 вариантами до записи spec; свой ответ владельца можно уточнить один раз. \`ask\` — асинхронный вопрос, если владельца нет; \`block\` — только если без ответа нельзя продолжать. Угадывать нельзя.
-3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. План (\`steps\`) при shape не пишется.
+3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. Теги — \`--tag\` из реестра, если дизайн задачи их предполагает; неизвестный тег сначала заводится \`board tag add\`. План (\`steps\`) при shape не пишется.
 4. Spec review: \`/spec-review\`. Режим — \`board card show <ID> --json\` → \`specReview.mode\`: \`none\` — не нужна, \`self\` — сам, \`subagent\` — \`board-reviewer\`. Результат: \`board card spec-review <ID> --mode self|subagent --verdict done|reopen --note "..."\`.
 5. Решений владельца нет — \`board card submit <ID> --as <исполнитель> --no-decisions\`: карточка сразу в очередь, отдельное утверждение не нужно.
 6. Решения нужны — \`board card submit <ID> --as <исполнитель>\` и \`card approve\` владельца после его ответа.
@@ -565,6 +566,22 @@ function ideaArgs(input) {
   return args
 }
 
+function tagArgs(input) {
+  const args = ['tag', input.action]
+  const a = input.action
+  if (a === 'add') {
+    if (input.name) args.push(String(input.name))
+    flag(args, 'description', input.description)
+  } else if (a === 'rename') {
+    if (input.name) args.push(String(input.name))
+    if (input.to) args.push(String(input.to))
+  } else if (a === 'remove') {
+    if (input.name) args.push(String(input.name))
+  }
+  flag(args, 'as', input.as)
+  return args
+}
+
 function reviewArgs(input) {
   const args = ['review', input.action]
   const a = input.action
@@ -949,6 +966,19 @@ export default Plugin.define({
           as: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, ideaArgs(input), context),
+      })
+
+      editor.add({
+        name: 'tag',
+        description: 'Реестр тегов: add|list|rename|remove',
+        input: schema({
+          action: { type: 'string' },
+          name: { type: 'string' },
+          to: { type: 'string' },
+          description: { type: 'string' },
+          as: { type: 'string' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, tagArgs(input), context),
       })
 
       editor.add({

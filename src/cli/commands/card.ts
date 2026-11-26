@@ -33,6 +33,7 @@ import {
 } from '../../core/review-policy.ts'
 import { getRun } from '../../core/runs.ts'
 import { readSettings } from '../../core/settings.ts'
+import { assertKnownTags } from '../../core/tags.ts'
 import {
   latestSpecReview,
   listReviews,
@@ -132,7 +133,7 @@ export default async function command(args: ParsedArgs) {
       title,
       body: stringFlag(args, 'spec') ?? stringFlag(args, 'body'),
       acceptance: stringsFlag(args, 'acceptance'),
-      tags: stringsFlag(args, 'tag'),
+      tags: assertKnownTags(db, stringsFlag(args, 'tag')),
       skill,
       author: stringFlag(args, 'as') ?? 'owner',
       needsMerge: settings.git ? undefined : false,
@@ -205,6 +206,43 @@ export default async function command(args: ParsedArgs) {
     const card = getCard(db, id)
     if (!card) throw new UserError(3, `карточка ${id} не найдена`)
     return card
+  }
+
+  const tag = (args: ParsedArgs): number => {
+    const [action, rawId, rawTag] = args.positionals
+    const card = requireCard(rawId, 'board card tag add|remove|list <ID> [тег]')
+    if (action === 'list') {
+      ok(card.tags, card.tags.length > 0 ? card.tags.join(', ') : 'тегов нет')
+      return 0
+    }
+    if (action !== 'add' && action !== 'remove') {
+      throw new UserError(3, 'использование: board card tag add|remove|list <ID> [тег]')
+    }
+    const name = assertKnownTags(db, [rawTag ?? ''])[0]
+    if (action === 'add') {
+      if (card.tags.includes(name)) {
+        ok(card, `${card.id}: тег ${name} уже стоит`)
+        return 0
+      }
+      const updated = editCard(db, {
+        id: card.id,
+        actor: stringFlag(args, 'as') ?? 'owner',
+        patch: { tags: [...card.tags, name] },
+      })
+      ok(updated, `${card.id}: + ${name}`)
+      return 0
+    }
+    if (!card.tags.includes(name)) {
+      ok(card, `${card.id}: тега ${name} нет`)
+      return 0
+    }
+    const updated = editCard(db, {
+      id: card.id,
+      actor: stringFlag(args, 'as') ?? 'owner',
+      patch: { tags: card.tags.filter((tagName) => tagName !== name) },
+    })
+    ok(updated, `${card.id}: − ${name}`)
+    return 0
   }
 
   const show = (args: ParsedArgs): number => {
@@ -297,7 +335,7 @@ export default async function command(args: ParsedArgs) {
     if (needsMerge !== undefined) patch.needsMerge = needsMerge
 
     if (args.flags['scope'] !== undefined) patch.scope = stringsFlag(args, 'scope')
-    if (args.flags.tag !== undefined) patch.tags = stringsFlag(args, 'tag')
+    if (args.flags.tag !== undefined) patch.tags = assertKnownTags(db, stringsFlag(args, 'tag'))
     if (args.flags['clear-tags'] !== undefined) patch.tags = []
 
     const note = stringFlag(args, 'note')
@@ -455,13 +493,23 @@ export default async function command(args: ParsedArgs) {
     // новая карточка без группы оставляют карточку в покое.
     const from = stringFlag(args, 'from')
     const file = from ? parseShapeFile(from) : undefined
+    const tags = assertKnownTags(db, stringsFlag(args, 'tag'))
+    if (file?.tags) assertKnownTags(db, file.tags)
+    for (const item of file?.new_cards ?? []) {
+      if (item.tags) assertKnownTags(db, item.tags)
+    }
 
     // shape + apply — одна транзакция: ошибка внутри applyShapeFile
     // откатывает и переход в shaping.
     const result = tx(db, () => {
       const shaped = shapeCard(db, { id, actor })
-      if (!file) return { card: shaped, newCards: [] as Card[] }
-      return applyShapeFile(db, { id, actor, file })
+      const applied = file
+        ? applyShapeFile(db, { id, actor, file })
+        : { card: shaped, newCards: [] as Card[] }
+      if (tags.length > 0) {
+        applied.card = editCard(db, { id, actor, patch: { tags } })
+      }
+      return applied
     })
 
     if (file) {
@@ -734,9 +782,10 @@ export default async function command(args: ParsedArgs) {
     if (args.sub === 'defer') return defer(args)
     if (args.sub === 'scope') return scope(args)
     if (args.sub === 'resume') return resume(args)
+    if (args.sub === 'tag') return tag(args)
     throw new UserError(
       3,
-      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume|scope',
+      'использование: board card add|list|show|edit|step|ref|dep|shape|submit|spec-review|approve|amend|reject|verdict|done|cancel|reopen|defer|resume|scope|tag',
     )
   } finally {
     db.close()

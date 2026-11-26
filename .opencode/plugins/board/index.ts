@@ -331,6 +331,22 @@ function ideaArgs(input) {
   return args
 }
 
+function tagArgs(input) {
+  const args = ['tag', input.action]
+  const a = input.action
+  if (a === 'add') {
+    if (input.name) args.push(String(input.name))
+    flag(args, 'description', input.description)
+  } else if (a === 'rename') {
+    if (input.name) args.push(String(input.name))
+    if (input.to) args.push(String(input.to))
+  } else if (a === 'remove') {
+    if (input.name) args.push(String(input.name))
+  }
+  flag(args, 'as', input.as)
+  return args
+}
+
 function reviewArgs(input) {
   const args = ['review', input.action]
   const a = input.action
@@ -715,6 +731,19 @@ export default Plugin.define({
           as: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, ideaArgs(input), context),
+      })
+
+      editor.add({
+        name: 'tag',
+        description: 'Реестр тегов: add|list|rename|remove',
+        input: schema({
+          action: { type: 'string' },
+          name: { type: 'string' },
+          to: { type: 'string' },
+          description: { type: 'string' },
+          as: { type: 'string' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, tagArgs(input), context),
       })
 
       editor.add({

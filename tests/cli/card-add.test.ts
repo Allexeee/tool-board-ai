@@ -298,8 +298,16 @@ test('card list фильтрует и печатает карточки', (t) =>
   assert.match(human.out, /new/)
 })
 
-test('card add и edit принимают теги', (t) => {
+test('card add и edit принимают теги из реестра', (t) => {
   const dir = project(t)
+  assert.equal(run(dir, ['tag', 'add', 'backend']).code, 0)
+
+  const unknown = run(dir, [
+    'card', 'add', '--group', 'UI', '--title', 't', '--skill', 'dev', '--tag', 'nope',
+  ])
+  assert.equal(unknown.code, 3)
+  assert.match(unknown.err, /не найден/)
+
   const added = json(dir, [
     'card', 'add', '--group', 'UI', '--title', 't', '--skill', 'dev',
     '--tag', 'New', '--tag', 'backend',
