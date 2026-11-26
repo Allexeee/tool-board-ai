@@ -367,6 +367,21 @@ test('now 0 показывает счётчик карточек на ревью
   assert.match(stripAnsi(renderNow(owner)), /НА РЕВЬЮ \(1\)/)
 })
 
+test('now показывает «ждёт финального ревью» у карточки на ревью', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  seedCard(db, {
+    phase: 'task',
+    status: 'review',
+    holder: 'developer',
+    skill: 'dev',
+    position: 1,
+  })
+
+  const view = nowData(db, { view: 1, executorId: 'developer' })
+  assert.match(stripAnsi(renderNow(view)), /ждёт финального ревью/)
+})
+
 test('now 3: owner после --bottom идёт последним в своей очереди', (t) => {
   const { db, root } = board(t)
   const first = seedCard(db, { phase: 'task', status: 'ready', skill: 'owner', position: 1 })
