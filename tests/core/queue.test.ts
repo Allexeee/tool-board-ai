@@ -279,7 +279,8 @@ test('--before ниже увеличивает демона, выше — нет
   )
 })
 
-test('демон растёт только при ручном понижении', (t) => {  const { db } = board(t)
+test('демон растёт только при ручном понижении', (t) => {
+  const { db } = board(t)
   const first = task(db, { position: 1 })
   const second = task(db, { position: 2 })
   const third = task(db, { position: 3 })
@@ -442,14 +443,15 @@ test('две очереди навыков независимы: move одног
   )
 
   // Владелец переставляет карточку любого навыка: двигается только эта очередь.
-  moveCard(db, mktSecond.id, { bottom: true })
+  moveCard(db, mktFirst.id, { bottom: true })
   assert.deepEqual(
     listQueue(db, { class: 'marketing' }).map((card) => card.id),
-    [mktFirst.id, mktSecond.id],
+    [mktSecond.id, mktFirst.id],
   )
+  assert.equal(getCard(db, mktFirst.id)!.demons, 1)
   assert.deepEqual(
-    listQueue(db, { class: 'dev' }).map((card) => card.position),
-    [1, 2],
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [devSecond.id, devFirst.id],
   )
 })
 

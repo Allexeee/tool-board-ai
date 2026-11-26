@@ -97,7 +97,8 @@ test('finish печатает «ждёт финального ревью»', (t)
   assert.match(finished.out, /ждёт финального ревью/)
 })
 
-test('finish без --as и --summary отказывает', (t) => {  const { root, cardId } = repoProject(t)
+test('finish без --as и --summary отказывает', (t) => {
+  const { root, cardId } = repoProject(t)
   run(root, ['run', 'start', '--as', 'developer', '--cards', cardId])
   json(root, ['take', cardId, '--as', 'developer'])
 
