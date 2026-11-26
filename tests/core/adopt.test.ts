@@ -17,6 +17,11 @@ test('adopt --check: пустой проект получает план и ни
   writeFileSync(join(board.root, 'docs', 'inbox', 'task.md'), '# Починить вход\n')
 
   const before = readFileSync(join(board.root, '.board', 'settings.json'), 'utf8')
+  const counts = () =>
+    ['cards', 'events', 'tags', 'groups'].map(
+      (table) => (board.db.prepare(`select count(*) as n from ${table}`).get() as { n: number }).n,
+    )
+  const beforeCounts = counts()
   const plan = buildAdoptPlan(board.db, board.root, NO_MODEL)
 
   assert.deepEqual(plan.groups.missing.map((group) => group.prefix), ['CARD'])
@@ -37,6 +42,7 @@ test('adopt --check: пустой проект получает план и ни
   assert.deepEqual(listGroups(board.db), [])
   assert.deepEqual(listExecutors(board.db).map((executor) => executor.id), ['owner'])
   assert.equal(readFileSync(join(board.root, '.board', 'settings.json'), 'utf8'), before)
+  assert.deepEqual(counts(), beforeCounts)
 
   const again = buildAdoptPlan(board.db, board.root, NO_MODEL)
   assert.deepEqual(again, plan)
@@ -114,6 +120,54 @@ test('adopt --check: чеклист вне inbox тоже источник за�
 
   const plan = buildAdoptPlan(board.db, board.root, NO_MODEL)
   assert.deepEqual(plan.sources.map((source) => source.path), ['docs/release/checklist.md'])
+})
+
+test('adopt --check: источник получает навык исполнителя, а не его id', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  addGroup(board.db, { prefix: 'CARD', name: null, actor: 'owner' })
+  seedExecutor(board.db, { id: 'developer', skills: ['dev', 'frontend'] })
+  mkdirSync(join(board.root, 'docs', 'inbox'), { recursive: true })
+  writeFileSync(join(board.root, 'docs', 'inbox', 'task.md'), '# Починить вход\n')
+
+  const plan = buildAdoptPlan(board.db, board.root, NO_MODEL)
+  assert.equal(plan.sources[0].skill, 'dev')
+  assert.match(plan.sources[0].command, /--skill "dev"/)
+  assert.doesNotMatch(plan.sources[0].command, /--skill "developer"/)
+})
+
+test('adopt --check: команды источников не дают shell-подстановку', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  addGroup(board.db, { prefix: 'CARD', name: null, actor: 'owner' })
+  mkdirSync(join(board.root, 'docs', 'inbox'), { recursive: true })
+  writeFileSync(
+    join(board.root, 'docs', 'inbox', 'task.md'),
+    '# Закрыть $(rm -rf /) `id` "x"\n',
+  )
+
+  const source = buildAdoptPlan(board.db, board.root, NO_MODEL).sources[0]
+  assert.match(source.command, /Закрыть/)
+  assert.doesNotMatch(source.command, /\$\(|`|\$[A-Za-z_]/)
+  assert.doesNotMatch(source.command, /\\/)
+})
+
+test('adopt --check: ## и front matter дают заголовок; README и шаблоны пропускаются', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  addGroup(board.db, { prefix: 'CARD', name: null, actor: 'owner' })
+  const inbox = join(board.root, 'docs', 'inbox')
+  mkdirSync(inbox, { recursive: true })
+  writeFileSync(join(inbox, 'README.md'), '# Индекс входящих\n')
+  writeFileSync(join(inbox, '_template.md'), '# Шаблон\n')
+  writeFileSync(
+    join(inbox, 'task.md'),
+    '---\ntitle: метаданные\n---\n\n## Настоящая задача\n\nтекст\n',
+  )
+
+  const plan = buildAdoptPlan(board.db, board.root, NO_MODEL)
+  assert.deepEqual(plan.sources.map((source) => source.path), ['docs/inbox/task.md'])
+  assert.deepEqual(plan.sources.map((source) => source.title), ['feat: Настоящая задача'])
 })
 
 test('renderAdoptPlan: остаток и честная пометка, что доска ничего не создала', (t) => {
