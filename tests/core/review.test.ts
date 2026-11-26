@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { editCard, getCard } from '../../src/core/cards.ts'
+import { editCard, getCard, listCards } from '../../src/core/cards.ts'
 import { openDb } from '../../src/core/db.ts'
 import { addDep, listDeps } from '../../src/core/deps.ts'
 import { finishCard, takeCard } from '../../src/core/lifecycle.ts'
@@ -14,6 +14,7 @@ import {
   hasReviewVerdict,
   listReviewCards,
   revalidateDependents,
+  submitPackage,
   submitVerdict,
   waiveReview,
 } from '../../src/core/review.ts'
@@ -529,4 +530,91 @@ test('hasReviewVerdict: старый вердикт не считается по
 
   review('2026-01-04T00:00:00.000Z')
   assert.equal(hasReviewVerdict(board.db, card.id), true)
+})
+
+test('повтор находки не плодит карточку: severity растёт, закрытая — новая', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+
+  const first = addFinding(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    severity: 'other',
+    text: '  нет   теста на отказ ',
+  })
+  const repeat = addFinding(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    severity: 'important',
+    text: 'нет теста на отказ',
+  })
+
+  assert.equal(repeat.id, first.id)
+  assert.equal(getCard(db, first.id)!.severity, 'important')
+  assert.equal(
+    listCards(db).filter(
+      (item) =>
+        item.originCardId === card.id && item.status !== 'done' && item.status !== 'cancelled',
+    ).length,
+    1,
+  )
+
+  db.prepare("update cards set status = 'done' where id = ?").run(first.id)
+  const regression = addFinding(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    severity: 'important',
+    text: 'нет теста на отказ',
+  })
+  assert.notEqual(regression.id, first.id)
+})
+
+test('пакетное ревью создаёт находку, сливает с раном и блокирует критичной', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = seedCard(db, { phase: 'task', status: 'review', needsMerge: true })
+  const runFinding = addFinding(db, {
+    cardId: card.id,
+    reviewer: 'reviewer-1',
+    severity: 'important',
+    text: 'нет теста на отказ',
+  })
+
+  const pkg = submitPackage(db, {
+    actor: 'reviewer-1',
+    verdict: 'done',
+    cards: [{ id: card.id, title: card.title, commit: 'a'.repeat(40) }],
+    findings: [{ severity: 'critical', text: 'нет теста на отказ', cardId: card.id }],
+  })
+
+  assert.equal(pkg.findings[0].findingId, runFinding.id)
+  assert.equal(getCard(db, runFinding.id)!.severity, 'critical')
+  assert.deepEqual(listDeps(db, card.id), [runFinding.id])
+  assert.throws(() => release(db, root, 'owner'), /находк/)
+})
+
+test('пакетное ревью: находка без cardId или с чужой карточкой — ошибка', (t) => {
+  const { db } = board(t)
+  const card = seedCard(db, { phase: 'task', status: 'done' })
+  const packed = [{ id: card.id, title: card.title, commit: 'b'.repeat(40) }]
+
+  assert.throws(
+    () =>
+      submitPackage(db, {
+        actor: 'reviewer-1',
+        verdict: 'done',
+        cards: packed,
+        findings: [{ severity: 'other', text: 'мелочь' }],
+      }),
+    /cardId/,
+  )
+  assert.throws(
+    () =>
+      submitPackage(db, {
+        actor: 'reviewer-1',
+        verdict: 'done',
+        cards: packed,
+        findings: [{ severity: 'other', text: 'мелочь', cardId: 'NOPE-1' }],
+      }),
+    /нет в пакете/,
+  )
 })
