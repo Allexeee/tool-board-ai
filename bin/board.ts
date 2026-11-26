@@ -40,6 +40,7 @@ const HELP = `board — доска карточек для людей и аге�
   command add|list
   review list|package|finding|submit|waive
   idea add|list|edit|drop   идеи: карточки вне очереди, мержа и ревью
+  tag add|list|rename|remove  реестр тегов карточек
   release [--package <executor|skill>] [--no-review --reason "..."] / now / doctor / backup / export / sync
   backlog [--out <path>] [--html] [--open]  md- или html-бэклог; --open — в браузере
 
@@ -88,6 +89,11 @@ const COMMAND_HELP: Record<string, string> = {
   'idea list': 'board idea list [--json]',
   'idea edit': 'board idea edit <ID> [--text "..."] [--title "..."] [--as <id>]',
   'idea drop': 'board idea drop <ID> [--as <id>]',
+  'tag add': 'board tag add <name> [--description "..."] [--as <id>]',
+  'tag list': 'board tag list [--json]',
+  'tag rename': 'board tag rename <old> <new> [--as <id>]',
+  'tag remove': 'board tag remove <name> [--as <id>]',
+  'card tag': 'board card tag add|remove|list <ID> [тег] [--as <id>]',
   'release': 'board release [--package <executor|skill>] [--no-review --reason "..."] --as owner',
   setup:
     'board setup [--show] [--defaults] [--profile auto|low|default|high|max|custom] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
