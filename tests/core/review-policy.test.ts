@@ -13,6 +13,12 @@ import {
 import type { BoardSettings } from '../../src/core/settings.ts'
 import { isLightRun } from '../../src/core/runs.ts'
 import { makeBoard, seedCard, seedRun } from '../helpers/board.ts'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { openDb } from '../../src/core/db.ts'
+import { mergeToDev, runGit, startCardBranch } from '../../src/core/git.ts'
+import { initProject } from '../../src/core/project.ts'
+import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
 const base: BoardSettings = {
   version: 2,
@@ -247,6 +253,43 @@ test('isLightRun: больше двух карточек — тяжёлый, д�
   )
   const light = seedRun(second.db, { cardIds: lightCards.map((card) => card.id) })
   assert.equal(isLightRun(second.db, light), true)
+})
+
+test('isLightRun: dropped-карточка не утяжеляет забег', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const cards = [1, 2, 3].map(() =>
+    seedCard(board.db, { phase: 'task', status: 'ready', needsMerge: false }),
+  )
+  const run = seedRun(board.db, { cardIds: cards.map((card) => card.id) })
+  board.db
+    .prepare("update run_cards set status = 'dropped' where run_id = ? and card_id = ?")
+    .run(run.id, cards[0].id)
+
+  assert.equal(isLightRun(board.db, run), true)
+})
+
+test('isLightRun: опасный путь в diff — тяжёлый', (t) => {
+  const repo = makeRepo()
+  initProject(repo.root)
+  commitGenerated(repo.root)
+  const db = openDb(join(repo.root, '.board', 'board.db'))
+  t.after(() => {
+    db.close()
+    repo.close()
+  })
+
+  const card = seedCard(db, { phase: 'task', status: 'booked', skill: 'dev', scope: ['src/**'] })
+  const { branch, worktree } = startCardBranch(repo.root, 'dev-a', card)
+  mkdirSync(join(worktree, 'src', 'cli'), { recursive: true })
+  writeFileSync(join(worktree, 'src', 'cli', 'x.ts'), 'x\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', card.id])
+  const merge = mergeToDev(repo.root, branch, card.id)
+  db.prepare('update cards set merge_commit = ?, in_dev = 1 where id = ?').run(merge, card.id)
+
+  const run = seedRun(db, { cardIds: [card.id] })
+  assert.equal(isLightRun(db, run, repo.root), false)
 })
 
 test('пакет ревью обязателен везде, кроме low', () => {
