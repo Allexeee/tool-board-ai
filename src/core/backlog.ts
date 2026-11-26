@@ -124,14 +124,20 @@ function statusRank(card: Card): number {
   return card.status === 'waiting' || card.status === 'blocked' ? 1 : 0
 }
 
-function sortCards(cards: Card[]): Card[] {
-  return [...cards].sort(
-    (left, right) =>
-      statusRank(left) - statusRank(right) ||
-      score(right) - score(left) ||
-      (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER) ||
-      (left.importance ?? 0) - (right.importance ?? 0) ||
-      left.id.localeCompare(right.id),
+function sortCards(cards: Card[], owner = false): Card[] {
+  return [...cards].sort((left, right) =>
+    owner
+      ? (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER) ||
+        statusRank(left) - statusRank(right) ||
+        score(right) - score(left) ||
+        left.id.localeCompare(right.id)
+      : statusRank(left) - statusRank(right) ||
+        score(right) - score(left) ||
+        (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER) ||
+        (left.importance ?? 0) - (right.importance ?? 0) ||
+        left.id.localeCompare(right.id),
   )
 }
 
@@ -173,7 +179,7 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
   const sections = skills.map((skill) => ({
     skill,
     label: SKILL_LABEL[skill] ?? skill,
-    rows: sortCards(bySkill.get(skill)!).map((card) => row(db, card)),
+    rows: sortCards(bySkill.get(skill)!, skill === 'owner').map((card) => row(db, card)),
   }))
   if (acceptance.length > 0) {
     const owner = sections.find((section) => section.skill === 'owner')

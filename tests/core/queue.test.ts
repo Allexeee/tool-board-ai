@@ -248,6 +248,42 @@ test('очередь запросов: вставка по оценке, move и
   assert.equal(listQueue(db, {}, 'request').some((card) => card.id === deferred.id), false)
 })
 
+test('owner-очередь: move внутри класса, исполнители не сдвигаются', (t) => {
+  const { db } = board(t)
+  const first = task(db, { skill: 'owner', position: 1 })
+  const second = task(db, { skill: 'owner', position: 2 })
+  const dev = task(db, { position: 1 })
+
+  moveCard(db, first.id, { bottom: true })
+  assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.id), [second.id, first.id])
+  assert.deepEqual(listQueue(db).map((card) => card.id), [dev.id])
+  assert.equal(listQueue(db, { class: 'owner' })[0].position, 1)
+  assert.equal(listQueue(db, { class: 'owner' })[1].position, 2)
+})
+
+test('owner-очередь: --before через классы даёт ошибку', (t) => {
+  const { db } = board(t)
+  const owner = task(db, { skill: 'owner', position: 1 })
+  const dev = task(db, { position: 1 })
+
+  assert.throws(() => moveCard(db, dev.id, { before: owner.id }), /разных очередях/)
+})
+
+test('owner-очередь: insert ставит в конец, reorder нумерует оба класса', (t) => {
+  const { db } = board(t)
+  const first = task(db, { skill: 'owner', position: 1 })
+  const second = task(db, { skill: 'owner', position: null, importance: 3, urgency: 3 })
+  const dev = task(db, { position: 1 })
+
+  insertIntoQueue(db, second.id)
+  assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.id), [first.id, second.id])
+
+  reorderQueue(db)
+  assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.position), [1, 2])
+  assert.deepEqual(listQueue(db).map((card) => card.position), [1])
+  assert.equal(getCard(db, dev.id)!.position, 1)
+})
+
 test('owner-карточка не ставится в очередь запросов', (t) => {
   const { db } = board(t)
   const owner = task(db, { phase: 'request', status: 'new', skill: 'owner' })
@@ -257,7 +293,7 @@ test('owner-карточка не ставится в очередь запро�
   assert.equal(listQueue(db, {}, 'request').length, 0)
 })
 
-test('смена навыка на owner убирает позицию из очереди', (t) => {
+test('смена навыка на owner переносит карточку в owner-очередь', (t) => {
   const { db } = board(t)
   const card = task(db, { phase: 'request', status: 'new', importance: 2, urgency: 2 })
   insertIntoQueue(db, card.id)
@@ -265,11 +301,15 @@ test('смена навыка на owner убирает позицию из оч
 
   editCard(db, { id: card.id, actor: 'owner', patch: { skill: 'owner', needsMerge: false } })
   const edited = getCard(db, card.id)!
-  assert.equal(edited.position, null)
+  assert.ok(edited.position)
   assert.equal(edited.phase, 'task')
   assert.equal(edited.status, 'ready')
   assert.equal(edited.reviewRequired, false)
   assert.equal(listQueue(db, {}, 'request').length, 0)
+  assert.deepEqual(
+    listQueue(db, { class: 'owner' }).map((item) => item.id),
+    [card.id],
+  )
 })
 
 test('queue reorder нумерует запросы без позиции и идемпотентен', (t) => {
