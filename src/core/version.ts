@@ -53,6 +53,16 @@ export function bumpVersion(root: string, kind: BumpKind): { from: string; to: s
   const pkg = JSON.parse(readFileSync(packagePath, 'utf8')) as { version?: string }
   const from = pkg.version?.trim() ?? ''
   const to = nextVersion(from, kind)
+
+  const changelogCheck = join(root, 'CHANGELOG.md')
+  if (existsSync(changelogCheck)) {
+    const heading = `## v${to} — ${today()}`
+    const lines = readFileSync(changelogCheck, 'utf8').split(/\r?\n/)
+    if (lines.some((line) => line.trim() === heading)) {
+      throw new UserError(3, `запись ${heading} уже есть в CHANGELOG`)
+    }
+  }
+
   pkg.version = to
   writeJson(packagePath, pkg)
 
