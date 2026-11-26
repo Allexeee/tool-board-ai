@@ -26,8 +26,7 @@ export default async function command(args: ParsedArgs) {
     moveCard(db, id, { before, top: boolFlag(args, 'top'), bottom: boolFlag(args, 'bottom') })
 
     const card = getCard(db, id)!
-    const queueClass = cardQueueClass(card) === 'owner' ? 'owner' : 'исполнители'
-    ok(card, `${card.id} · позиция ${card.position} · ${queueClass}`)
+    ok(card, `${card.id} · позиция ${card.position} · ${cardQueueClass(card)}`)
     return 0
   }
 

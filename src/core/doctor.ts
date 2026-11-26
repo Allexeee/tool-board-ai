@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { listCards } from './cards.ts'
 import { acceptancePaths, evaluateAcceptance } from './acceptance.ts'
 import { getExecutor } from './executors.ts'
-import { listQueue } from './queue.ts'
+import { cardQueueClass, listQueue } from './queue.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
 import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
@@ -142,10 +142,12 @@ function checkAcceptance(
 
 /** Позиции двух очередей: дубли, дыры и owner-карточки без позиции. */
 function checkQueues(db: DatabaseSync, warnings: string[]): void {
-  for (const [label, cards] of [
-    ['owner', listQueue(db, { class: 'owner' })],
-    ['executors', listQueue(db, { class: 'executors' })],
-  ] as const) {
+  const groups = new Map<string, ReturnType<typeof listQueue>>()
+  for (const card of listQueue(db)) {
+    const key = cardQueueClass(card)
+    groups.set(key, [...(groups.get(key) ?? []), card])
+  }
+  for (const [label, cards] of groups) {
     const missing = cards.filter((card) => card.position === null)
     if (missing.length > 0) {
       warnings.push(
