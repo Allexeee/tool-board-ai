@@ -41,7 +41,7 @@ export const BUILTIN_PROFILES: Record<'low' | 'default' | 'high' | 'max', Review
   },
   default: {
     spec: 'auto',
-    specWords: 350,
+    specWords: 500,
     card: 'needs_merge',
     reopens: 1,
     run: 'auto',
@@ -50,7 +50,7 @@ export const BUILTIN_PROFILES: Record<'low' | 'default' | 'high' | 'max', Review
   },
   high: {
     spec: 'auto',
-    specWords: 150,
+    specWords: 250,
     card: 'needs_merge',
     reopens: 2,
     run: 'subagent',

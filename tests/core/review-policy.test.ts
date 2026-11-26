@@ -200,18 +200,18 @@ test('профили auto по варианту модели', () => {
   assert.equal(at('default'), 'default')
 })
 
-test('spec auto: default 350 слов, high 150', () => {
+test('spec auto: default 500 слов, high 250', () => {
   const words = (count: number) => Array.from({ length: count }, () => 'слово').join(' ')
   const settings = { ...base, review: { ...base.review, profile: 'default' as const } }
 
-  const exact = words(350)
-  assert.equal(countWords(exact), 350)
+  const exact = words(500)
+  assert.equal(countWords(exact), 500)
   assert.equal(
     resolveSpecReviewMode({ settings, specLength: exact.length, specText: exact, context: context(null) })
       .mode,
     'subagent',
   )
-  const below = words(349)
+  const below = words(499)
   assert.equal(
     resolveSpecReviewMode({ settings, specLength: below.length, specText: below, context: context(null) })
       .mode,
@@ -219,7 +219,7 @@ test('spec auto: default 350 слов, high 150', () => {
   )
 
   const high = { ...settings, review: { ...settings.review, profile: 'high' as const } }
-  const highExact = words(150)
+  const highExact = words(250)
   assert.equal(
     resolveSpecReviewMode({
       settings: high,

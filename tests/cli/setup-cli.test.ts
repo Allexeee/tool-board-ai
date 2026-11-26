@@ -266,7 +266,7 @@ test('setup --show: high печатает эффективный профиль'
   const shown = run(fixture.root, ['setup', '--show'])
   assert.equal(shown.code, 0, shown.err)
   assert.match(shown.out, /Профиль ревью: high/)
-  assert.match(shown.out, /Ревью spec: auto, порог 150 слов/)
+  assert.match(shown.out, /Ревью spec: auto, порог 250 слов/)
   assert.match(shown.out, /Ревью в конце забега: subagent/)
   assert.match(shown.out, /Реревью: 2/)
   assert.match(shown.out, /Находки: critical \+ important/)
