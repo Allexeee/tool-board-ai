@@ -27,14 +27,30 @@ export interface AddFindingInput {
   scope?: string[]
 }
 
-/** Есть ли у карточки вердикт run review done. */
+/** Есть ли у карточки вердикт run review done после последней сдачи. */
 export function hasReviewVerdict(db: DatabaseSync, cardId: string): boolean {
+  const lastFinish = (
+    db
+      .prepare(
+        "select max(at) as at from events where subject = ? and type = 'card.finished'",
+      )
+      .get(cardId) as { at: string | null } | undefined
+  )?.at
+  if (!lastFinish) {
+    return (
+      db
+        .prepare(
+          "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' limit 1",
+        )
+        .get(cardId) !== undefined
+    )
+  }
   return (
     db
       .prepare(
-        "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' limit 1",
+        "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' and at >= ? limit 1",
       )
-      .get(cardId) !== undefined
+      .get(cardId, lastFinish) !== undefined
   )
 }
 
