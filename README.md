@@ -160,6 +160,8 @@ board run end --as developer [--review|--no-review]
 board run note RUN-1 --text "итоги прохода" --as reviewer
 ```
 
+На старте забега агент пишет «Начинаю RUN-N» и по строке на карточку: `- ID — задача. Кратко, что будет сделано`. После finish — «Сделал ID: …». Ревью после `run end` запускается автоматически, отдельно его предлагать не нужно; любое следующее действие агент предлагает и ждёт утверждения владельца.
+
 `take` создаёт ветку `card/UI-1` и worktree `.worktrees/developer`; `finish` проверяет `scope` и мержит ветку в `dev` (`--no-ff`), затем ставит `review` или `done`. Если `runReview.mode != none`, `finish` отправляет в review все карточки забега, включая `review_required=false`. Если plan требует нового файла, `card scope add` расширяет scope у карточки в работе; если нового поведения или acceptance — `block`/`ask`, затем `card amend` и повторное утверждение.
 
 Если нужен владелец — `block UI-1 --as developer --reason needs_decision --note "..."` или `ask UI-1 "вопрос" --as developer [--block]`. Ответ — `answer UI-1 "ответ"`.
