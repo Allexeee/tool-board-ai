@@ -398,3 +398,61 @@ test('ensureSkillQueues нумерует 1..N внутри навыка для �
   assert.ok(listQueue(db, { class: 'dev' }).some((card) => card.id === devBooked.id))
   assert.equal(getCard(db, uiReview.id)!.position, 1)
 })
+
+test('две очереди навыков независимы: move одного не двигает другой', (t) => {
+  const { db } = board(t)
+  const devFirst = task(db, { skill: 'dev', position: 1, importance: 3, urgency: 3 })
+  const devSecond = task(db, { skill: 'dev', position: 2, importance: 1, urgency: 1 })
+  const mktFirst = task(db, { skill: 'marketing', position: 1, importance: 3, urgency: 3 })
+  const mktSecond = task(db, { skill: 'marketing', position: 2, importance: 1, urgency: 1 })
+
+  moveCard(db, devSecond.id, { top: true })
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [devSecond.id, devFirst.id],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'marketing' }).map((card) => card.id),
+    [mktFirst.id, mktSecond.id],
+  )
+
+  assert.throws(
+    () => moveCard(db, mktFirst.id, { before: devFirst.id }),
+    /разных очередях/,
+  )
+
+  // Владелец переставляет карточку любого навыка: двигается только эта очередь.
+  moveCard(db, mktSecond.id, { bottom: true })
+  assert.deepEqual(
+    listQueue(db, { class: 'marketing' }).map((card) => card.id),
+    [mktFirst.id, mktSecond.id],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.position),
+    [1, 2],
+  )
+})
+
+test('reorder нумерует каждую очередь навыка отдельно, сохраняя порядок', (t) => {
+  const { db } = board(t)
+  const devFirst = task(db, { skill: 'dev', position: 1 })
+  const devSecond = task(db, { skill: 'dev', position: 2 })
+  const mkt = task(db, { skill: 'marketing', position: 7 })
+
+  moveCard(db, devSecond.id, { top: true })
+  reorderQueue(db)
+
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.id),
+    [devSecond.id, devFirst.id],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.position),
+    [1, 2],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'marketing' }).map((card) => card.position),
+    [1],
+  )
+  assert.equal(getCard(db, mkt.id)!.position, 1)
+})

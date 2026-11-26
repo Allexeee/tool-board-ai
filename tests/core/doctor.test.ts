@@ -235,3 +235,19 @@ test('doctorData: предупреждает, когда конкурирующ�
     data.warnings.join(' | '),
   )
 })
+
+test('doctorData: дубли и дыры позиций проверяются по каждому навыку', () => {
+  const board = makeBoardRepo()
+  try {
+    seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev', position: 1 })
+    seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev', position: 1 })
+    seedCard(board.db, { phase: 'task', status: 'ready', skill: 'marketing', position: 1 })
+    seedCard(board.db, { phase: 'task', status: 'ready', skill: 'marketing', position: 3 })
+
+    const warnings = doctorData(board.db, board.root).warnings.join(' | ')
+    assert.match(warnings, /dev-очередь: повторяются позиции 1/)
+    assert.match(warnings, /marketing-очередь: позиции с дырами/)
+  } finally {
+    board.close()
+  }
+})
