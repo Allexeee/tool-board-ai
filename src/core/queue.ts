@@ -31,7 +31,8 @@ function inQueue(phase: CardPhase, status: CardStatus): boolean {
   return (phase === 'request' ? REQUEST_QUEUE : QUEUE).has(status)
 }
 
-export type QueueClass = 'owner' | 'executors'
+/** Класс очереди — навык карточки; пустой навык идёт в общую очередь. */
+export type QueueClass = string
 
 export interface QueueFilter {
   status?: CardStatus | CardStatus[]
@@ -39,12 +40,19 @@ export interface QueueFilter {
   skill?: string
   holder?: string
   limit?: number
-  /** Класс очереди: owner-карточки и остальные исполнители нумеруются отдельно. */
+  /** Класс очереди: карточки разных навыков нумеруются отдельно. */
   class?: QueueClass
 }
 
 export function cardQueueClass(card: Card): QueueClass {
-  return card.skill === 'owner' ? 'owner' : 'executors'
+  return card.skill?.trim() || 'executors'
+}
+
+function classRank(left: string, right: string): number {
+  if (left === right) return 0
+  if (left === 'owner') return -1
+  if (right === 'owner') return 1
+  return left.localeCompare(right)
 }
 
 export interface MoveTarget {
@@ -89,20 +97,20 @@ export function listQueue(
     holder: filter.holder,
   })
 
-  const queueClass = filter.class ?? 'executors'
+  const queueClass = filter.class
   const queue = cards
     .filter((card) => inQueue(phase, card.status))
-    .filter((card) => cardQueueClass(card) === queueClass)
-    .filter((card) => queueClass === 'owner' || card.position !== null)
+    .filter((card) => queueClass === undefined || cardQueueClass(card) === queueClass)
     .sort(
-      queueClass === 'owner'
-        ? (left, right) =>
-            (left.position ?? Number.MAX_SAFE_INTEGER) -
-              (right.position ?? Number.MAX_SAFE_INTEGER) ||
-            (right.importance ?? 0) - (left.importance ?? 0) ||
-            left.createdAt.localeCompare(right.createdAt) ||
-            left.id.localeCompare(right.id)
-        : byPosition,
+      (left, right) =>
+        (queueClass === undefined
+          ? classRank(cardQueueClass(left), cardQueueClass(right))
+          : 0) ||
+        (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER) ||
+        (right.importance ?? 0) - (left.importance ?? 0) ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.id.localeCompare(right.id),
     )
   return limit === undefined ? queue : queue.slice(0, limit)
 }
@@ -129,13 +137,20 @@ export function insertIntoQueue(db: DatabaseSync, cardId: string): void {
     if (card.skill === 'owner') {
       if (card.phase !== 'task') return
       const owner = listQueue(db, { class: 'owner' }, card.phase).filter(
-        (item) => item.id !== cardId,
+        (item) => item.id !== cardId && item.position !== null,
       )
       renumber(db, [...owner.map((item) => item.id), cardId])
       return
     }
 
-    const others = listQueue(db, {}, card.phase).filter((item) => item.id !== cardId)
+    const others = listQueue(db, { class: cardQueueClass(card) }, card.phase)
+      .filter((item) => item.id !== cardId && item.position !== null)
+      .sort(
+        (left, right) =>
+          score(right) - score(left) ||
+          (left.position ?? Number.MAX_SAFE_INTEGER) -
+            (right.position ?? Number.MAX_SAFE_INTEGER),
+      )
     const cardScore = score(card)
     let index = 0
     for (let i = 0; i < others.length; i++) {
@@ -213,52 +228,64 @@ export function moveCard(db: DatabaseSync, id: string, target: MoveTarget): void
  */
 export function reorderQueue(db: DatabaseSync): void {
   tx(db, () => {
-    // Owner-очередь: ручной порядок сохраняется, без позиции — по важности/дате.
-    const owner = listQueue(db, { class: 'owner' }).sort(
-      (left, right) =>
-        (left.position ?? Number.MAX_SAFE_INTEGER) -
-          (right.position ?? Number.MAX_SAFE_INTEGER) ||
-        (right.importance ?? 0) - (left.importance ?? 0) ||
-        left.createdAt.localeCompare(right.createdAt) ||
-        left.id.localeCompare(right.id),
+    normalizeClasses(db, listQueue(db), false)
+    normalizeClasses(
+      db,
+      listCards(db, { phase: 'request', status: ['new', 'shaping'] }).filter(
+        (card) => card.skill !== 'owner',
+      ),
+      true,
     )
-    if (owner.length > 0) renumber(db, owner.map((card) => card.id))
-
-    const tasks = listQueue(db).sort(
-      (left, right) =>
-        score(right) - score(left) ||
-        (left.position ?? Number.MAX_SAFE_INTEGER) -
-          (right.position ?? Number.MAX_SAFE_INTEGER),
-    )
-    if (tasks.length > 0) renumber(db, tasks.map((card) => card.id))
-
-    // Запросы пересобираются целиком: карточки без позиции тоже встают 1..N.
-    // Owner-карточки не нумеруются никогда.
-    const requests = listCards(db, { phase: 'request', status: ['new', 'shaping'] })
-      .filter((card) => card.skill !== 'owner')
-      .sort(
-        (left, right) =>
-          score(right) - score(left) ||
-          left.createdAt.localeCompare(right.createdAt) ||
-          left.id.localeCompare(right.id),
-      )
-    if (requests.length > 0) renumber(db, requests.map((card) => card.id))
   })
 }
 
-/** Миграция старых owner-карточек: расставить позиции, сохранив порядок отображения. */
-export function ensureOwnerQueue(db: DatabaseSync): void {
-  tx(db, () => {
-    const owner = listQueue(db, { class: 'owner' }).sort(
-      (left, right) =>
-        (left.position ?? Number.MAX_SAFE_INTEGER) -
-          (right.position ?? Number.MAX_SAFE_INTEGER) ||
-        (right.importance ?? 0) - (left.importance ?? 0) ||
-        left.createdAt.localeCompare(right.createdAt) ||
-        left.id.localeCompare(right.id),
+function normalizeClasses(db: DatabaseSync, cards: Card[], requests: boolean): void {
+  const groups = new Map<string, Card[]>()
+  for (const card of cards) {
+    const key = cardQueueClass(card)
+    groups.set(key, [...(groups.get(key) ?? []), card])
+  }
+  for (const [key, group] of groups) {
+    const sorted = [...group].sort((left, right) =>
+      requests
+        ? score(right) - score(left) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.id.localeCompare(right.id)
+        : key === 'owner'
+          ? (left.position ?? Number.MAX_SAFE_INTEGER) -
+              (right.position ?? Number.MAX_SAFE_INTEGER) ||
+            (right.importance ?? 0) - (left.importance ?? 0) ||
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.id.localeCompare(right.id)
+          : score(right) - score(left) ||
+            (left.position ?? Number.MAX_SAFE_INTEGER) -
+              (right.position ?? Number.MAX_SAFE_INTEGER),
     )
-    if (owner.length === 0) return
-    renumber(db, owner.map((card) => card.id))
+    if (sorted.length > 0) renumber(db, sorted.map((card) => card.id))
+  }
+}
+
+/** Миграция старых позиций: внутри каждого навыка 1..N, порядок сохраняется. */
+export function ensureSkillQueues(db: DatabaseSync): void {
+  tx(db, () => {
+    const groups = new Map<string, Card[]>()
+    for (const card of listQueue(db)) {
+      const key = cardQueueClass(card)
+      groups.set(key, [...(groups.get(key) ?? []), card])
+    }
+    for (const [key, group] of groups) {
+      const sorted = [...group].sort(
+        (left, right) =>
+          (left.position ?? Number.MAX_SAFE_INTEGER) -
+            (right.position ?? Number.MAX_SAFE_INTEGER) ||
+          (key === 'owner'
+            ? (right.importance ?? 0) - (left.importance ?? 0)
+            : score(right) - score(left)) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.id.localeCompare(right.id),
+      )
+      if (sorted.length > 0) renumber(db, sorted.map((card) => card.id))
+    }
   })
 }
 

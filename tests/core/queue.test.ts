@@ -273,7 +273,7 @@ test('owner-очередь: move внутри класса, исполнител
 
   moveCard(db, first.id, { bottom: true })
   assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.id), [second.id, first.id])
-  assert.deepEqual(listQueue(db).map((card) => card.id), [dev.id])
+  assert.deepEqual(listQueue(db, { class: 'dev' }).map((card) => card.id), [dev.id])
   assert.equal(listQueue(db, { class: 'owner' })[0].position, 1)
   assert.equal(listQueue(db, { class: 'owner' })[1].position, 2)
 })
@@ -297,7 +297,7 @@ test('owner-очередь: insert ставит в конец, reorder нуме�
 
   reorderQueue(db)
   assert.deepEqual(listQueue(db, { class: 'owner' }).map((card) => card.position), [1, 2])
-  assert.deepEqual(listQueue(db).map((card) => card.position), [1])
+  assert.deepEqual(listQueue(db, { class: 'dev' }).map((card) => card.position), [1])
   assert.equal(getCard(db, dev.id)!.position, 1)
 })
 
@@ -307,7 +307,7 @@ test('owner-карточка не ставится в очередь запро�
 
   insertIntoQueue(db, owner.id)
   assert.equal(getCard(db, owner.id)!.position, null)
-  assert.equal(listQueue(db, {}, 'request').length, 0)
+  assert.equal(listQueue(db, { class: 'dev' }, 'request').length, 0)
 })
 
 test('смена навыка на owner переносит карточку в owner-очередь', (t) => {
@@ -357,6 +357,9 @@ test('queue reorder не нумерует owner-запросы', (t) => {
   reorderQueue(db)
 
   assert.equal(getCard(db, owner.id)!.position, null)
-  assert.equal(listQueue(db, {}, 'request').some((card) => card.id === owner.id), false)
+  assert.equal(
+    listQueue(db, { class: 'dev' }, 'request').some((card) => card.id === owner.id),
+    false,
+  )
   assert.equal(getCard(db, normal.id)!.position, 1)
 })
