@@ -9,8 +9,8 @@ function columns(db: DatabaseSync, table: string): string[] {
 
 test('новый файл получает схему v3 с полями spec/review и tags', () => {
   const db = new DatabaseSync(':memory:')
-  assert.equal(migrate(db), 11)
-  assert.equal(SCHEMA_VERSION, 11)
+  assert.equal(migrate(db), 12)
+  assert.equal(SCHEMA_VERSION, 12)
   assert.ok(columns(db, 'cards').includes('acceptance'))
   assert.ok(columns(db, 'cards').includes('legacy_ids'))
   assert.ok(columns(db, 'cards').includes('main_commit'))
@@ -34,7 +34,7 @@ test('база v10 получает поля приёмки владельцем
     insert into meta values ('schemaVersion', '10');
     insert into cards (id) values ('UI-1');`)
 
-  assert.equal(migrate(db), 11)
+  assert.equal(migrate(db), 12)
   assert.ok(columns(db, 'cards').includes('owner_acceptance'))
   assert.ok(columns(db, 'cards').includes('owner_acceptance_manual'))
   const row = db
@@ -49,7 +49,7 @@ test('база v7 получает таблицу пакетного ревью'
   db.exec(`create table meta (key text primary key, value text not null);
     insert into meta values ('schemaVersion', '7');`)
 
-  assert.equal(migrate(db), 11)
+  assert.equal(migrate(db), 12)
   assert.ok(columns(db, 'review_packages').includes('findings'))
 })
 
@@ -60,7 +60,7 @@ test('база v9 получает реестр тегов из карточек
     insert into meta values ('schemaVersion', '9');
     insert into cards (id, tags) values ('UI-1', '["ui","backend"]');`)
 
-  assert.equal(migrate(db), 11)
+  assert.equal(migrate(db), 12)
   const names = (
     db.prepare('select name from tags order by name').all() as Array<{ name: string }>
   ).map((row) => row.name)
@@ -80,8 +80,8 @@ test('база v1 мигрирует без потери карточки', () =
     insert into cards values ('UI-1', 'spec', 'ready');
     insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'review', 'done', '2026-01-01');`)
 
-  assert.equal(migrate(db), 11)
-  assert.equal(schemaVersionOf(db), 11)
+  assert.equal(migrate(db), 12)
+  assert.equal(schemaVersionOf(db), 12)
   assert.equal((db.prepare('select count(*) as n from cards').get() as { n: number }).n, 1)
   assert.equal(columns(db, 'cards').includes('spec_rev'), true)
   assert.equal(columns(db, 'cards').includes('tags'), true)
@@ -96,7 +96,7 @@ test('база v5 мигрирует acceptance в reviews', () => {
     insert into meta values ('schemaVersion', '5');
     insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'r', 'done', '2026-01-01');`)
 
-  assert.equal(migrate(db), 11)
+  assert.equal(migrate(db), 12)
   assert.ok(columns(db, 'reviews').includes('acceptance'))
   const row = db.prepare('select acceptance from reviews').get() as {
     acceptance: string | null
@@ -111,7 +111,7 @@ test('база v6 мигрирует legacy_ids', () => {
     insert into meta values ('schemaVersion', '6');
     insert into cards (id) values ('UI-1');`)
 
-  assert.equal(migrate(db), 11)
+  assert.equal(migrate(db), 12)
   assert.ok(columns(db, 'cards').includes('legacy_ids'))
   const row = db.prepare('select legacy_ids from cards where id = ?').get('UI-1') as {
     legacy_ids: string
@@ -127,7 +127,7 @@ test('база v2 мигрирует tags и помечает находки rev
     insert into cards values ('UI-1', 'UI-9');
     insert into cards values ('UI-2', null);`)
 
-  assert.equal(migrate(db), 11)
+  assert.equal(migrate(db), 12)
   const rows = db.prepare('select id, tags from cards order by id').all() as Array<{
     id: string
     tags: string

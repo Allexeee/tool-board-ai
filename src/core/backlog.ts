@@ -40,6 +40,8 @@ export interface BacklogRow {
   status: string
   statusKey: CardStatus
   note: string
+  /** Счётчик ручных понижений. */
+  demons: number
   /** Короткая причина для HTML: первая фраза до 90 символов. */
   reason?: string
 }
@@ -75,6 +77,10 @@ export interface BacklogData {
 
 function cell(value: string): string {
   return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim()
+}
+
+function idLabel(id: string, demons: number): string {
+  return demons > 0 ? `${id} 👿 ${demons}` : id
 }
 
 function shortTime(iso: string): string {
@@ -116,6 +122,7 @@ function row(db: DatabaseSync, card: Card): BacklogRow {
     status: STATUS_LABEL[card.status] ?? String(card.status),
     statusKey: card.status,
     note: noteFor(db, card),
+    demons: card.demons,
   }
 }
 
@@ -217,7 +224,9 @@ export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): s
     lines.push(`## Задачи для ${section.label}`, '')
     lines.push('| ID | Заголовок | Статус | Заметка |', '|---|---|---|---|')
     for (const item of section.rows) {
-      lines.push(`| ${item.id} | ${cell(item.title)} | ${item.status} | ${item.note} |`)
+      lines.push(
+        `| ${idLabel(item.id, item.demons)} | ${cell(item.title)} | ${item.status} | ${item.note} |`,
+      )
     }
     lines.push('')
   }
@@ -225,7 +234,7 @@ export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): s
   if (data.deferred.length > 0) {
     lines.push('## Отложенные', '', '| ID | Заголовок | Причина |', '|---|---|---|')
     for (const item of data.deferred) {
-      lines.push(`| ${item.id} | ${cell(item.title)} | ${cell(item.note)} |`)
+      lines.push(`| ${idLabel(item.id, item.demons)} | ${cell(item.title)} | ${cell(item.note)} |`)
     }
     lines.push('')
   }

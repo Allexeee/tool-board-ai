@@ -104,6 +104,8 @@ export interface Card {
   importance: number | null
   urgency: number | null
   position: number | null
+  /** Сколько раз владелец вручную понизил карточку. */
+  demons: number
   needsMerge: boolean
   reviewRequired: boolean
   /** Осознанно без плана: маленькая задача, шаги не нужны. */
