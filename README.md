@@ -118,6 +118,8 @@ board card add --group UI --title "Форма входа" --skill dev
 
 `needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done` и без waiver.
 
+Профиль ревью: `board setup --profile auto|low|default|high|max|custom`. `auto` берёт профиль по варианту модели (`low/default/high/max`). Встроенные: `low` — spec self, run none, без пакета и реревью; `default` — spec auto 350 слов, run auto, реревью 1; `high` — spec auto 150 слов, run subagent, реревью 2, important чинятся сразу; `max` — spec subagent, run subagent, реревью 3, каждая карточка в ревью. Свои профили — `review.profiles` в `.board/settings.json`; старые флаги `--spec-review`/`--run-review` переключают на `custom`.
+
 ## Очередь и забег
 
 После утверждения карточка встаёт в очередь задач по оценке. `now 0` (по умолчанию) показывает владельцу утверждения, owner-задачи и вопросы; `now 1` — задачи указанного `--as`; `now 2` — других агентов; `now 3` — открытые запросы и очередь.

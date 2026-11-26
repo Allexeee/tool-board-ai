@@ -23,6 +23,11 @@ function decision(overrides: Partial<SetupDecision> = {}): SetupDecision {
     reviewer: { model: null },
     specReview: { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 },
     runReview: { mode: 'none' },
+    review: {
+      profile: 'custom',
+      modelMap: { low: 'low', default: 'default', high: 'high', max: 'max' },
+      profiles: {},
+    },
     branches: { main: null, dev: null },
     git: true,
     sync: { remote: null },

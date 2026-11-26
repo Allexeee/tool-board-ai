@@ -3,6 +3,8 @@ import { getCard } from '../../core/cards.ts'
 import { openDb } from '../../core/db.ts'
 import { listDiscussion } from '../../core/discussion.ts'
 import { findProject } from '../../core/project.ts'
+import { readSettings } from '../../core/settings.ts'
+import { modelContext, reviewReopensLimit } from '../../core/review-policy.ts'
 import { listRefs, type Ref } from '../../core/refs.ts'
 import {
   addFinding,
@@ -176,6 +178,7 @@ export default async function command(args: ParsedArgs) {
       findings,
       planCompliance,
       acceptance,
+      reopensLimit: reviewReopensLimit(readSettings(project.root), modelContext(process.env)),
       mode,
     })
     ok(

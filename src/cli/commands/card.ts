@@ -25,7 +25,12 @@ import { listGroups, normalizeGroupPrefix } from '../../core/groups.ts'
 import { insertIntoQueue } from '../../core/queue.ts'
 import { addRef, listRefs, removeRef, type Ref } from '../../core/refs.ts'
 import { submitVerdict, waiveReview } from '../../core/review.ts'
-import { modelContext, resolveSpecReviewMode } from '../../core/review-policy.ts'
+import {
+  modelContext,
+  resolveReviewProfile,
+  resolveSpecReviewMode,
+  reviewReopensLimit,
+} from '../../core/review-policy.ts'
 import { getRun } from '../../core/runs.ts'
 import { readSettings } from '../../core/settings.ts'
 import {
@@ -71,6 +76,7 @@ export default async function command(args: ParsedArgs) {
     const resolution = resolveSpecReviewMode({
       settings,
       specLength: card.body.length + card.acceptance.length,
+      specText: `${card.body}\n${card.acceptance}`,
       context: reviewContext,
     })
     return {
@@ -139,9 +145,16 @@ export default async function command(args: ParsedArgs) {
     const reviewFlag = switchFlag(args, 'review', 'no-review')
     const needsMergeFlag = switchFlag(args, 'needs-merge', 'no-needs-merge')
     const effectiveNeedsMerge = needsMergeFlag ?? (skill !== 'owner' && settings.git)
+    const profile = resolveReviewProfile(settings, reviewContext)
+    const reviewDefault =
+      profile.profile.card === 'always'
+        ? true
+        : profile.profile.card === 'never'
+          ? false
+          : effectiveNeedsMerge
     let waiverReason: string | null = null
     if (reviewFlag === undefined) {
-      if (effectiveNeedsMerge) patch.reviewRequired = true
+      if (reviewDefault) patch.reviewRequired = true
     } else if (reviewFlag === false && effectiveNeedsMerge) {
       waiverReason = requireNoReview(args)
       patch.reviewRequired = false
@@ -255,10 +268,16 @@ export default async function command(args: ParsedArgs) {
     const reviewRequired = switchFlag(args, 'review', 'no-review')
     const existing = requireCard(id, 'board card edit UI-1')
     const effectiveNeedsMerge = needsMerge ?? existing.needsMerge
+    const profile = resolveReviewProfile(settings, reviewContext)
+    const reviewDefault =
+      profile.profile.card === 'always'
+        ? true
+        : profile.profile.card === 'never'
+          ? false
+          : effectiveNeedsMerge
     let waiverReason: string | null = null
     if (reviewRequired === undefined) {
-      if (needsMerge === true) patch.reviewRequired = true
-      else if (needsMerge === false) patch.reviewRequired = false
+      if (needsMerge !== undefined) patch.reviewRequired = reviewDefault
     } else if (reviewRequired === false && effectiveNeedsMerge) {
       waiverReason = requireNoReview(args)
       patch.reviewRequired = false
@@ -634,6 +653,7 @@ export default async function command(args: ParsedArgs) {
       note: stringFlag(args, 'note') ?? '',
       planCompliance,
       acceptance: acceptance as 'done' | 'failed' | undefined,
+      reopensLimit: reviewReopensLimit(settings, reviewContext),
       mode,
     })
     ok(result, `${id} ${result.card.status} · plan ${planCompliance}`)

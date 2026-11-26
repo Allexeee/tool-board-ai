@@ -62,6 +62,15 @@ test('card add: --no-review требует owner и причину, пишет w
   }
 })
 
+test('профиль max: карточка без merge всё равно в ревью', (t) => {
+  const dir = project(t)
+  json(dir, ['setup', '--profile', 'max'])
+  const card = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'x', '--skill', 'dev', '--no-needs-merge',
+  ])
+  assert.equal(card.reviewRequired, true)
+})
+
 test('card add заводит запрос и печатает его в json', (t) => {
   const dir = project(t)
 

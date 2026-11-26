@@ -7,6 +7,7 @@ import { isSatisfied, listDeps } from './deps.ts'
 import { openQuestions } from './discussion.ts'
 import { appendEvent } from './events.ts'
 import { getExecutor } from './executors.ts'
+import { runGit } from './git.ts'
 import { allocateId } from './ids.ts'
 import { insertIntoQueue } from './queue.ts'
 import { RUN_VARIANTS, variantOf } from './tags.ts'
@@ -20,7 +21,41 @@ import type {
   RunSuggestion,
 } from './types.ts'
 
-/** Забег держит lease два часа; карточки наследуют срок забега (§8.5). */
+/** Лёгкий ран для auto-ревью: мало карточек, малый дифф, без опасных путей. */
+export function isLightRun(db: DatabaseSync, run: Run, root?: string): boolean {
+  const cards = listRunCards(db, run.id)
+    .map((row) => getCard(db, row.cardId))
+    .filter((card): card is Card => card !== null)
+  if (cards.length > 2) return false
+  if (cards.some((card) => /^(sec|perf):/i.test(card.title))) return false
+  const openFinding = db
+    .prepare(
+      "select 1 as found from cards where severity in ('critical', 'important') and status not in ('done', 'cancelled') limit 1",
+    )
+    .get()
+  if (openFinding) return false
+  if (!root) return true
+
+  let lines = 0
+  let files = 0
+  const dangerous = /^(src\/core\/(schema|settings|lifecycle|release|git)\.ts|\.opencode\/)/
+  for (const card of cards) {
+    if (!card.mergeCommit) continue
+    try {
+      const output = runGit(root, ['diff', '--numstat', `${card.mergeCommit}^1`, card.mergeCommit])
+      for (const line of output.split('\n')) {
+        const [added, deleted, path] = line.split('\t')
+        if (!path) continue
+        files++
+        lines += (Number(added) || 0) + (Number(deleted) || 0)
+        if (dangerous.test(path.replace(/\\/g, '/'))) return false
+      }
+    } catch {
+      return false
+    }
+  }
+  return lines <= 200 && files <= 5
+}
 export const RUN_LEASE_MS = 2 * 60 * 60 * 1000
 
 const OWNER = 'owner'
@@ -858,10 +893,13 @@ export function endRun(
       run.reviewMode ??
       'none'
 
+    // auto без CLI-контекста (тесты/библиотека): безопасный self.
+    const concreteMode = reviewMode === 'auto' ? 'self' : reviewMode
+
     releaseRunCards(db, run, actor, `забег ${run.id} закрыт`)
 
     // Пост-фактум ревью: карточки уже done, но забег просит проверить plan и код.
-    if (reviewMode !== 'none') {
+    if (concreteMode !== 'none') {
       for (const row of listRunCards(db, run.id)) {
         const card = getCard(db, row.cardId)
         // Уже отревьюенная карточка имеет run_cards.status='done' после verdict.
@@ -886,8 +924,8 @@ export function endRun(
       }
     }
 
-    const review = reviewMode !== 'none'
-    const ended = closeRun(db, run, 'ended', nowIso(), review, reviewMode, null)
+    const review = concreteMode !== 'none'
+    const ended = closeRun(db, run, 'ended', nowIso(), review, concreteMode, null)
 
     appendEvent(db, {
       type: 'run.ended',
@@ -895,7 +933,7 @@ export function endRun(
       subject: run.id,
       before: run,
       after: ended,
-      note: review ? `ревью запланировано: ${reviewMode}` : 'ревью выключено',
+      note: review ? `ревью запланировано: ${concreteMode}` : 'ревью выключено',
     })
 
     return ended

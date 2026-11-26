@@ -83,6 +83,8 @@ export interface SubmitVerdictInput {
   findings?: FindingInput[]
   planCompliance?: 'done' | 'failed'
   acceptance?: 'done' | 'failed'
+  /** Лимит реревью для не-владельца; -1 — без лимита. */
+  reopensLimit?: number
   mode?: 'self' | 'subagent'
 }
 
@@ -210,8 +212,13 @@ export function submitVerdict(
     if (listSteps(db, card.id).length > 0 && input.planCompliance === undefined) {
       throw new UserError(3, 'у карточки есть шаги плана: укажите --plan done|failed')
     }
-    if (verdict === 'reopen' && card.reviewReopens >= 1 && reviewer !== OWNER) {
-      throw new UserError(2, `карточка ${card.id}: один reopen уже был, нужно решение владельца`)
+    if (
+      verdict === 'reopen' &&
+      reviewer !== OWNER &&
+      (input.reopensLimit ?? 1) >= 0 &&
+      card.reviewReopens >= (input.reopensLimit ?? 1)
+    ) {
+      throw new UserError(2, `карточка ${card.id}: лимит реревью исчерпан, нужно решение владельца`)
     }
 
     const findings = (input.findings ?? []).map((item) =>

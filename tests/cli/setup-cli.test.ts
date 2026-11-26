@@ -247,6 +247,17 @@ test('init печатает мастер и proposal без TTY', (t) => {
   assert.equal(proposal.missing.groups, true)
 })
 
+test('setup --profile меняет профиль, --show печатает', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const updated = json(fixture.root, ['setup', '--profile', 'max'])
+  assert.equal((updated.review as { profile: string }).profile, 'max')
+
+  const shown = run(fixture.root, ['setup', '--show'])
+  assert.match(shown.out, /Профиль ревью: max/)
+})
+
 test('setup --defaults: умолчания, developer один раз, бэклог собран', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)
