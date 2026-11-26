@@ -7,6 +7,7 @@ import { addDep, refreshReadiness } from './deps.ts'
 import { appendEvent, listEvents } from './events.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { listSteps } from './steps.ts'
+import { isAncestor, refreshMergeState } from './git.ts'
 import type { Card, Severity } from './types.ts'
 
 /** Находка ревью §9.6: severity + текст; skill/scope перекрывают наследуемое. */
@@ -50,6 +51,152 @@ export function hasReviewWaiver(db: DatabaseSync, cardId: string): boolean {
       )
       .get(...ids) !== undefined
   )
+}
+
+/** Карточка в пакете: ID, заголовок и merge-коммит. */
+export interface PackageCard {
+  id: string
+  title: string
+  commit: string
+}
+
+/** Один проход пакетного ревью: что смотрели, чем закончилось. */
+export interface ReviewPackage {
+  id: number
+  at: string
+  actor: string
+  since: string | null
+  verdict: 'done' | 'reopen'
+  note: string | null
+  cards: PackageCard[]
+  commits: string[]
+  findings: FindingInput[]
+}
+
+interface PackageRow {
+  id: number
+  at: string
+  actor: string
+  since: string | null
+  verdict: string
+  note: string | null
+  cards: string
+  commits: string
+  findings: string
+}
+
+const toPackage = (row: PackageRow): ReviewPackage => ({
+  id: row.id,
+  at: row.at,
+  actor: row.actor,
+  since: row.since,
+  verdict: row.verdict === 'reopen' ? 'reopen' : 'done',
+  note: row.note,
+  cards: JSON.parse(row.cards) as PackageCard[],
+  commits: JSON.parse(row.commits) as string[],
+  findings: JSON.parse(row.findings) as FindingInput[],
+})
+
+/** Коммит уже прошёл пакетное ревью с вердиктом done. */
+export function packageCovers(db: DatabaseSync, commit: string): boolean {
+  return (
+    db
+      .prepare(
+        `select 1 as found from review_packages
+         where verdict = 'done'
+           and exists (select 1 from json_each(review_packages.commits) where json_each.value = ?)
+         limit 1`,
+      )
+      .get(commit) !== undefined
+  )
+}
+
+export function listPackages(db: DatabaseSync): ReviewPackage[] {
+  const rows = db
+    .prepare('select * from review_packages order by id')
+    .all() as unknown as PackageRow[]
+  return rows.map(toPackage)
+}
+
+/**
+ * Состав следующего пакета: done-карточки в dev вне main, коммиты которых
+ * ещё не покрыты проходом с вердиктом done. `since` заменяет базу main.
+ */
+export function collectPackage(
+  db: DatabaseSync,
+  root: string,
+  options: { since?: string | null } = {},
+): PackageCard[] {
+  const since = options.since?.trim() || null
+  const cards = listCards(db)
+    .filter((card) => card.status === 'done' && card.mergeCommit !== null && card.revertedAt === null)
+    .map((card) => refreshMergeState(db, root, card))
+    .filter((card) =>
+      card.inDev && (since ? !isAncestor(root, card.mergeCommit!, since) : !card.inMain),
+    )
+    .filter((card) => !packageCovers(db, card.mergeCommit!))
+    .sort((left, right) => left.id.localeCompare(right.id))
+
+  return cards.map((card) => ({ id: card.id, title: card.title, commit: card.mergeCommit! }))
+}
+
+export interface SubmitPackageInput {
+  actor: string
+  verdict: 'done' | 'reopen'
+  note?: string | null
+  since?: string | null
+  cards: PackageCard[]
+  findings?: FindingInput[]
+}
+
+/** Записывает проход пакета одной строкой: карточки, коммиты, вердикт, находки. */
+export function submitPackage(db: DatabaseSync, input: SubmitPackageInput): ReviewPackage {
+  if (input.cards.length === 0) {
+    throw new UserError(2, 'пакет ревью пуст: в dev нет непокрытых done-карточек')
+  }
+  return tx(db, () => {
+    const at = nowIso()
+    const commits = [...new Set(input.cards.map((card) => card.commit))]
+    const findings = input.findings ?? []
+    const result = db
+      .prepare(
+        `insert into review_packages (at, actor, since, verdict, note, cards, commits, findings)
+         values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        at,
+        input.actor,
+        input.since ?? null,
+        input.verdict,
+        input.note ?? null,
+        JSON.stringify(input.cards),
+        JSON.stringify(commits),
+        JSON.stringify(findings),
+      )
+    const id = Number(result.lastInsertRowid)
+    appendEvent(db, {
+      type: 'review.package',
+      actor: input.actor,
+      subject: `package/${id}`,
+      note: input.note ?? undefined,
+      after: {
+        verdict: input.verdict,
+        cards: input.cards.map((card) => card.id),
+        commits,
+      },
+    })
+    return {
+      id,
+      at,
+      actor: input.actor,
+      since: input.since ?? null,
+      verdict: input.verdict,
+      note: input.note ?? null,
+      cards: input.cards,
+      commits,
+      findings,
+    }
+  })
 }
 
 /** Явный отказ владельца от ревью старой карточки: событие с причиной. */

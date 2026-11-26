@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -174,6 +174,18 @@ create table reviews (
   plan_compliance text,
   acceptance text
 );
+
+create table review_packages (
+  id integer primary key autoincrement,
+  at text not null,
+  actor text not null,
+  since text,
+  verdict text not null,
+  note text,
+  cards text not null default '[]',
+  commits text not null default '[]',
+  findings text not null default '[]'
+);
 `
 
 /** Добавляет поля v2 к существующей базе v1 без пересоздания таблиц. */
@@ -220,6 +232,21 @@ const MIGRATE_V6_TO_V7 = `
 alter table cards add column legacy_ids text not null default '[]';
 `
 
+/** Проход пакетного ревью: карточки, коммиты, вердикт и находки одной записью. */
+const MIGRATE_V7_TO_V8 = `
+create table review_packages (
+  id integer primary key autoincrement,
+  at text not null,
+  actor text not null,
+  since text,
+  verdict text not null,
+  note text,
+  cards text not null default '[]',
+  commits text not null default '[]',
+  findings text not null default '[]'
+);
+`
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -254,7 +281,7 @@ export function migrate(db: DatabaseSync): number {
       db.exec(MIGRATE_V4_TO_V5)
     } else if (from === 4) {
       db.exec(MIGRATE_V4_TO_V5)
-    } else if (from !== 5 && from !== 6) {
+    } else if (from !== 5 && from !== 6 && from !== 7) {
       throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     }
 
@@ -271,6 +298,7 @@ export function migrate(db: DatabaseSync): number {
         .get()
       if (hasCards) db.exec(MIGRATE_V6_TO_V7)
     }
+    if (from >= 1 && from < 8) db.exec(MIGRATE_V7_TO_V8)
 
     if (from === 1 || from === 2) {
       const hasOrigin = (db.prepare('pragma table_info(cards)').all() as Array<{ name: string }>).some(

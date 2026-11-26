@@ -129,3 +129,14 @@ test('второй review reopen через CLI требует владельц�
   ])
   assert.equal(owner.code, 0, owner.err)
 })
+
+test('review package: пустой пакет и запись без карточек', (t) => {
+  const { root } = fixture(t)
+  const empty = run(root, ['review', 'package', '--json'])
+  assert.equal(empty.code, 0, empty.err)
+  assert.deepEqual(JSON.parse(empty.out), [])
+
+  const submit = run(root, ['review', 'package', '--verdict', 'done', '--reviewer', 'reviewer'])
+  assert.equal(submit.code, 2)
+  assert.match(submit.err, /пуст/)
+})

@@ -6,8 +6,8 @@ import { listCards } from './cards.ts'
 import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
-import { hasReviewVerdict, hasReviewWaiver } from './review.ts'
-import { findingsScope, modelContext } from './review-policy.ts'
+import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
+import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 import { readSettings } from './settings.ts'
 import { CONFLICTING_SKILLS_ADVICE, conflictingSkillsDisabled, SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
@@ -73,7 +73,12 @@ export function doctorData(
     checkWorktrees(root, warnings)
   }
 
-  checkCards(db, warnings, findingsScope(settings, modelContext(process.env)))
+  checkCards(
+    db,
+    warnings,
+    findingsScope(settings, modelContext(process.env)),
+    packageReviewRequired(settings, modelContext(process.env)),
+  )
 
   return { errors, warnings, recommendations }
 }
@@ -136,6 +141,7 @@ function checkCards(
   db: DatabaseSync,
   warnings: string[],
   findings: 'critical' | 'critical+important' = 'critical',
+  packageRequired = true,
 ): void {
   const cards = listCards(db)
 
@@ -181,11 +187,16 @@ function checkCards(
       card.status === 'done' &&
       card.revertedAt === null &&
       !hasReviewVerdict(db, card.id) &&
-      !hasReviewWaiver(db, card.id),
+      !hasReviewWaiver(db, card.id) &&
+      !(
+        packageRequired &&
+        card.mergeCommit !== null &&
+        packageCovers(db, card.mergeCommit)
+      ),
   )
   if (unreviewedDev.length > 0) {
     warnings.push(
-      `в dev без ревью и без waiver: ${unreviewedDev.map((c) => c.id).join(', ')}`,
+      `${packageRequired ? 'в dev без ревью, пакета и waiver' : 'в dev без ревью и waiver'}: ${unreviewedDev.map((c) => c.id).join(', ')}`,
     )
   }
 

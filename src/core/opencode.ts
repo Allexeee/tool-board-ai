@@ -39,6 +39,7 @@ export const AGENTS_BLOCK = [
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
   '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`. Первый проход полный; повторный — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь; other — сборник в `deferred`.',
   '- Итоги ревью в чате — одной строкой: «Ревьюер закончил работу. Ревью обнаружило n критичных находок и n важных.» Затем — что устраняешь (все или только критичные) и куда вынес важные. Находки не перечисляй: они в `run note` и карточке.',
+  '- Перед релизом — `board review package`: пакет done-карточек dev вне main, проход записывается `--verdict done|reopen`. Release без пакета — только `--no-review --reason` владельца.',
   '- В отчёте не пиши «suite»: «все тесты прошли» или «полный прогон тестов».',
   '- Ревьюер не гоняет тесты и не пишет в доску; его shell ограничен read-only командами, каждая команда — отдельный вызов.',
   '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
@@ -158,6 +159,7 @@ description: Доска: исполнить карточку — take, план 
 - critical и регрессии этого diff — чинятся сразу, карточка reopen.
 - important — finding-карточка \`board review finding <ID> --severity important --text "..."\` встаёт в очередь; release не блокирует, берётся следующим раном по приоритету.
 - other — один сборник \`review notes\` в \`deferred\`.
+- Перед релизом — \`board review package\`: пакет done-карточек dev вне main, проход записывается \`--verdict done|reopen\` и покрывает коммиты; release без пакета — \`--no-review --reason\` владельца.
 - Свою карточку не ревьюй: вердикт даёт свежий субагент. \`critical\` блокирует release.
 
 ## Правила
@@ -564,6 +566,13 @@ function reviewArgs(input) {
     if (input.id) args.push(input.id)
     flag(args, 'reason', input.reason)
     flag(args, 'as', input.as)
+  } else if (a === 'package') {
+    flag(args, 'since', input.since)
+    flag(args, 'verdict', input.verdict)
+    flag(args, 'note', input.note)
+    flag(args, 'reviewer', input.reviewer)
+    flag(args, 'findings', input.findings)
+    flag(args, 'as', input.as)
   }
   return args
 }
@@ -889,7 +898,7 @@ export default Plugin.define({
 
       editor.add({
         name: 'review',
-        description: 'Ревью: list|submit|finding|waive',
+        description: 'Ревью: list|package|submit|finding|waive',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
@@ -902,6 +911,7 @@ export default Plugin.define({
           plan: { type: 'string' },
           acceptance: { type: 'string' },
           reason: { type: 'string' },
+          since: { type: 'string' },
           as: { type: 'string' },
           mode: { type: 'string' },
         }, ['action']),
@@ -970,6 +980,7 @@ subagent: false
    тестов не перезапускает.
 7. Если карточек нет — сообщи, что ревьюить нечего.
 8. В чат — итоги одной строкой: «Ревьюер закончил работу. Ревью обнаружило n критичных находок и n важных.» Дальше — что устраняешь (все или только критичные) и куда вынес важные. Находки в чате не перечисляй: они в \`run note\` и карточке.
+9. Перед релизом пакет done-карточек собирает \`board review package\`; проход записывается \`--verdict done|reopen --reviewer <ревьюер>\`.
 `
 
 export const SPEC_REVIEW_COMMAND_SOURCE = `---

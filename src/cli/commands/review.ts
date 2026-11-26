@@ -8,10 +8,13 @@ import { modelContext, reviewReopensLimit } from '../../core/review-policy.ts'
 import { listRefs, type Ref } from '../../core/refs.ts'
 import {
   addFinding,
+  collectPackage,
   listReviewCards,
+  submitPackage,
   submitVerdict,
   waiveReview,
   type FindingInput,
+  type PackageCard,
 } from '../../core/review.ts'
 import { getRun } from '../../core/runs.ts'
 import { listSteps, type Step } from '../../core/steps.ts'
@@ -204,12 +207,44 @@ export default async function command(args: ParsedArgs) {
     return 0
   }
 
+  const packageCommand = (args: ParsedArgs): number => {
+    const since = stringFlag(args, 'since') ?? null
+    const cards = collectPackage(db, project.root, { since })
+    const verdict = stringFlag(args, 'verdict')
+
+    if (verdict === undefined) {
+      ok(cards, formatPackage(cards))
+      return 0
+    }
+    if (verdict !== 'done' && verdict !== 'reopen') {
+      throw new UserError(3, 'нужен --verdict done|reopen')
+    }
+    const reviewer = stringFlag(args, 'reviewer') ?? stringFlag(args, 'as')
+    if (!reviewer) throw new UserError(3, 'нужен --reviewer <id> ревьюера')
+    const findingsPath = stringFlag(args, 'findings')
+    const findings = findingsPath ? parseFindings(findingsPath) : []
+    const result = submitPackage(db, {
+      actor: reviewer,
+      verdict,
+      note: stringFlag(args, 'note') ?? '',
+      since,
+      cards,
+      findings,
+    })
+    ok(
+      result,
+      `пакет ${result.id}: ${verdict} · карточек ${result.cards.length} · коммитов ${result.commits.length}${result.findings.length > 0 ? ` · находок ${result.findings.length}` : ''}`,
+    )
+    return 0
+  }
+
   try {
     if (args.sub === 'list') return list(args)
+    if (args.sub === 'package') return packageCommand(args)
     if (args.sub === 'finding') return finding(args)
     if (args.sub === 'submit') return submit(args)
     if (args.sub === 'waive') return waive(args)
-    throw new UserError(3, 'использование: board review list|finding|submit|waive')
+    throw new UserError(3, 'использование: board review list|package|finding|submit|waive')
   } finally {
     db.close()
   }
@@ -245,6 +280,11 @@ function parseFindings(path: string): FindingInput[] {
 
 function value(text: string | null): string {
   return text === null || text === '' ? '—' : text
+}
+
+function formatPackage(cards: PackageCard[]): string {
+  if (cards.length === 0) return 'пакет пуст: новых done-карточек в dev нет'
+  return cards.map((card) => `${card.id} · ${card.title} · ${card.commit}`).join('\n')
 }
 
 function formatReviewList(items: ReviewItem[]): string {

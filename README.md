@@ -120,9 +120,9 @@ board card add --group UI --title "Форма входа" --skill dev
 
 `needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 0–3. Зависимости — `card dep`.
 
-`needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done` и без waiver.
+`needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done`, waiver или покрытия пакетным проходом (кроме профиля `low`).
 
-Профиль ревью: `board setup --profile auto|low|default|high|max|custom`. `auto` берёт профиль по варианту модели (`low/default/high/max`). Встроенные: `low` — spec self, run none, без пакетного ревью (CORE-41) и реревью; `default` — spec auto 350 слов, run auto, реревью 1; `high` — spec auto 150 слов, run subagent, реревью 2, important чинятся сразу; `max` — spec subagent, run subagent, реревью 3, каждая карточка в ревью. Свои профили — `review.profiles` в `.board/settings.json`; старые флаги `--spec-review`/`--run-review` переключают на `custom`.
+Профиль ревью: `board setup --profile auto|low|default|high|max|custom`. `auto` берёт профиль по варианту модели (`low/default/high/max`). Встроенные: `low` — spec self, run none, без пакетного ревью и реревью; `default` — spec auto 350 слов, run auto, реревью 1; `high` — spec auto 150 слов, run subagent, реревью 2, important чинятся сразу; `max` — spec subagent, run subagent, реревью 3, каждая карточка в ревью. Свои профили — `review.profiles` в `.board/settings.json`; старые флаги `--spec-review`/`--run-review` переключают на `custom`.
 
 ## Очередь и забег
 
@@ -154,6 +154,16 @@ board card ref add UI-1 --kind review --value RUN-1 --title "итоги прох
 ```
 
 Ревьюер только читает: карточек не создаёт. Итоги прохода — `run note` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка. Бюджет прохода: первый проход полный; повторный — только дельта (исправлены ли находки и нет ли регрессий от фикса), новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь и не блокирует релиз; other — сборник `review notes` в `deferred`. Больше 7 находок на проход не перечисляют.
+
+Перед релизом — пакетный проход по done-карточкам dev вне main:
+
+```bash
+board review package                       # состав: ID, заголовок, merge-коммит
+board review package --since <ref>         # другая база вместо main
+board review package --verdict done --reviewer reviewer --note "ИТОГИ: ..."
+```
+
+Проход пишется одной записью `review.package`: карточки, коммиты, вердикт, находки. Пакет собирает карточки, чьи коммиты ещё не покрыты проходом с `done`; `release` требует, чтобы все коммиты релиза были покрыты. Отказ владельца — `release --no-review --reason "..."` с событием `release.review_waived`.
 
 CLI субагентов не порождает — он готовит пакет и принимает вердикты. Субагент `board-reviewer` работает на default-варианте `reviewer.model`, не в Max; `self` использует модель основной сессии.
 
