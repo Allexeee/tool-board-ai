@@ -165,7 +165,8 @@ test('плагин держит правила отчёта в системно�
     'Решений не принимал',
     'Предлагаю дальше',
     'Утверждаешь? Тогда',
-    '7 карточк',
+    '7–10 карточк',
+    'больше 10',
     'Настоятельно рекомендую',
     'Ран не прерываем',
     'только важное для человека',
@@ -500,7 +501,8 @@ test('четыре навыка: разные description и свои прави
   assert.doesNotMatch(read('board-run'), /Ревью ожидают задачи/)
   assert.match(read('board-run'), /Предлагаю дальше/)
   assert.match(read('board-run'), /Утверждаешь\? Тогда/)
-  assert.match(read('board-run'), /7 карточек/)
+  assert.match(read('board-run'), /7–10 карточек/)
+  assert.match(read('board-run'), /больше 10/)
   assert.match(read('board-run'), /Настоятельно рекомендую/)
   assert.match(read('board-run'), /Ран не прерываем/)
   assert.match(read('board-work'), /первая карточка забега — без «Сделал»/)
