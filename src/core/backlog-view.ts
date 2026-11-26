@@ -137,6 +137,17 @@ setInterval(function () {
     )
   }
 
+  if (data.ideas.length > 0) {
+    const rows = data.ideas.map((item) => [
+      `<td class="id">${esc(item.id)}</td>`,
+      `<td>${esc(item.text)}</td>`,
+      `<td class="note">${fmt(item.updatedAt)}</td>`,
+    ])
+    parts.push(
+      `<section><h2>Идеи</h2>${table(['ID', 'Идея', 'Изменено'], rows)}</section>`,
+    )
+  }
+
   return `<!doctype html>
 <html lang="ru">
 <head>

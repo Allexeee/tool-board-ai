@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { listCards } from './cards.ts'
+import { isIdeaCard, listCards } from './cards.ts'
 import { listDeps } from './deps.ts'
 import { readSettings, type BoardSettings } from './settings.ts'
 import { renderBacklogPage } from './backlog-view.ts'
@@ -45,6 +45,12 @@ export interface BacklogDone {
   doneAt: string
 }
 
+export interface BacklogIdea {
+  id: string
+  text: string
+  updatedAt: string
+}
+
 export interface BacklogSkill {
   skill: string
   label: string
@@ -56,6 +62,7 @@ export interface BacklogData {
   skills: BacklogSkill[]
   deferred: BacklogRow[]
   done: BacklogDone[]
+  ideas: BacklogIdea[]
 }
 
 function cell(value: string): string {
@@ -104,7 +111,7 @@ function sortCards(cards: Card[]): Card[] {
 
 /** Данные бэклога: таблицы по навыкам, отложенные и недавно готовые. */
 export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): BacklogData {
-  const cards = listCards(db).filter((card) => !HIDDEN.includes(card.status))
+  const cards = listCards(db).filter((card) => !HIDDEN.includes(card.status) && !isIdeaCard(card))
 
   const bySkill = new Map<string, Card[]>()
   for (const card of cards) {
@@ -120,9 +127,18 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
 
   const cut = reference.getTime() - DONE_WINDOW_HOURS * 60 * 60 * 1000
   const done = listCards(db, { status: 'done' }).filter((card) => {
+    if (isIdeaCard(card)) return false
     if (card.doneAt === null) return false
     return new Date(card.doneAt).getTime() >= cut
   })
+
+  const ideas = listCards(db, { status: 'deferred', tag: 'idea' })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .map((card) => ({
+      id: card.id,
+      text: card.body.trim() || card.title,
+      updatedAt: card.updatedAt,
+    }))
 
   return {
     generatedAt: reference.toISOString(),
@@ -131,10 +147,13 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
       label: SKILL_LABEL[skill] ?? skill,
       rows: sortCards(bySkill.get(skill)!).map((card) => row(db, card)),
     })),
-    deferred: sortCards(listCards(db, { status: 'deferred' })).map((card) => row(db, card)),
+    deferred: sortCards(
+      listCards(db, { status: 'deferred' }).filter((card) => !isIdeaCard(card)),
+    ).map((card) => row(db, card)),
     done: done
       .sort((left, right) => (right.doneAt ?? '').localeCompare(left.doneAt ?? ''))
       .map((card) => ({ id: card.id, title: card.title, doneAt: card.doneAt! })),
+    ideas,
   }
 }
 
@@ -177,6 +196,14 @@ export function renderBacklog(db: DatabaseSync, reference: Date = new Date()): s
     )
     for (const item of data.done) {
       lines.push(`| ${item.id} | ${cell(item.title)} | ${shortTime(item.doneAt)} |`)
+    }
+    lines.push('')
+  }
+
+  if (data.ideas.length > 0) {
+    lines.push('## Идеи', '', '| ID | Идея | Изменено |', '|---|---|---|')
+    for (const item of data.ideas) {
+      lines.push(`| ${item.id} | ${cell(item.text)} | ${shortTime(item.updatedAt)} |`)
     }
     lines.push('')
   }

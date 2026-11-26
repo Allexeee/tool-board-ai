@@ -501,3 +501,118 @@ export function editCard(
     return updated
   })
 }
+
+/** Тег идеи: карточка живёт вне очереди, мержа и ревью. */
+export const IDEA_TAG = 'idea'
+
+export function isIdeaCard(card: Card): boolean {
+  return card.tags.includes(IDEA_TAG)
+}
+
+function ideaTitle(text: string, title?: string): string {
+  const explicit = title?.trim()
+  if (explicit) return explicit
+  const first = text.trim().split(/\r?\n/)[0]?.trim() ?? ''
+  return first.length > 80 ? `${first.slice(0, 77)}…` : first
+}
+
+/** Идея: карточка группы IDEA, status deferred, без мержа и ревью. */
+export function addIdea(
+  db: DatabaseSync,
+  input: { text: string; title?: string; actor?: string },
+): Card {
+  return tx(db, () => {
+    const text = input.text?.trim() ?? ''
+    if (text === '') throw new UserError(3, 'нужен текст идеи')
+    const actor = input.actor?.trim() || 'owner'
+    const card = createCard(db, {
+      group: 'IDEA',
+      title: ideaTitle(text, input.title),
+      body: text,
+      skill: 'owner',
+      author: actor,
+      tags: [IDEA_TAG],
+      needsMerge: false,
+    })
+    db.prepare(
+      "update cards set status = 'deferred', review_required = 0, updated_at = ? where id = ?",
+    ).run(nowIso(), card.id)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, { type: 'idea.added', actor, subject: card.id, after: updated })
+    return updated
+  })
+}
+
+function requireIdea(db: DatabaseSync, id: string): Card {
+  const card = getCard(db, id)
+  if (!card || !isIdeaCard(card)) throw new UserError(3, `идея ${id} не найдена`)
+  return card
+}
+
+/** Активные идеи: deferred + тег idea, свежие сверху. */
+export function listIdeas(db: DatabaseSync): Card[] {
+  return listCards(db, { status: 'deferred', tag: IDEA_TAG }).sort((left, right) => {
+    const byTime = right.updatedAt.localeCompare(left.updatedAt)
+    return byTime !== 0 ? byTime : left.id.localeCompare(right.id)
+  })
+}
+
+export function editIdea(
+  db: DatabaseSync,
+  input: { id: string; text?: string; title?: string; actor?: string },
+): Card {
+  return tx(db, () => {
+    const card = requireIdea(db, input.id)
+    const sets: string[] = []
+    const params: string[] = []
+    if (input.text !== undefined) {
+      const text = input.text.trim()
+      if (text === '') throw new UserError(3, 'текст идеи пуст')
+      sets.push('body = ?')
+      params.push(text)
+    }
+    if (input.title !== undefined) {
+      const title = ideaTitle(input.text ?? card.body, input.title)
+      if (title === '') throw new UserError(3, 'заголовок идеи пуст')
+      sets.push('title = ?')
+      params.push(title)
+    }
+    if (sets.length === 0) return card
+
+    sets.push('updated_at = ?')
+    params.push(nowIso())
+    db.prepare(`update cards set ${sets.join(', ')} where id = ?`).run(...params, card.id)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'idea.edited',
+      actor: input.actor?.trim() || 'owner',
+      subject: card.id,
+      before: card,
+      after: updated,
+    })
+    return updated
+  })
+}
+
+/** drop идеи — отмена карточки; идеи нет в очереди и ревью, гасить нечего. */
+export function dropIdea(
+  db: DatabaseSync,
+  input: { id: string; actor?: string },
+): Card {
+  return tx(db, () => {
+    const card = requireIdea(db, input.id)
+    const at = nowIso()
+    db.prepare(
+      "update cards set status = 'cancelled', cancel_reason = ?, updated_at = ? where id = ?",
+    ).run('идея убрана', at, card.id)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'idea.dropped',
+      actor: input.actor?.trim() || 'owner',
+      subject: card.id,
+      before: card,
+      after: updated,
+    })
+    return updated
+  })
+}

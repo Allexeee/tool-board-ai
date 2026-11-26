@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildBacklog } from '../../src/core/backlog.ts'
+import { addIdea } from '../../src/core/cards.ts'
 import { renderBacklogPage } from '../../src/core/backlog-view.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 
@@ -18,6 +19,17 @@ test('buildBacklog: группы по навыку и человеческие �
   )
   assert.equal(data.skills[1].rows[0].status, 'готов к работе')
   assert.equal(data.skills[0].rows[0].status, 'разбор')
+})
+
+test('renderBacklogPage: идеи в конце отдельной таблицей', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  addIdea(board.db, { text: 'Идея в html', actor: 'owner' })
+
+  const html = renderBacklogPage(buildBacklog(board.db))
+  assert.match(html, /<h2>Идеи<\/h2>/)
+  assert.match(html, /Идея в html/)
+  assert.ok(html.indexOf('Идея в html') > html.indexOf('Бэклог'))
 })
 
 test('renderBacklogPage: автообновление, кнопка и крупный шрифт', (t) => {
