@@ -143,7 +143,7 @@ test('touch продлевает lease через CLI', (t) => {
   assert.equal(getActiveRun(fixture.db, 'developer')!.leaseUntil, touched.leaseUntil)
 })
 
-test('take: 400-словный spec требует spec review subagent', (t) => {
+test('take: 600-словный spec требует spec review subagent', (t) => {
   const repo = makeRepo()
   initProject(repo.root)
   commitGenerated(repo.root)
@@ -171,7 +171,8 @@ test('take: 400-словный spec требует spec review subagent', (t) =>
   const shaped = run(repo.root, ['take', card.id, '--as', 'developer'])
   assert.equal(shaped.code, 0, shaped.err)
 
-  const words = Array.from({ length: 400 }, () => 'слово').join(' ')
+  // Профиль default требует субагента с 500 слов: берём заведомо больше порога.
+  const words = Array.from({ length: 600 }, () => 'слово').join(' ')
   db.prepare('update cards set body = ?, acceptance = ? where id = ?').run(words, 'ok', card.id)
   // Self-ревью есть; если take не передаст текст spec, гейт останется self и пропустит.
   recordSpecReview(db, { cardId: card.id, reviewer: 'reviewer', mode: 'self', verdict: 'done' })

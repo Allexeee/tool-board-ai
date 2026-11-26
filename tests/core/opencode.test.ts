@@ -105,6 +105,8 @@ test('после обновления агент пересказывает «Ч
     assert.match(text, /без флагов и CLI-жаргона/)
     assert.match(text, /изменений нет/i)
     assert.match(text, /board adopt --check/)
+    assert.match(text, /ничего не создаёт/)
+    assert.match(text, /остаток/)
   }
 })
 
