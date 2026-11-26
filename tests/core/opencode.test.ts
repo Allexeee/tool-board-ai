@@ -160,9 +160,10 @@ test('плагин держит правила отчёта в системно�
     'Перехожу к {ID}',
     'только «Сделал»',
     'Завершил {RUN}',
-    'Ревью ожидают задачи',
-    'если в review что-то есть',
-    'Ревью сейчас или до релиза?',
+    'Что сделано',
+    'Решения, которые я принял сам',
+    'Решений не принимал',
+    'только важное для человека',
     'если очередь не пуста',
     'до следующего вызова инструмента',
     'не заменяет',
@@ -489,10 +490,10 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-work'), /две строки/)
   assert.match(read('board-work'), /Перехожу к \{ID\}/)
   assert.match(read('board-run'), /Завершил \{RUN\}/)
-  assert.match(read('board-run'), /1\. \{ID\}/)
-  assert.match(read('board-run'), /Ревью ожидают задачи/)
-  assert.match(read('board-run'), /если в `review` что-то есть/)
-  assert.match(read('board-run'), /Ревью сейчас или до релиза\?/)
+  assert.match(read('board-run'), /Что сделано/)
+  assert.match(read('board-run'), /Решения, которые я принял сам/)
+  assert.match(read('board-run'), /Решений не принимал/)
+  assert.doesNotMatch(read('board-run'), /Ревью ожидают задачи/)
   assert.match(read('board-run'), /если очередь не пуста/)
   assert.match(read('board-run'), /Следующий Run/)
   assert.match(read('board-run'), /Запустить следующий Run\?/)
