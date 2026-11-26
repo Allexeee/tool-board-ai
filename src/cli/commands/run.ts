@@ -4,6 +4,7 @@ import {
   dropFromRun,
   endRun,
   getActiveRun,
+  isLightRun,
   listRunCards,
   listRuns,
   nextCard,
@@ -19,6 +20,7 @@ import { findProject } from '../../core/project.ts'
 import {
   effectiveReviewerModel,
   modelContext,
+  profileRunMode,
   resolveRunReviewMode,
 } from '../../core/review-policy.ts'
 import { readSettings } from '../../core/settings.ts'
@@ -88,17 +90,11 @@ export default async function command(args: ParsedArgs) {
       cardIds = cardFlags
     }
 
-    let reviewMode = resolveRunReviewMode({ settings, context }).mode
+    let reviewMode: RunReviewMode = profileRunMode(settings, context)
     if (boolFlag(args, 'no-review')) {
       reviewMode = 'none'
     } else if (boolFlag(args, 'review')) {
-      const forced = {
-        ...settings,
-        runReview: {
-          mode: settings.runReview.mode === 'none' ? ('auto' as const) : settings.runReview.mode,
-        },
-      }
-      reviewMode = resolveRunReviewMode({ settings: forced, context }).mode
+      reviewMode = effectiveReviewerModel(settings, context) ? 'subagent' : 'self'
     }
     const run = startRun(db, { executorId, cardIds, actor: executorId, reviewMode })
     ok(run, `${run.id} · ${run.executorId} · ${cardIds.join(', ')}`)
@@ -182,6 +178,14 @@ export default async function command(args: ParsedArgs) {
       const resolution = resolveRunReviewMode({ settings, context })
       reviewMode = run.reviewMode ?? resolution.mode
       reviewReason = run.reviewMode ? 'explicit' : resolution.reason
+    }
+
+    if (reviewMode === 'auto') {
+      reviewMode = isLightRun(db, run, project.root) ? 'self' : 'subagent'
+      reviewReason = reviewMode === 'self' ? 'light-run' : 'heavy-run'
+      if (reviewMode === 'subagent' && effectiveReviewerModel(settings, context) === null) {
+        reviewMode = 'self'
+      }
     }
 
     if (reviewMode === 'subagent' && effectiveReviewerModel(settings, context) === null) {

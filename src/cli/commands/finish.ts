@@ -28,7 +28,7 @@ export default async function command(args: ParsedArgs) {  const project = findP
       settings: readSettings(project.root),
       context: modelContext(process.env),
     }).mode
-    const forceReview = run !== null && resolvedMode !== 'none'
+    const forceReview = run !== null && resolvedMode !== 'none' && resolvedMode !== 'auto'
 
     const card = finishCard(db, {
       id,
@@ -39,7 +39,13 @@ export default async function command(args: ParsedArgs) {  const project = findP
       mergeCommit: stringFlag(args, 'merge-commit'),
       forceReview,
     })
-    ok(card, `${card.id} ${card.status === 'review' ? 'на ревью' : 'закрыта'}: ${card.title}`)
+    const state =
+      card.status === 'review'
+        ? 'ждет финального ревью'
+        : card.status === 'acceptance'
+          ? 'ждёт приёмки владельцем'
+          : 'закрыта'
+    ok(card, `${card.id} ${state}: ${card.title}`)
     try {
       refreshBacklogIfAuto(db, project.root)
     } catch (error) {

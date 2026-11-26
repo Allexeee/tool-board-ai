@@ -134,7 +134,7 @@ test('критическая находка ревью блокирует releas
 
   const released = run(root, ['release'])
   assert.equal(released.code, 2)
-  assert.match(released.err, /критическ/)
+  assert.match(released.err, /находк/)
 })
 
 test('два процесса не бронируют одну карточку дважды', async (t) => {

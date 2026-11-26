@@ -3,12 +3,15 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { listCards } from './cards.ts'
+import { acceptancePaths, evaluateAcceptance } from './acceptance.ts'
 import { getExecutor } from './executors.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
-import { hasReviewVerdict, hasReviewWaiver } from './review.ts'
+import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
+import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 import { readSettings } from './settings.ts'
+import { tagExists } from './tags.ts'
 import { CONFLICTING_SKILLS_ADVICE, conflictingSkillsDisabled, SUPERPOWERS_ADVICE, superpowersConfigured } from './superpowers.ts'
 
 export interface DoctorResult {
@@ -72,9 +75,67 @@ export function doctorData(
     checkWorktrees(root, warnings)
   }
 
-  checkCards(db, warnings)
+  checkCards(
+    db,
+    warnings,
+    findingsScope(settings, modelContext(process.env)),
+    packageReviewRequired(settings, modelContext(process.env)),
+  )
+  checkAcceptance(db, root, settings, warnings)
 
   return { errors, warnings, recommendations }
+}
+
+/** Приёмка: согласованность флага, статуса и правил проекта. */
+function checkAcceptance(
+  db: DatabaseSync,
+  root: string,
+  settings: ReturnType<typeof readSettings>,
+  warnings: string[],
+): void {
+  const cards = listCards(db)
+  const withoutFlag = cards.filter(
+    (card) => card.status === 'acceptance' && !card.ownerAcceptance,
+  )
+  if (withoutFlag.length > 0) {
+    warnings.push(
+      `в acceptance без флага приёмки: ${withoutFlag.map((card) => card.id).join(', ')}`,
+    )
+  }
+  const ownerFlag = cards.filter(
+    (card) => card.skill === 'owner' && card.ownerAcceptance,
+  )
+  if (ownerFlag.length > 0) {
+    warnings.push(
+      `флаг приёмки у owner-карточки: ${ownerFlag.map((card) => card.id).join(', ')}`,
+    )
+  }
+
+  const acceptance = settings.acceptance
+  const unknown = new Set<string>()
+  const collect = (conditions: { tags?: string[] } | undefined): void => {
+    for (const tag of conditions?.tags ?? []) {
+      if (!tagExists(db, tag)) unknown.add(tag)
+    }
+  }
+  collect(acceptance.exclude)
+  for (const rule of acceptance.rules) {
+    collect(rule.include)
+    collect(rule.exclude)
+  }
+  if (unknown.size > 0) {
+    warnings.push(`правила приёмки ссылаются на неизвестные теги: ${[...unknown].join(', ')}`)
+  }
+
+  for (const card of cards) {
+    if (card.ownerAcceptanceManual || card.skill === 'owner') continue
+    const decision = evaluateAcceptance(settings, card, acceptancePaths(root, card))
+    if (decision.required !== card.ownerAcceptance) {
+      warnings.push(
+        `приёмка ${card.id} расходится с правилами: флаг ${card.ownerAcceptance ? 'да' : 'нет'}, правила ${decision.required ? 'да' : 'нет'}`,
+      )
+    }
+  }
 }
 
 function branchExists(root: string, name: string): boolean {
@@ -131,7 +192,12 @@ function registeredWorktrees(root: string): string[] {
 }
 
 /** Карточки, мешающие релизу: код в dev без done, критические находки, ревью. */
-function checkCards(db: DatabaseSync, warnings: string[]): void {
+function checkCards(
+  db: DatabaseSync,
+  warnings: string[],
+  findings: 'critical' | 'critical+important' = 'critical',
+  packageRequired = true,
+): void {
   const cards = listCards(db)
 
   const inDevNotDone = cards.filter(
@@ -150,6 +216,20 @@ function checkCards(db: DatabaseSync, warnings: string[]): void {
     warnings.push(`открыты критические находки (critical): ${critical.map((c) => c.id).join(', ')}`)
   }
 
+  if (findings === 'critical+important') {
+    const important = cards.filter(
+      (card) =>
+        card.severity === 'important' &&
+        card.status !== 'done' &&
+        card.status !== 'cancelled',
+    )
+    if (important.length > 0) {
+      warnings.push(
+        `открыты важные находки (important): ${important.map((c) => c.id).join(', ')}`,
+      )
+    }
+  }
+
   const review = cards.filter((card) => card.status === 'review')
   if (review.length > 0) {
     warnings.push(`карточки на ревью: ${review.map((c) => c.id).join(', ')}`)
@@ -162,11 +242,16 @@ function checkCards(db: DatabaseSync, warnings: string[]): void {
       card.status === 'done' &&
       card.revertedAt === null &&
       !hasReviewVerdict(db, card.id) &&
-      !hasReviewWaiver(db, card.id),
+      !hasReviewWaiver(db, card.id) &&
+      !(
+        packageRequired &&
+        card.mergeCommit !== null &&
+        packageCovers(db, card.mergeCommit)
+      ),
   )
   if (unreviewedDev.length > 0) {
     warnings.push(
-      `в dev без ревью и без waiver: ${unreviewedDev.map((c) => c.id).join(', ')}`,
+      `${packageRequired ? 'в dev без ревью, пакета и waiver' : 'в dev без ревью и waiver'}: ${unreviewedDev.map((c) => c.id).join(', ')}`,
     )
   }
 

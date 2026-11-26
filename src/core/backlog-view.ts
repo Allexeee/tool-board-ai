@@ -46,6 +46,37 @@ td.id { font-family: "SF Mono", Consolas, monospace; font-size: 14px; color: var
 td.status { white-space: nowrap; }
 td.note { color: var(--muted); }
 .empty { color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 6px; color: var(--muted); font-size: 13px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--row, var(--muted)); }
+tr.status-new { --row: #7dd3fc; }
+tr.status-shaping { --row: #7dd3fc; }
+tr.status-approval { --row: #f59e0b; }
+tr.status-waiting { --row: #94a3b8; }
+tr.status-ready { --row: #34d399; }
+tr.status-booked { --row: #34d399; }
+tr.status-in_progress { --row: #60a5fa; }
+tr.status-review { --row: #a78bfa; }
+tr.status-acceptance { --row: #fb923c; }
+tr.status-blocked { --row: #f87171; }
+tr.status-deferred { --row: #6b7280; }
+tr.status-done { --row: #16a34a; }
+tr.status-idea { --row: #2dd4bf; }
+tr[class*="status-"] td { background: color-mix(in srgb, var(--row) 7%, var(--panel)); }
+tr[class*="status-"] td:first-child { box-shadow: inset 3px 0 0 var(--row); }
+span.status-new { --row: #7dd3fc; }
+span.status-shaping { --row: #7dd3fc; }
+span.status-approval { --row: #f59e0b; }
+span.status-waiting { --row: #94a3b8; }
+span.status-ready { --row: #34d399; }
+span.status-booked { --row: #34d399; }
+span.status-in_progress { --row: #60a5fa; }
+span.status-review { --row: #a78bfa; }
+span.status-acceptance { --row: #fb923c; }
+span.status-blocked { --row: #f87171; }
+span.status-deferred { --row: #6b7280; }
+span.status-done { --row: #16a34a; }
+span.status-idea { --row: #2dd4bf; }
 `
 
 function esc(value: string): string {
@@ -66,10 +97,15 @@ function fmt(iso: string): string {
   return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-function table(headers: string[], rows: string[][]): string {
+function table(headers: string[], rows: string[][], classes: string[] = []): string {
   if (rows.length === 0) return '<p class="empty">пусто</p>'
   const head = headers.map((header) => `<th>${esc(header)}</th>`).join('')
-  const body = rows.map((cells) => `<tr>${cells.join('')}</tr>`).join('')
+  const body = rows
+    .map((cells, index) => {
+      const cls = classes[index] ? ` class="${classes[index]}"` : ''
+      return `<tr${cls}>${cells.join('')}</tr>`
+    })
+    .join('')
   return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
 }
 
@@ -80,6 +116,28 @@ function rowsFor(rows: BacklogRow[]): string[][] {
     `<td class="status">${esc(item.status)}</td>`,
     `<td class="note">${esc(item.note)}</td>`,
   ])
+}
+
+/** Подписи цветов: статус остаётся текстом, цвет — только подсказка. */
+const LEGEND: Array<[string, string]> = [
+  ['ready', 'в очереди'],
+  ['booked', 'забронирована'],
+  ['in_progress', 'в работе'],
+  ['review', 'ждет финального ревью'],
+  ['acceptance', 'требует приёмки'],
+  ['approval', 'на утверждении'],
+  ['waiting', 'ждёт'],
+  ['blocked', 'заблокирована'],
+  ['deferred', 'отложена'],
+  ['done', 'готово'],
+  ['idea', 'идея'],
+]
+
+function legend(): string {
+  return `<div class="legend">${LEGEND.map(
+    ([key, label]) =>
+      `<span class="legend-item"><span class="dot status-${key}"></span>${esc(label)}</span>`,
+  ).join('')}</div>`
 }
 
 /** Самодостаточный HTML-снимок бэклога. refreshSeconds > 0 — страница сама перезагружается. */
@@ -109,7 +167,11 @@ setInterval(function () {
   for (const section of data.skills) {
     parts.push(
       `<section><h2>Задачи для ${esc(section.label)}</h2>` +
-        table(['ID', 'Заголовок', 'Статус', 'Заметка'], rowsFor(section.rows)) +
+        table(
+          ['ID', 'Заголовок', 'Статус', 'Заметка'],
+          rowsFor(section.rows),
+          section.rows.map((item) => `status-${item.statusKey}`),
+        ) +
         '</section>',
     )
   }
@@ -122,7 +184,11 @@ setInterval(function () {
       `<td class="note">${esc(item.note)}</td>`,
     ])
     parts.push(
-      `<section><h2>Отложенные</h2>${table(['ID', 'Заголовок', 'Причина'], rows)}</section>`,
+      `<section><h2>Отложенные</h2>${table(
+        ['ID', 'Заголовок', 'Причина'],
+        rows,
+        data.deferred.map(() => 'status-deferred'),
+      )}</section>`,
     )
   }
 
@@ -133,7 +199,26 @@ setInterval(function () {
       `<td class="note">${fmt(item.doneAt)}</td>`,
     ])
     parts.push(
-      `<section><h2>Готово за последние 12 часов</h2>${table(['ID', 'Заголовок', 'Завершено'], rows)}</section>`,
+      `<section><h2>Готово за последние 12 часов</h2>${table(
+        ['ID', 'Заголовок', 'Завершено'],
+        rows,
+        data.done.map(() => 'status-done'),
+      )}</section>`,
+    )
+  }
+
+  if (data.ideas.length > 0) {
+    const rows = data.ideas.map((item) => [
+      `<td class="id">${esc(item.id)}</td>`,
+      `<td>${esc(item.text)}</td>`,
+      `<td class="note">${fmt(item.updatedAt)}</td>`,
+    ])
+    parts.push(
+      `<section><h2>Идеи</h2>${table(
+        ['ID', 'Идея', 'Изменено'],
+        rows,
+        data.ideas.map(() => 'status-idea'),
+      )}</section>`,
     )
   }
 
@@ -159,6 +244,7 @@ setInterval(function () {
 <p class="hint">Собрано из <code>.board/board.db</code>. Доска пересобирает файл после каждой команды. ${
     auto ? 'Страница обновляется сама' : 'Обновить вручную'
   } — кнопка «Обновить»${auto ? '' : ' или F5'}.</p>
+${legend()}
 ${parts.join('\n')}
 </div>
 ${scripts}

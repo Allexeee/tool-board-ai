@@ -11,6 +11,7 @@ export type CardStatus =
   | 'blocked'
   | 'deferred'
   | 'review'
+  | 'acceptance'
   | 'done'
   | 'cancelled'
 
@@ -19,7 +20,7 @@ export type Severity = 'critical' | 'important' | 'other'
 export type ExecutorKind = 'human' | 'agent'
 
 export type RunStatus = 'active' | 'ended' | 'cancelled' | 'lease_expired'
-export type RunReviewMode = 'none' | 'self' | 'subagent'
+export type RunReviewMode = 'none' | 'self' | 'subagent' | 'auto'
 
 export type RunCardStatus =
   | 'planned'
@@ -30,6 +31,7 @@ export type RunCardStatus =
   | 'done'
   | 'review'
   | 'reviewed'
+  | 'acceptance'
 
 export interface Run {
   id: string
@@ -92,6 +94,7 @@ export interface Card {
   id: string
   group: string
   groupSeq: number
+  legacyIds: string[]
   title: string
   body: string
   acceptance: string
@@ -117,6 +120,9 @@ export interface Card {
   specRev: number
   reviewReopens: number
   mergeCommit: string | null
+  mainCommit: string | null
+  ownerAcceptance: boolean
+  ownerAcceptanceManual: boolean
   inDev: boolean
   inMain: boolean
   revertedAt: string | null

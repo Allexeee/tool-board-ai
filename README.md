@@ -69,6 +69,10 @@ board now
 Поменять / Не сейчас». `board setup --defaults` применяет умолчания разом;
 `/setup` и флаги `board setup` меняют отдельные настройки.
 
+Области можно переименовать или слить: `board group rename OLD NEW [--merge] [--dry-run]`.
+Переносятся карточки и все ссылки; старые ID остаются в `legacy_ids`, `card show` по ним работает.
+Карточки в `in_progress`/`booked`/`shaping` сначала закрываются.
+
 `init` создаёт:
 
 - `.board/board.db` — базу (истина доски) и исполнителя `owner`;
@@ -116,7 +120,9 @@ board card add --group UI --title "Форма входа" --skill dev
 
 `needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 0–3. Зависимости — `card dep`.
 
-`needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done` и без waiver.
+`needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done`, waiver или покрытия пакетным проходом (кроме профиля `low`).
+
+Профиль ревью: `board setup --profile auto|low|default|high|max|custom`. `auto` берёт профиль по варианту модели (`low/default/high/max`). Встроенные: `low` — spec self, run none, без пакетного ревью и реревью; `default` — spec auto 500 слов, run auto, реревью 1; `high` — spec auto 250 слов, run subagent, реревью 2, important чинятся сразу; `max` — spec subagent, run subagent, реревью 3, каждая карточка в ревью. Свои профили — `review.profiles` в `.board/settings.json`; старые флаги `--spec-review`/`--run-review` переключают на `custom`.
 
 ## Очередь и забег
 
@@ -149,7 +155,44 @@ board card ref add UI-1 --kind review --value RUN-1 --title "итоги прох
 
 Ревьюер только читает: карточек не создаёт. Итоги прохода — `run note` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка. Бюджет прохода: первый проход полный; повторный — только дельта (исправлены ли находки и нет ли регрессий от фикса), новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь и не блокирует релиз; other — сборник `review notes` в `deferred`. Больше 7 находок на проход не перечисляют.
 
+Перед релизом — пакетный проход по done-карточкам dev вне main:
+
+```bash
+board review package                       # состав: ID, заголовок, merge-коммит
+board review package --since <ref>         # другая база вместо main
+board review package --verdict done --reviewer reviewer --note "ИТОГИ: ..."
+```
+
+Проход пишется одной записью `review.package`: карточки, коммиты, вердикт, находки. Пакет собирает карточки, чьи коммиты ещё не покрыты проходом с `done`; `release` требует, чтобы все коммиты релиза были покрыты. Отказ владельца — `release --no-review --reason "..."` с событием `release.review_waived`.
+
 CLI субагентов не порождает — он готовит пакет и принимает вердикты. Субагент `board-reviewer` работает на default-варианте `reviewer.model`, не в Max; `self` использует модель основной сессии.
+
+## Идеи
+
+Идея — карточка группы `IDEA`: статус `deferred`, тег `idea`, без мержа, ревью и очереди.
+
+```bash
+board idea add "Тёмная тема" [--title "..."]
+board idea list
+board idea edit IDEA-1 --text "..." --title "..."
+board idea drop IDEA-1
+```
+
+В бэклоге идеи идут отдельной таблицей «Идеи» в конце; в задачи, отложенные и готовые они не попадают. В плагине — `board_idea`.
+
+## Приёмка владельцем
+
+Флаг `owner_acceptance` означает, что результат должен посмотреть владелец. Сданная карточка с флагом встаёт в статус `acceptance`; после код-ревью — тоже туда, а не в `done`. Релиз ждёт обе проверки: ревью и приёмку.
+
+```bash
+board acceptance rule add visual --include-tag ui --include-path "src/components/**" --exclude-tag no-acceptance
+board acceptance rule list
+board acceptance check CORE-1
+board card accept CORE-1 [--note "..."]
+board card accept CORE-1 --reject --reason "кнопка не та" --as owner
+```
+
+Правила живут в `acceptance.rules`: `include`/`exclude` по группам, тегам, навыкам и путям; общий `exclude` снимает приёмку. Проверка идёт по заявленному scope и фактическому diff на `finish`. Явный `--owner-acceptance` / `--no-owner-acceptance` сильнее правил. В бэклоге карточки приёмки — в начале «Задачи для владельца»; в `now` — счётчик и пометка «ждёт приёмки».
 
 ## Настройки
 
@@ -190,9 +233,16 @@ board setup --backlog-refresh 5                     # автообновлени
 
 `release` — команда владельца: проверяет, что в `dev` нет незавершённых карточек и открытых `critical`-находок, и мержит `dev` в `main` (`--no-ff`).
 
+Версия проекта — semver: major — ломающие изменения, minor — новые возможности, patch — исправления, документация и внутренние правки. `board bump patch|minor|major` обновляет `package.json`, lock и CHANGELOG; `release` требует версию новее последнего тега.
+
 ```bash
+board bump minor
 board release
+board release --package developer   # только карточки навыков исполнителя
+board release --package content     # или навык, если исполнителя с таким id нет
 ```
+
+`--package` собирает временную ветку от `main`, переносит в неё только merge-коммиты выбранных карточек (`cherry-pick -m 1`) и мержит в `main`. Невыбранные изменения остаются в `dev`; `in_main` и тег отражают только пакет. При конфликте релиз откатывается, `main` не меняется. Гейты ревью и находок считаются по выбранному набору.
 
 ## Доска
 
@@ -206,7 +256,7 @@ board now 3    # открытые запросы и общая очередь
 
 `now 0` — по умолчанию: утверждения, owner-задачи в `ready`/`waiting` и открытые вопросы; имя исполнителя в строках не печатается. `now 1` показывает задачи текущего `--as` на руках и в очереди, а также три вероятных забега по тегам: «НОВОЕ», «УЛУЧШЕНИЕ», «ПОСЛЕ РЕВЬЮ». Запрос в забеге помечен `?`; каждая карточка — отдельная строка. `now 2` показывает только других агентов, без текущего и без забегов. `now 3` — открытые запросы и общая очередь; отменённые и закрытые не попадают.
 
-Теги: `card add|edit --tag new|improve|review`; `--tag` заменяет список, `--clear-tags` очищает. Находки ревью получают `review` автоматически. Карточка без вариантного тега в вероятные забеги не попадает — `now 1` показывает счётчик «БЕЗ ТЕГА».
+Теги — реестр: `board tag add|list|rename|remove`. На `card shape --tag` теги берутся из дизайна задачи, `card tag add|remove|list` меняют точечно; `card edit --tag` заменяет список, `--clear-tags` очищает. Находки ревью получают `review`, идеи — `idea`. Карточка без вариантного тега в вероятные забеги не попадает — `now 1` показывает счётчик «БЕЗ ТЕГА».
 
 Запрос может входить в забег: `run start --cards` принимает его как `planned`, `run next` возвращает первым, `take` сначала переводит в разбор, а повторный `take` после spec — в работу с веткой и lease. Approve владельца для такого запроса не требуется; spec показывается, забег можно остановить. Цвета статусов, имён агентов и маркера `?` включаются только в живом терминале: в `--json`, пайпе и при `NO_COLOR` ANSI нет.
 

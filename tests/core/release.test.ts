@@ -12,12 +12,13 @@ import {
   runGit,
   startCardBranch,
 } from '../../src/core/git.ts'
-import { cancelCard, finishCard } from '../../src/core/lifecycle.ts'
+import { acceptCard, cancelCard, finishCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
-import { waiveReview } from '../../src/core/review.ts'
+import { collectPackage, submitPackage, waiveReview } from '../../src/core/review.ts'
+import { updateSettings } from '../../src/core/settings.ts'
 import type { Card } from '../../src/core/types.ts'
-import { seedCard } from '../helpers/board.ts'
+import { seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
 interface RepoBoard {
@@ -42,8 +43,14 @@ function repoBoard(t: { after: (fn: () => void) => void }): RepoBoard {
  * Реальный merge карточки в dev: ветка, коммит, mergeToDev. Возвращает карточку
  * с `merge_commit` и `in_dev=1` в нужном статусе.
  */
-function merged(root: string, db: DatabaseSync, status: Card['status'], executor: string): Card {
-  const card = seedCard(db, { phase: 'task', status: 'booked', skill: 'dev' })
+function merged(
+  root: string,
+  db: DatabaseSync,
+  status: Card['status'],
+  executor: string,
+  skill = 'dev',
+): Card {
+  const card = seedCard(db, { phase: 'task', status: 'booked', skill })
   const { branch, worktree } = startCardBranch(root, executor, card)
   mkdirSync(join(worktree, 'src'), { recursive: true })
   writeFileSync(join(worktree, 'src', `${card.id}.txt`), `${card.id}\n`)
@@ -85,13 +92,26 @@ test('release блокируется на done без ревью и waiver', (t)
   assert.throws(() => release(db, root, 'owner'), /нет ревью/)
 })
 
+test('профиль high блокирует открытый important', (t) => {
+  const { root, db } = repoBoard(t)
+  merged(root, db, 'done', 'dev-a')
+  const important = seedCard(db, { phase: 'request', status: 'new', skill: 'dev' })
+  db.prepare("update cards set severity = 'important' where id = ?").run(important.id)
+  updateSettings(root, { review: { profile: 'high' } })
+
+  assert.throws(() => release(db, root, 'owner'), /находк/)
+
+  db.prepare("update cards set status = 'done' where id = ?").run(important.id)
+  assert.equal(release(db, root, 'owner').commit.length, 40)
+})
+
 test('критическая находка блокирует release, пока не закрыта', (t) => {
   const { root, db } = repoBoard(t)
   merged(root, db, 'done', 'dev-a')
   const critical = seedCard(db, { phase: 'request', status: 'new', skill: 'dev' })
   db.prepare("update cards set severity = 'critical' where id = ?").run(critical.id)
 
-  assert.throws(() => release(db, root, 'owner'), /критич/)
+  assert.throws(() => release(db, root, 'owner'), /находк/)
 
   db.prepare("update cards set status = 'done' where id = ?").run(critical.id)
   assert.equal(release(db, root, 'owner').commit.length, 40)
@@ -279,7 +299,109 @@ test('finish после reopen мержит новые коммиты ветки
   assert.equal(isAncestor(root, tip, 'dev'), true)
 })
 
-test('release ставит тег версии, повторный release не падает', (t) => {
+test('release проходит с пакетным ревью вместо waiver', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+
+  const packed = collectPackage(db, root)
+  assert.deepEqual(packed.map((item) => item.id), [card.id])
+  assert.throws(() => release(db, root, 'owner'), /нет ревью/)
+
+  const pass = submitPackage(db, { actor: 'reviewer', verdict: 'done', cards: packed })
+  assert.equal(pass.commits.length, 1)
+  assert.deepEqual(collectPackage(db, root), [])
+  assert.equal(release(db, root, 'owner').commit.length, 40)
+})
+
+test('collectPackage --since отсекает коммиты старше базы', (t) => {
+  const { root, db } = repoBoard(t)
+  const first = merged(root, db, 'done', 'dev-a')
+  const second = merged(root, db, 'done', 'dev-b')
+
+  const since = collectPackage(db, root, { since: first.mergeCommit })
+  assert.deepEqual(since.map((item) => item.id), [second.id])
+  assert.equal(collectPackage(db, root).length, 2)
+})
+
+test('release --no-review требует reason и пишет отказ в журнал', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+
+  assert.throws(() => release(db, root, 'owner', { noReview: true }), /--reason/)
+
+  const result = release(db, root, 'owner', { noReview: true, reason: 'срочный фикс' })
+  assert.equal(result.reviewWaived, true)
+  const event = db
+    .prepare("select actor, note from events where type = 'release.review_waived' limit 1")
+    .get() as { actor: string; note: string } | undefined
+  assert.equal(event?.actor, 'owner')
+  assert.equal(event?.note, 'срочный фикс')
+})
+
+test('release --package переносит только выбранного исполнителя', (t) => {
+  const { root, db } = repoBoard(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const devCard = merged(root, db, 'done', 'dev-a')
+  const content = merged(root, db, 'done', 'content-a', 'content')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(content.id)
+  const stillInReview = merged(root, db, 'review', 'content-b', 'content')
+
+  const result = release(db, root, 'owner', { package: 'developer' })
+  assert.equal(result.commit.length, 40)
+  assert.equal(getCard(db, devCard.id)!.inMain, true)
+  assert.equal(getCard(db, content.id)!.inMain, false)
+  assert.equal(getCard(db, stillInReview.id)!.inMain, false)
+
+  assert.match(runGit(root, ['show', `main:src/${devCard.id}.txt`]), new RegExp(devCard.id))
+  assert.throws(() => runGit(root, ['show', `main:src/${content.id}.txt`]))
+  assert.throws(() => runGit(root, ['show', `main:src/${stillInReview.id}.txt`]))
+})
+
+test('release --package: конфликт переноса не меняет main', (t) => {
+  const { root, db } = repoBoard(t)
+  seedExecutor(db, { id: 'content', skills: ['content'] })
+  const card = seedCard(db, { phase: 'task', status: 'booked', skill: 'content' })
+  const { branch, worktree } = startCardBranch(root, 'content-a', card)
+  mkdirSync(join(worktree, 'src'), { recursive: true })
+  writeFileSync(join(worktree, 'src', 'conflict.txt'), 'dev\n')
+  runGit(worktree, ['add', '.'])
+  runGit(worktree, ['commit', '-m', card.id])
+  const merge = mergeToDev(root, branch, card.id)
+  db.prepare('update cards set status = ?, merge_commit = ?, in_dev = 1 where id = ?').run(
+    'done',
+    merge,
+    card.id,
+  )
+  waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'test: package conflict' })
+
+  // main уходит вперёд независимо: тот же файл, другая строка.
+  mkdirSync(join(root, 'src'), { recursive: true })
+  writeFileSync(join(root, 'src', 'conflict.txt'), 'main\n')
+  runGit(root, ['add', '.'])
+  runGit(root, ['commit', '-m', 'main side'])
+  const before = runGit(root, ['rev-parse', 'HEAD'])
+
+  assert.throws(
+    () => release(db, root, 'owner', { package: 'content' }),
+    /конфликт переноса/,
+  )
+  assert.equal(runGit(root, ['rev-parse', 'HEAD']), before)
+  assert.equal(runGit(root, ['show', 'main:src/conflict.txt']).trim(), 'main')
+})
+
+test('release ждёт приёмку владельцем и проходит после accept', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("update cards set status = 'acceptance', done_at = null where id = ?").run(card.id)
+
+  assert.throws(() => release(db, root, 'owner'), /приёмки/)
+  acceptCard(db, { id: card.id, actor: 'owner' })
+  assert.equal(release(db, root, 'owner').commit.length, 40)
+})
+
+test('release ставит тег версии и требует bump перед повторным релизом', (t) => {
   const { root, db } = repoBoard(t)
   merged(root, db, 'done', 'developer')
 
@@ -293,9 +415,28 @@ test('release ставит тег версии, повторный release не 
   ).version
   const tags = runGit(root, ['tag', '--list'])
   assert.match(tags, new RegExp(`^v${version.replace(/\./g, '\\.')}$`, 'm'))
+  assert.equal(runGit(root, ['rev-parse', `v${version}^{commit}`]).trim(), first.commit)
 
   const second = release(db, root, 'owner')
   assert.ok(second.commit)
   const after = runGit(root, ['tag', '--list']).trim().split('\n').filter(Boolean)
   assert.equal(after.filter((tag) => tag === `v${version}`).length, 1)
+})
+
+test('release с package.json требует версию новее последнего тега', (t) => {
+  const { root, db } = repoBoard(t)
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'host', version: '1.4.7' }))
+  runGit(root, ['add', 'package.json'])
+  runGit(root, ['commit', '-m', 'host package'])
+  merged(root, db, 'done', 'developer')
+
+  release(db, root, 'owner')
+  runGit(root, ['checkout', 'dev'])
+  writeFileSync(join(root, 'extra.txt'), 'x\n')
+  runGit(root, ['add', '.'])
+  runGit(root, ['commit', '-m', 'extra dev change'])
+  runGit(root, ['checkout', 'main'])
+  const mainBefore = runGit(root, ['rev-parse', 'main'])
+  assert.throws(() => release(db, root, 'owner'), /не новее/)
+  assert.equal(runGit(root, ['rev-parse', 'main']), mainBefore)
 })

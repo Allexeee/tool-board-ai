@@ -11,6 +11,7 @@ import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import {
   addFinding,
+  hasReviewVerdict,
   listReviewCards,
   revalidateDependents,
   submitVerdict,
@@ -65,7 +66,7 @@ test('reopen с критической находкой: карточка ждё
   assert.equal(result.findings[0].originCardId, card.id)
   assert.deepEqual(listDeps(db, card.id), [result.findings[0].id])
 
-  assert.throws(() => release(db, root, 'owner'), /критич/)
+  assert.throws(() => release(db, root, 'owner'), /находк/)
 })
 
 test('done с important/other не блокирует release, critical — блокирует', (t) => {
@@ -97,7 +98,7 @@ test('done с important/other не блокирует release, critical — бл
   assert.equal(result.findings[0].severity, 'critical')
 
   // critical находка открыта — release блокируется
-  assert.throws(() => release(db, root, 'owner'), /критич/)
+  assert.throws(() => release(db, root, 'owner'), /находк/)
 
   // закрываем находку — release проходит
   db.prepare("update cards set status = 'done' where id = ?").run(result.findings[0].id)
@@ -453,6 +454,32 @@ test('review submit без acceptance сохраняет null', (t) => {
   assert.equal(row.acceptance, null)
 })
 
+test('лимит реревью из профиля: 0 запрещает, 3 разрешает', (t) => {
+  const { db } = board(t)
+  const first = seedCard(db, { phase: 'task', status: 'review' })
+  assert.throws(
+    () =>
+      submitVerdict(db, {
+        cardId: first.id,
+        reviewer: 'reviewer-1',
+        verdict: 'reopen',
+        note: 'x',
+        reopensLimit: 0,
+      }),
+    /лимит/,
+  )
+
+  const second = seedCard(db, { phase: 'task', status: 'review' })
+  const reopened = submitVerdict(db, {
+    cardId: second.id,
+    reviewer: 'reviewer-1',
+    verdict: 'reopen',
+    note: 'x',
+    reopensLimit: 3,
+  })
+  assert.equal(reopened.card.status, 'ready')
+})
+
 test('waiveReview: только владелец, причина, идемпотентность', (t) => {
   const { db } = board(t)
   const card = seedCard(db, { phase: 'task', status: 'done' })
@@ -474,4 +501,32 @@ test('waiveReview: только владелец, причина, идемпот
   waiveReview(db, { cardId: card.id, actor: 'owner', reason: 'повтор' })
   events = listEvents(db, card.id).filter((event) => event.type === 'card.review_waived')
   assert.equal(events.length, 1)
+})
+
+test('hasReviewVerdict: старый вердикт не считается после нового finish', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const card = seedCard(board.db, { phase: 'task', status: 'done' })
+  const finishEvent = (at: string) =>
+    board.db
+      .prepare(
+        "insert into events (at, type, actor, subject) values (?, 'card.finished', 'x', ?)",
+      )
+      .run(at, card.id)
+  const review = (at: string) =>
+    board.db
+      .prepare(
+        "insert into reviews (card_id, reviewer, verdict, at, kind) values (?, 'r', 'done', ?, 'run')",
+      )
+      .run(card.id, at)
+
+  finishEvent('2026-01-01T00:00:00.000Z')
+  review('2026-01-02T00:00:00.000Z')
+  assert.equal(hasReviewVerdict(board.db, card.id), true)
+
+  finishEvent('2026-01-03T00:00:00.000Z')
+  assert.equal(hasReviewVerdict(board.db, card.id), false)
+
+  review('2026-01-04T00:00:00.000Z')
+  assert.equal(hasReviewVerdict(board.db, card.id), true)
 })

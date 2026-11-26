@@ -7,6 +7,7 @@ import { addDep, refreshReadiness } from './deps.ts'
 import { appendEvent, listEvents } from './events.ts'
 import { insertIntoQueue, moveCard } from './queue.ts'
 import { listSteps } from './steps.ts'
+import { isAncestor, refreshMergeState } from './git.ts'
 import type { Card, Severity } from './types.ts'
 
 /** Находка ревью §9.6: severity + текст; skill/scope перекрывают наследуемое. */
@@ -26,26 +27,192 @@ export interface AddFindingInput {
   scope?: string[]
 }
 
-/** Есть ли у карточки вердикт run review done. */
+/** Есть ли у карточки вердикт run review done после последней сдачи. */
 export function hasReviewVerdict(db: DatabaseSync, cardId: string): boolean {
+  const lastFinish = (
+    db
+      .prepare(
+        "select max(at) as at from events where subject = ? and type = 'card.finished'",
+      )
+      .get(cardId) as { at: string | null } | undefined
+  )?.at
+  if (!lastFinish) {
+    return (
+      db
+        .prepare(
+          "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' limit 1",
+        )
+        .get(cardId) !== undefined
+    )
+  }
   return (
     db
       .prepare(
-        "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' limit 1",
+        "select 1 as found from reviews where card_id = ? and kind = 'run' and verdict = 'done' and at >= ? limit 1",
       )
-      .get(cardId) !== undefined
+      .get(cardId, lastFinish) !== undefined
   )
 }
 
-/** Владелец явно отказался от ревью: есть событие card.review_waived. */
+/** Владелец явно отказался от ревью: событие card.review_waived, в том числе по старому ID. */
 export function hasReviewWaiver(db: DatabaseSync, cardId: string): boolean {
+  const card = getCard(db, cardId)
+  const ids = [cardId, ...(card?.legacyIds ?? [])]
+  const placeholders = ids.map(() => '?').join(', ')
   return (
     db
       .prepare(
-        "select 1 as found from events where subject = ? and type = 'card.review_waived' limit 1",
+        `select 1 as found from events
+         where type = 'card.review_waived' and subject in (${placeholders}) limit 1`,
       )
-      .get(cardId) !== undefined
+      .get(...ids) !== undefined
   )
+}
+
+/** Карточка в пакете: ID, заголовок и merge-коммит. */
+export interface PackageCard {
+  id: string
+  title: string
+  commit: string
+}
+
+/** Один проход пакетного ревью: что смотрели, чем закончилось. */
+export interface ReviewPackage {
+  id: number
+  at: string
+  actor: string
+  since: string | null
+  verdict: 'done' | 'reopen'
+  note: string | null
+  cards: PackageCard[]
+  commits: string[]
+  findings: FindingInput[]
+}
+
+interface PackageRow {
+  id: number
+  at: string
+  actor: string
+  since: string | null
+  verdict: string
+  note: string | null
+  cards: string
+  commits: string
+  findings: string
+}
+
+const toPackage = (row: PackageRow): ReviewPackage => ({
+  id: row.id,
+  at: row.at,
+  actor: row.actor,
+  since: row.since,
+  verdict: row.verdict === 'reopen' ? 'reopen' : 'done',
+  note: row.note,
+  cards: JSON.parse(row.cards) as PackageCard[],
+  commits: JSON.parse(row.commits) as string[],
+  findings: JSON.parse(row.findings) as FindingInput[],
+})
+
+/** Коммит уже прошёл пакетное ревью с вердиктом done. */
+export function packageCovers(db: DatabaseSync, commit: string): boolean {
+  return (
+    db
+      .prepare(
+        `select 1 as found from review_packages
+         where verdict = 'done'
+           and exists (select 1 from json_each(review_packages.commits) where json_each.value = ?)
+         limit 1`,
+      )
+      .get(commit) !== undefined
+  )
+}
+
+export function listPackages(db: DatabaseSync): ReviewPackage[] {
+  const rows = db
+    .prepare('select * from review_packages order by id')
+    .all() as unknown as PackageRow[]
+  return rows.map(toPackage)
+}
+
+/**
+ * Состав следующего пакета: done-карточки в dev вне main, коммиты которых
+ * ещё не покрыты проходом с вердиктом done. `since` заменяет базу main.
+ */
+export function collectPackage(
+  db: DatabaseSync,
+  root: string,
+  options: { since?: string | null } = {},
+): PackageCard[] {
+  const since = options.since?.trim() || null
+  const cards = listCards(db)
+    .filter((card) => card.status === 'done' && card.mergeCommit !== null && card.revertedAt === null)
+    .map((card) => refreshMergeState(db, root, card))
+    .filter((card) =>
+      card.inDev && (since ? !isAncestor(root, card.mergeCommit!, since) : !card.inMain),
+    )
+    .filter((card) => !packageCovers(db, card.mergeCommit!))
+    .sort((left, right) => left.id.localeCompare(right.id))
+
+  return cards.map((card) => ({ id: card.id, title: card.title, commit: card.mergeCommit! }))
+}
+
+export interface SubmitPackageInput {
+  actor: string
+  verdict: 'done' | 'reopen'
+  note?: string | null
+  since?: string | null
+  cards: PackageCard[]
+  findings?: FindingInput[]
+}
+
+/** Записывает проход пакета одной строкой: карточки, коммиты, вердикт, находки. */
+export function submitPackage(db: DatabaseSync, input: SubmitPackageInput): ReviewPackage {
+  if (input.cards.length === 0) {
+    throw new UserError(2, 'пакет ревью пуст: в dev нет непокрытых done-карточек')
+  }
+  return tx(db, () => {
+    const at = nowIso()
+    const commits = [...new Set(input.cards.map((card) => card.commit))]
+    const findings = input.findings ?? []
+    const result = db
+      .prepare(
+        `insert into review_packages (at, actor, since, verdict, note, cards, commits, findings)
+         values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        at,
+        input.actor,
+        input.since ?? null,
+        input.verdict,
+        input.note ?? null,
+        JSON.stringify(input.cards),
+        JSON.stringify(commits),
+        JSON.stringify(findings),
+      )
+    const id = Number(result.lastInsertRowid)
+    appendEvent(db, {
+      type: 'review.package',
+      actor: input.actor,
+      subject: `package/${id}`,
+      note: input.note ?? undefined,
+      after: {
+        verdict: input.verdict,
+        cards: input.cards.map((card) => card.id),
+        commits,
+      },
+    })
+    return {
+      id,
+      at,
+      actor: input.actor,
+      since: input.since ?? null,
+      verdict: input.verdict,
+      note: input.note ?? null,
+      cards: input.cards,
+      commits,
+      findings,
+    }
+  })
 }
 
 /** Явный отказ владельца от ревью старой карточки: событие с причиной. */
@@ -83,6 +250,8 @@ export interface SubmitVerdictInput {
   findings?: FindingInput[]
   planCompliance?: 'done' | 'failed'
   acceptance?: 'done' | 'failed'
+  /** Лимит реревью для не-владельца; -1 — без лимита. */
+  reopensLimit?: number
   mode?: 'self' | 'subagent'
 }
 
@@ -210,8 +379,13 @@ export function submitVerdict(
     if (listSteps(db, card.id).length > 0 && input.planCompliance === undefined) {
       throw new UserError(3, 'у карточки есть шаги плана: укажите --plan done|failed')
     }
-    if (verdict === 'reopen' && card.reviewReopens >= 1 && reviewer !== OWNER) {
-      throw new UserError(2, `карточка ${card.id}: один reopen уже был, нужно решение владельца`)
+    if (
+      verdict === 'reopen' &&
+      reviewer !== OWNER &&
+      (input.reopensLimit ?? 1) >= 0 &&
+      card.reviewReopens >= (input.reopensLimit ?? 1)
+    ) {
+      throw new UserError(2, `карточка ${card.id}: лимит реревью исчерпан, нужно решение владельца`)
     }
 
     const findings = (input.findings ?? []).map((item) =>
@@ -242,14 +416,16 @@ export function submitVerdict(
 
     const at = nowIso()
     if (verdict === 'done') {
+      const next = card.ownerAcceptance ? 'acceptance' : 'done'
       db.prepare('update cards set status = ?, done_at = ?, updated_at = ? where id = ?').run(
-        'done',
-        at,
+        next,
+        next === 'done' ? at : null,
         at,
         card.id,
       )
       if (card.runId) {
-        db.prepare("update run_cards set status = 'reviewed' where run_id = ? and card_id = ?").run(
+        db.prepare('update run_cards set status = ? where run_id = ? and card_id = ?').run(
+          next === 'acceptance' ? 'acceptance' : 'reviewed',
           card.runId,
           card.id,
         )

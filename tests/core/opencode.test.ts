@@ -115,6 +115,13 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   assert.match(plugin, /board_now/)
   assert.match(plugin, /board_setup/)
   assert.match(plugin, /name: 'setup'/)
+  assert.match(plugin, /name: 'idea'/)
+  assert.match(plugin, /ideaArgs/)
+  assert.match(plugin, /name: 'tag'/)
+  assert.match(plugin, /tagArgs/)
+  assert.match(plugin, /name: 'acceptance'/)
+  assert.match(plugin, /acceptanceArgs/)
+  assert.match(plugin, /input\.reject/)
   assert.match(plugin, /'setup', '--show'/)
   assert.match(plugin, /review-after-run/)
   assert.match(plugin, /no-review-after-run/)
@@ -153,10 +160,16 @@ test('плагин держит правила отчёта в системно�
     'Перехожу к {ID}',
     'только «Сделал»',
     'Завершил {RUN}',
-    'Ревью ожидают задачи',
-    'если в review что-то есть',
-    'Ревью сейчас или до релиза?',
-    'если очередь не пуста',
+    'Что сделано',
+    'Решения, которые я принял сам',
+    'Решений не принимал',
+    'Предлагаю дальше',
+    'Утверждаешь? Тогда',
+    '7–10 карточк',
+    'больше 10',
+    'Настоятельно рекомендую',
+    'Ран не прерываем',
+    'только важное для человека',
     'до следующего вызова инструмента',
     'не заменяет',
     'не пиши',
@@ -482,15 +495,27 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-work'), /две строки/)
   assert.match(read('board-work'), /Перехожу к \{ID\}/)
   assert.match(read('board-run'), /Завершил \{RUN\}/)
-  assert.match(read('board-run'), /1\. \{ID\}/)
-  assert.match(read('board-run'), /Ревью ожидают задачи/)
-  assert.match(read('board-run'), /если в `review` что-то есть/)
-  assert.match(read('board-run'), /Ревью сейчас или до релиза\?/)
-  assert.match(read('board-run'), /если очередь не пуста/)
-  assert.match(read('board-run'), /Следующий Run/)
-  assert.match(read('board-run'), /Запустить следующий Run\?/)
+  assert.match(read('board-run'), /Что сделано/)
+  assert.match(read('board-run'), /Решения, которые я принял сам/)
+  assert.match(read('board-run'), /Решений не принимал/)
+  assert.doesNotMatch(read('board-run'), /Ревью ожидают задачи/)
+  assert.match(read('board-run'), /Предлагаю дальше/)
+  assert.match(read('board-run'), /Утверждаешь\? Тогда/)
+  assert.match(read('board-run'), /7–10 карточек/)
+  assert.match(read('board-run'), /больше 10/)
+  assert.match(read('board-run'), /Настоятельно рекомендую/)
+  assert.match(read('board-run'), /Ран не прерываем/)
   assert.match(read('board-work'), /первая карточка забега — без «Сделал»/)
   assert.match(read('board-work'), /это шум/)
+  assert.match(read('board-work'), /все тесты прошли/)
+  assert.doesNotMatch(read('board-work'), /suite/)
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+  assert.match(agents, /Ревьюер закончил работу/)
+  assert.match(agents, /Ревью обнаружило n критичных/)
+  assert.match(agents, /не пиши «suite»/)
+  const review = readFileSync(join(root, '.opencode', 'command', 'review.md'), 'utf8')
+  assert.match(review, /Ревьюер закончил работу/)
+  assert.match(review, /Находки в чате не перечисляй/)
   assert.match(read('board-spec'), /reviewRequired/)
   assert.match(read('board-run'), /не больше 3/)
   assert.match(read('board-run'), /только части только что разобранной/)

@@ -8,6 +8,8 @@ import { openDb } from '../../src/core/db.ts'
 import { runGit } from '../../src/core/git.ts'
 import { initProject } from '../../src/core/project.ts'
 import { getActiveRun, listRunCards } from '../../src/core/runs.ts'
+import { updateSettings } from '../../src/core/settings.ts'
+import { recordSpecReview } from '../../src/core/spec-review.ts'
 import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { commitGenerated, makeRepo } from '../helpers/repo.ts'
 
@@ -139,4 +141,42 @@ test('touch продлевает lease через CLI', (t) => {
   const touched = json(fixture.root, ['touch', card.id, '--as', 'developer'])
   assert.ok((touched.leaseUntil as string) > '2000-01-01T00:00:00.000Z')
   assert.equal(getActiveRun(fixture.db, 'developer')!.leaseUntil, touched.leaseUntil)
+})
+
+test('take: 400-словный spec требует spec review subagent', (t) => {
+  const repo = makeRepo()
+  initProject(repo.root)
+  commitGenerated(repo.root)
+  const db = openDb(join(repo.root, '.board', 'board.db'))
+  t.after(() => {
+    db.close()
+    repo.close()
+  })
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  updateSettings(repo.root, {
+    reviewer: { model: 'opencode-go/deepseek-v4.1-flash' },
+    review: { profile: 'default' },
+  })
+
+  const card = seedCard(db, {
+    phase: 'request',
+    status: 'new',
+    skill: 'dev',
+    importance: 2,
+    urgency: 2,
+    scope: ['src/**'],
+  })
+  const started = run(repo.root, ['run', 'start', '--cards', card.id, '--as', 'developer'])
+  assert.equal(started.code, 0, started.err)
+  const shaped = run(repo.root, ['take', card.id, '--as', 'developer'])
+  assert.equal(shaped.code, 0, shaped.err)
+
+  const words = Array.from({ length: 400 }, () => 'слово').join(' ')
+  db.prepare('update cards set body = ?, acceptance = ? where id = ?').run(words, 'ok', card.id)
+  // Self-ревью есть; если take не передаст текст spec, гейт останется self и пропустит.
+  recordSpecReview(db, { cardId: card.id, reviewer: 'reviewer', mode: 'self', verdict: 'done' })
+
+  const result = run(repo.root, ['take', card.id, '--as', 'developer'])
+  assert.equal(result.code, 2, result.err)
+  assert.match(result.err, /субагента/)
 })

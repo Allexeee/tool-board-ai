@@ -154,6 +154,15 @@ async function withJson(result, fn) {
 
 function cardArgs(input) {
   const a = input.action
+  if (a === 'accept') {
+    const args = ['card', 'accept']
+    if (input.id) args.push(input.id)
+    if (input.reject === true) args.push('--reject')
+    flag(args, 'reason', input.reason)
+    flag(args, 'note', input.note)
+    flag(args, 'as', input.as)
+    return args
+  }
   if (a === 'step' || a === 'ref' || a === 'dep' || a === 'scope') {
     const args = ['card', a, input.sub]
     if (input.id) args.push(input.id)
@@ -191,6 +200,9 @@ function cardArgs(input) {
     if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (input.new_group) args.push('--new-group')
     flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
@@ -211,6 +223,9 @@ function cardArgs(input) {
     if (input.urgency !== undefined) args.push('--urgency', String(input.urgency))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
     if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
     if (input.clear_tags) args.push('--clear-tags')
@@ -312,6 +327,69 @@ function backupArgs(input) {
   return args
 }
 
+function ideaArgs(input) {
+  const args = ['idea', input.action]
+  const a = input.action
+  if (a === 'add') {
+    if (input.text) args.push(String(input.text))
+    flag(args, 'title', input.title)
+    flag(args, 'as', input.as)
+  } else if (a === 'edit') {
+    if (input.id) args.push(input.id)
+    flag(args, 'text', input.text)
+    flag(args, 'title', input.title)
+    flag(args, 'as', input.as)
+  } else if (a === 'drop') {
+    if (input.id) args.push(input.id)
+    flag(args, 'as', input.as)
+  }
+  return args
+}
+
+function acceptanceArgs(input) {
+  const args = ['acceptance', input.action]
+  if (input.action === 'check') {
+    if (input.id) args.push(input.id)
+    return args
+  }
+  if (input.action === 'rule') {
+    if (input.sub) args.push(input.sub)
+    if (input.name) args.push(input.name)
+    for (const key of [
+      'include_group',
+      'include_tag',
+      'include_skill',
+      'include_path',
+      'exclude_group',
+      'exclude_tag',
+      'exclude_skill',
+      'exclude_path',
+    ]) {
+      const values = input[key]
+      if (Array.isArray(values)) {
+        for (const value of values) args.push(`--${key.replace('_', '-')}`, String(value))
+      }
+    }
+  }
+  return args
+}
+
+function tagArgs(input) {
+  const args = ['tag', input.action]
+  const a = input.action
+  if (a === 'add') {
+    if (input.name) args.push(String(input.name))
+    flag(args, 'description', input.description)
+  } else if (a === 'rename') {
+    if (input.name) args.push(String(input.name))
+    if (input.to) args.push(String(input.to))
+  } else if (a === 'remove') {
+    if (input.name) args.push(String(input.name))
+  }
+  flag(args, 'as', input.as)
+  return args
+}
+
 function reviewArgs(input) {
   const args = ['review', input.action]
   const a = input.action
@@ -332,6 +410,13 @@ function reviewArgs(input) {
   } else if (a === 'waive') {
     if (input.id) args.push(input.id)
     flag(args, 'reason', input.reason)
+    flag(args, 'as', input.as)
+  } else if (a === 'package') {
+    flag(args, 'since', input.since)
+    flag(args, 'verdict', input.verdict)
+    flag(args, 'note', input.note)
+    flag(args, 'reviewer', input.reviewer)
+    flag(args, 'findings', input.findings)
     flag(args, 'as', input.as)
   }
   return args
@@ -384,7 +469,7 @@ export default Plugin.define({
       })
       event.system.push({
         type: 'text',
-        text: 'Отчёт по ходу работы обязателен: каждое событие — отдельным сообщением сразу после него, до следующего вызова инструмента; финальный ответ эти сообщения не заменяет. «Беру в работу (n)» — на старте забега. На take — «Приступаю к {ID}: шаги 1..N». После finish — «Сделал {ID}: …» и на следующей строке «Перехожу к {ID}: …»; для последней карточки забега — только «Сделал». Первая карточка забега — без «Сделал» до её завершения. Итог забега: «Завершил {RUN}.» и список карточек; затем блок «Ревью ожидают задачи (n):» со списком ID и вопросом «Ревью сейчас или до релиза?» — только если в review что-то есть; затем «Следующий Run:» — только если очередь не пуста; последняя строка — «Запустить следующий Run?». Зелёные тесты, doctor, typecheck и номера коммитов в чат не пиши — только если упало.',
+        text: 'Отчёт по ходу работы обязателен: каждое событие — отдельным сообщением сразу после него, до следующего вызова инструмента; финальный ответ эти сообщения не заменяет. «Беру в работу (n)» — на старте забега. На take — «Приступаю к {ID}: шаги 1..N». После finish — «Сделал {ID}: …» и на следующей строке «Перехожу к {ID}: …»; для последней карточки забега — только «Сделал». Первая карточка забега — без «Сделал» до её завершения. Итог забега: «Завершил {RUN}.»; затем «Что сделано:» и короткий список человеческим языком — что нового и что изменилось, только важное для человека; затем «Решения, которые я принял сам:» и список решений агента (если решений нет — «Решений не принимал»); затем одно предложение действия: «Предлагаю дальше: …» и «Утверждаешь? Тогда …» (приёмка → при 7–10 карточках в review предложить ревью, больше 10 — Настоятельно рекомендую → следующий ран со списком ID; Ран не прерываем, ревью только после run end). Зелёные тесты, doctor, typecheck и номера коммитов в чат не пиши — только если упало.',
       })
     })
 
@@ -453,6 +538,8 @@ export default Plugin.define({
           urgency: { type: 'number' },
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
+          owner_acceptance: { type: 'boolean' },
+          reject: { type: 'boolean' },
           no_decisions: { type: 'boolean', description: 'submit: решений владельца нет' },
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
@@ -658,7 +745,7 @@ export default Plugin.define({
 
       editor.add({
         name: 'review',
-        description: 'Ревью: list|submit|finding|waive',
+        description: 'Ревью: list|package|submit|finding|waive',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
@@ -671,10 +758,57 @@ export default Plugin.define({
           plan: { type: 'string' },
           acceptance: { type: 'string' },
           reason: { type: 'string' },
+          since: { type: 'string' },
           as: { type: 'string' },
           mode: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, reviewArgs(input), context),
+      })
+
+      editor.add({
+        name: 'idea',
+        description: 'Идеи: add|list|edit|drop',
+        input: schema({
+          action: { type: 'string' },
+          id: { type: 'string' },
+          text: { type: 'string' },
+          title: { type: 'string' },
+          as: { type: 'string' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, ideaArgs(input), context),
+      })
+
+      editor.add({
+        name: 'tag',
+        description: 'Реестр тегов: add|list|rename|remove',
+        input: schema({
+          action: { type: 'string' },
+          name: { type: 'string' },
+          to: { type: 'string' },
+          description: { type: 'string' },
+          as: { type: 'string' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, tagArgs(input), context),
+      })
+
+      editor.add({
+        name: 'acceptance',
+        description: 'Приёмка владельцем: rule|check',
+        input: schema({
+          action: { type: 'string' },
+          sub: { type: 'string', description: 'rule: add|list|remove' },
+          id: { type: 'string' },
+          name: { type: 'string' },
+          include_group: { type: 'array', items: { type: 'string' } },
+          include_tag: { type: 'array', items: { type: 'string' } },
+          include_skill: { type: 'array', items: { type: 'string' } },
+          include_path: { type: 'array', items: { type: 'string' } },
+          exclude_group: { type: 'array', items: { type: 'string' } },
+          exclude_tag: { type: 'array', items: { type: 'string' } },
+          exclude_skill: { type: 'array', items: { type: 'string' } },
+          exclude_path: { type: 'array', items: { type: 'string' } },
+        }, ['action']),
+        execute: (input, context) => call(ctx, acceptanceArgs(input), context),
       })
 
       editor.add({

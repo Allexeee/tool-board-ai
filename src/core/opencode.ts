@@ -33,15 +33,22 @@ export const AGENTS_BLOCK = [
   '- После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.',
   '- Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.',
   '- «Открой/покажи бэклог» — `board backlog --open`; если доступен инструмент браузера, открой `docs/board/BACKLOG.html` в панели Review (`browser.preview`). В чат HTML не вставляй.',
+  '- Идеи — `board idea add|list|edit|drop` (или `board_idea`): карточки IDEA, вне очереди, мержа и ревью; в бэклоге отдельная таблица.',
+  '- Теги — реестр `board tag add|list|rename|remove` (или `board_tag`); на `card shape` теги берутся из дизайна задачи, `card tag add|remove` — точечно.',
+  '- Приёмка владельцем: флаг `owner_acceptance` и статус `acceptance`; правила — `board acceptance rule add|list|remove` и `check`; владелец закрывает `card accept` или отклоняет `--reject --reason`; релиз ждёт и ревью, и приёмку.',
   '- Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.',
   '- `writing-plans`, `executing-plans` и другие конкурирующие навыки superpowers в проекте выключены правами OpenCode: план — steps карточки, отдельного plan-файла нет.',
   '- `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.',
   '- Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).',
   '- Ревью идёт пакетом: ревьюер только читает, итоги прохода — `run note`. Первый проход полный; повторный — только дельта: исправлены ли находки и нет ли регрессий, новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь; other — сборник в `deferred`.',
+  '- Итоги ревью в чате — одной строкой: «Ревьюер закончил работу. Ревью обнаружило n критичных находок и n важных.» Затем — что устраняешь (все или только критичные) и куда вынес важные. Находки не перечисляй: они в `run note` и карточке.',
+  '- Перед релизом — `board review package`: пакет done-карточек dev вне main, проход записывается `--verdict done|reopen`. Release без пакета — только `--no-review --reason` владельца.',
+  '- В отчёте не пиши «suite»: «все тесты прошли» или «полный прогон тестов».',
   '- Ревьюер не гоняет тесты и не пишет в доску; его shell ограничен read-only командами, каждая команда — отдельный вызов.',
   '- Ревьюеры-субагенты работают на default-варианте `reviewer.model`; режимы задаёт `/setup`.',
   '- После `board init` сразу покажи мастер окном выбора: «Оставить умолчания / Поменять / Не сейчас». Умолчания — `board setup --defaults`; недостающих исполнителей и области — `board executor add` / `board group add`.',
   '- Коммит делаешь сам в ветке карточки; мерж в `dev` делает `finish`. `main` меняется только `release` владельцем.',
+  '- Версии — semver: `board bump patch|minor|major`; major — ломающие, minor — новые возможности, patch — исправления, документация и внутренние правки. `release` без версии новее последнего тега не проходит.',
   AGENTS_END,
 ].join('\n')
 
@@ -82,7 +89,7 @@ description: Доска: разобрать запрос в spec и утверд
 
 1. Запрос → разбор: \`board card shape <ID> --as <исполнитель> [--from card.json]\`.
 2. Решение владельца спрашивай **окном выбора** с 2–4 вариантами до записи spec; свой ответ владельца можно уточнить один раз. \`ask\` — асинхронный вопрос, если владельца нет; \`block\` — только если без ответа нельзя продолжать. Угадывать нельзя.
-3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. План (\`steps\`) при shape не пишется.
+3. Заполни **spec** (\`body\`): problem/why, результат, non-goals, ограничения, зависимости, риски и **критерии приёмки**. Теги — \`--tag\` из реестра, если дизайн задачи их предполагает; неизвестный тег сначала заводится \`board tag add\`. Приёмка владельцем — флаг \`--owner-acceptance\`, если дизайн задачи её требует. План (\`steps\`) при shape не пишется.
 4. Spec review: \`/spec-review\`. Режим — \`board card show <ID> --json\` → \`specReview.mode\`: \`none\` — не нужна, \`self\` — сам, \`subagent\` — \`board-reviewer\`. Результат: \`board card spec-review <ID> --mode self|subagent --verdict done|reopen --note "..."\`.
 5. Решений владельца нет — \`board card submit <ID> --as <исполнитель> --no-decisions\`: карточка сразу в очередь, отдельное утверждение не нужно.
 6. Решения нужны — \`board card submit <ID> --as <исполнитель>\` и \`card approve\` владельца после его ответа.
@@ -132,7 +139,7 @@ description: Доска: исполнить карточку — take, план 
 ## Проверки
 
 - На карточке — целевые тесты затронутых файлов и проверка типов проекта; полный прогон после каждой карточки не нужен.
-- Полный прогон — один раз, при сдаче bump-карточки перед релизом: её acceptance требует зелёный suite, там же фиксируется результат.
+- Полный прогон — один раз, при сдаче bump-карточки перед релизом: её acceptance требует, чтобы все тесты прошли; там же фиксируется результат.
 - Вне очереди полный прогон, если diff трогает общий каркас: настройки, жизненный цикл, git-слой, очередь, шаги.
 - Bump-карточка перед релизом обновляет и \`package-lock.json\`: версия в lockfile совпадает с \`package.json\`.
 
@@ -156,6 +163,8 @@ description: Доска: исполнить карточку — take, план 
 - critical и регрессии этого diff — чинятся сразу, карточка reopen.
 - important — finding-карточка \`board review finding <ID> --severity important --text "..."\` встаёт в очередь; release не блокирует, берётся следующим раном по приоритету.
 - other — один сборник \`review notes\` в \`deferred\`.
+- Перед релизом — \`board review package\`: пакет done-карточек dev вне main, проход записывается \`--verdict done|reopen\` и покрывает коммиты; release без пакета — \`--no-review --reason\` владельца.
+- Если карточка требует приёмки, вердикт \`done\` ведёт в \`acceptance\`; владелец закрывает \`board card accept\` или отклоняет \`--reject --reason\`. Релиз ждёт обе проверки.
 - Свою карточку не ревьюй: вердикт даёт свежий субагент. \`critical\` блокирует release.
 
 ## Правила
@@ -176,7 +185,7 @@ description: Доска: забег — «Ран», состав, порядок
 
 1. \`board run start --as <исполнитель> --cards <ID>,...\` (или \`--suggest 1|2|3\` — вариант new/improve/review). На старте не больше 3 карточек.
 2. \`board run next --as <исполнитель>\` — следующая карточка забега.
-3. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег; если \`reviewMode\` не \`none\`, запусти \`/review\`.
+3. \`board run end --as <исполнитель> [--review|--no-review]\` — закрыть забег; если \`reviewMode\` не \`none\`, запусти \`/review\`. Карточки в \`acceptance\` считаются сданными: забег закрывается, \`run next\` их не выдаёт.
 4. \`board run add <ID>\`, \`board run drop <ID>\` — состав забега.
 
 ## Ран
@@ -199,10 +208,14 @@ description: Доска: забег — «Ран», состав, порядок
 Одно сообщение на событие, не на команду; spec не пересказывать, сроки не обещать, о каждом вызове инструмента не отчитываться. События по самой карточке — в board-work.
 
 - \`run start\` — «Беру в работу (n)» и по 1–2 предложения на карточку: что будет сделано;
-- \`run end\` — «Завершил {RUN}.» и по строке на каждую карточку: «1. {ID} — что сделано», «2. …» и так далее;
-- пустая строка, затем «Ревью ожидают задачи (n):» и по строке на каждый ID, если в \`review\` что-то есть; последняя строка блока — «Ревью сейчас или до релиза?»;
-- пустая строка, затем «Следующий Run:» и заголовки карточек из очереди, по строке на карточку — только если очередь не пуста;
-- последняя строка — «Запустить следующий Run?».
+- \`run end\` — «Завершил {RUN}.»;
+- пустая строка, затем «Что сделано:» и короткий список человеческим языком: что нового и что изменилось; только важное для человека;
+- затем «Решения, которые я принял сам:» и список решений агента; если решений нет — «Решений не принимал»;
+- затем одно предложение действия: «Предлагаю дальше: …» и «Утверждаешь? Тогда …». Ран не прерываем: ревью предлагается только после \`run end\`, порог — 7 карточек в \`review\`.
+  - есть \`acceptance\` — ответить по задачам приёмки;
+  - иначе в \`review\` 7–10 карточек — предложить ревью; больше 10 — «Настоятельно рекомендую провести ревью (N ждут)»;
+  - иначе очередь не пуста — следующий ран со списком ID;
+  - иначе — дальше нечего.
 
 ## Пакет и проход ревью
 
@@ -383,6 +396,15 @@ async function withJson(result, fn) {
 
 function cardArgs(input) {
   const a = input.action
+  if (a === 'accept') {
+    const args = ['card', 'accept']
+    if (input.id) args.push(input.id)
+    if (input.reject === true) args.push('--reject')
+    flag(args, 'reason', input.reason)
+    flag(args, 'note', input.note)
+    flag(args, 'as', input.as)
+    return args
+  }
   if (a === 'step' || a === 'ref' || a === 'dep' || a === 'scope') {
     const args = ['card', a, input.sub]
     if (input.id) args.push(input.id)
@@ -420,6 +442,9 @@ function cardArgs(input) {
     if (Array.isArray(input.scope)) for (const path of input.scope) args.push('--scope', String(path))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (input.new_group) args.push('--new-group')
     flag(args, 'note', input.note)
     flag(args, 'skill', input.skill)
@@ -440,6 +465,9 @@ function cardArgs(input) {
     if (input.urgency !== undefined) args.push('--urgency', String(input.urgency))
     if (input.needs_merge !== undefined) args.push(input.needs_merge ? '--needs-merge' : '--no-needs-merge')
     if (input.review !== undefined) args.push(input.review ? '--review' : '--no-review')
+    if (input.owner_acceptance !== undefined) {
+      args.push(input.owner_acceptance ? '--owner-acceptance' : '--no-owner-acceptance')
+    }
     if (Array.isArray(input.scope)) for (const s of input.scope) args.push('--scope', String(s))
     if (Array.isArray(input.tags)) for (const tag of input.tags) args.push('--tag', String(tag))
     if (input.clear_tags) args.push('--clear-tags')
@@ -541,6 +569,69 @@ function backupArgs(input) {
   return args
 }
 
+function ideaArgs(input) {
+  const args = ['idea', input.action]
+  const a = input.action
+  if (a === 'add') {
+    if (input.text) args.push(String(input.text))
+    flag(args, 'title', input.title)
+    flag(args, 'as', input.as)
+  } else if (a === 'edit') {
+    if (input.id) args.push(input.id)
+    flag(args, 'text', input.text)
+    flag(args, 'title', input.title)
+    flag(args, 'as', input.as)
+  } else if (a === 'drop') {
+    if (input.id) args.push(input.id)
+    flag(args, 'as', input.as)
+  }
+  return args
+}
+
+function acceptanceArgs(input) {
+  const args = ['acceptance', input.action]
+  if (input.action === 'check') {
+    if (input.id) args.push(input.id)
+    return args
+  }
+  if (input.action === 'rule') {
+    if (input.sub) args.push(input.sub)
+    if (input.name) args.push(input.name)
+    for (const key of [
+      'include_group',
+      'include_tag',
+      'include_skill',
+      'include_path',
+      'exclude_group',
+      'exclude_tag',
+      'exclude_skill',
+      'exclude_path',
+    ]) {
+      const values = input[key]
+      if (Array.isArray(values)) {
+        for (const value of values) args.push(\`--\${key.replace('_', '-')}\`, String(value))
+      }
+    }
+  }
+  return args
+}
+
+function tagArgs(input) {
+  const args = ['tag', input.action]
+  const a = input.action
+  if (a === 'add') {
+    if (input.name) args.push(String(input.name))
+    flag(args, 'description', input.description)
+  } else if (a === 'rename') {
+    if (input.name) args.push(String(input.name))
+    if (input.to) args.push(String(input.to))
+  } else if (a === 'remove') {
+    if (input.name) args.push(String(input.name))
+  }
+  flag(args, 'as', input.as)
+  return args
+}
+
 function reviewArgs(input) {
   const args = ['review', input.action]
   const a = input.action
@@ -561,6 +652,13 @@ function reviewArgs(input) {
   } else if (a === 'waive') {
     if (input.id) args.push(input.id)
     flag(args, 'reason', input.reason)
+    flag(args, 'as', input.as)
+  } else if (a === 'package') {
+    flag(args, 'since', input.since)
+    flag(args, 'verdict', input.verdict)
+    flag(args, 'note', input.note)
+    flag(args, 'reviewer', input.reviewer)
+    flag(args, 'findings', input.findings)
     flag(args, 'as', input.as)
   }
   return args
@@ -613,7 +711,7 @@ export default Plugin.define({
       })
       event.system.push({
         type: 'text',
-        text: 'Отчёт по ходу работы обязателен: каждое событие — отдельным сообщением сразу после него, до следующего вызова инструмента; финальный ответ эти сообщения не заменяет. «Беру в работу (n)» — на старте забега. На take — «Приступаю к {ID}: шаги 1..N». После finish — «Сделал {ID}: …» и на следующей строке «Перехожу к {ID}: …»; для последней карточки забега — только «Сделал». Первая карточка забега — без «Сделал» до её завершения. Итог забега: «Завершил {RUN}.» и список карточек; затем блок «Ревью ожидают задачи (n):» со списком ID и вопросом «Ревью сейчас или до релиза?» — только если в review что-то есть; затем «Следующий Run:» — только если очередь не пуста; последняя строка — «Запустить следующий Run?». Зелёные тесты, doctor, typecheck и номера коммитов в чат не пиши — только если упало.',
+        text: 'Отчёт по ходу работы обязателен: каждое событие — отдельным сообщением сразу после него, до следующего вызова инструмента; финальный ответ эти сообщения не заменяет. «Беру в работу (n)» — на старте забега. На take — «Приступаю к {ID}: шаги 1..N». После finish — «Сделал {ID}: …» и на следующей строке «Перехожу к {ID}: …»; для последней карточки забега — только «Сделал». Первая карточка забега — без «Сделал» до её завершения. Итог забега: «Завершил {RUN}.»; затем «Что сделано:» и короткий список человеческим языком — что нового и что изменилось, только важное для человека; затем «Решения, которые я принял сам:» и список решений агента (если решений нет — «Решений не принимал»); затем одно предложение действия: «Предлагаю дальше: …» и «Утверждаешь? Тогда …» (приёмка → при 7–10 карточках в review предложить ревью, больше 10 — Настоятельно рекомендую → следующий ран со списком ID; Ран не прерываем, ревью только после run end). Зелёные тесты, doctor, typecheck и номера коммитов в чат не пиши — только если упало.',
       })
     })
 
@@ -682,6 +780,8 @@ export default Plugin.define({
           urgency: { type: 'number' },
           needs_merge: { type: 'boolean' },
           review: { type: 'boolean' },
+          owner_acceptance: { type: 'boolean' },
+          reject: { type: 'boolean' },
           no_decisions: { type: 'boolean', description: 'submit: решений владельца нет' },
           scope: { type: 'array', items: { type: 'string' } },
           tags: { type: 'array', items: { type: 'string' } },
@@ -887,7 +987,7 @@ export default Plugin.define({
 
       editor.add({
         name: 'review',
-        description: 'Ревью: list|submit|finding|waive',
+        description: 'Ревью: list|package|submit|finding|waive',
         input: schema({
           action: { type: 'string' },
           id: { type: 'string' },
@@ -900,10 +1000,57 @@ export default Plugin.define({
           plan: { type: 'string' },
           acceptance: { type: 'string' },
           reason: { type: 'string' },
+          since: { type: 'string' },
           as: { type: 'string' },
           mode: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, reviewArgs(input), context),
+      })
+
+      editor.add({
+        name: 'idea',
+        description: 'Идеи: add|list|edit|drop',
+        input: schema({
+          action: { type: 'string' },
+          id: { type: 'string' },
+          text: { type: 'string' },
+          title: { type: 'string' },
+          as: { type: 'string' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, ideaArgs(input), context),
+      })
+
+      editor.add({
+        name: 'tag',
+        description: 'Реестр тегов: add|list|rename|remove',
+        input: schema({
+          action: { type: 'string' },
+          name: { type: 'string' },
+          to: { type: 'string' },
+          description: { type: 'string' },
+          as: { type: 'string' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, tagArgs(input), context),
+      })
+
+      editor.add({
+        name: 'acceptance',
+        description: 'Приёмка владельцем: rule|check',
+        input: schema({
+          action: { type: 'string' },
+          sub: { type: 'string', description: 'rule: add|list|remove' },
+          id: { type: 'string' },
+          name: { type: 'string' },
+          include_group: { type: 'array', items: { type: 'string' } },
+          include_tag: { type: 'array', items: { type: 'string' } },
+          include_skill: { type: 'array', items: { type: 'string' } },
+          include_path: { type: 'array', items: { type: 'string' } },
+          exclude_group: { type: 'array', items: { type: 'string' } },
+          exclude_tag: { type: 'array', items: { type: 'string' } },
+          exclude_skill: { type: 'array', items: { type: 'string' } },
+          exclude_path: { type: 'array', items: { type: 'string' } },
+        }, ['action']),
+        execute: (input, context) => call(ctx, acceptanceArgs(input), context),
       })
 
       editor.add({
@@ -967,6 +1114,8 @@ subagent: false
    исправлены ли находки и нет ли регрессий; новых не ищет, полный прогон
    тестов не перезапускает.
 7. Если карточек нет — сообщи, что ревьюить нечего.
+8. В чат — итоги одной строкой: «Ревьюер закончил работу. Ревью обнаружило n критичных находок и n важных.» Дальше — что устраняешь (все или только критичные) и куда вынес важные. Находки в чате не перечисляй: они в \`run note\` и карточке.
+9. Перед релизом пакет done-карточек собирает \`board review package\`; проход записывается \`--verdict done|reopen --reviewer <ревьюер>\`.
 `
 
 export const SPEC_REVIEW_COMMAND_SOURCE = `---
@@ -1044,7 +1193,7 @@ ${permissions}
 Ты — свежий ревьюер. Не редактируй файлы и не создавай карточки:
 ни \`board review finding\`, ни \`board card add\` — это отклоняется правами, а не просьбой.
 
-Тесты не гоняй: их прогнал исполнитель, полный suite идёт перед релизом, CI — после push. Твой инструмент — чтение файлов и \`git diff\`.
+Тесты не гоняй: их прогнал исполнитель, полный прогон тестов идёт перед релизом, CI — после push. Твой инструмент — чтение файлов и \`git diff\`.
 Каждая команда — отдельный вызов: \`;\`, \`&&\` и \`|\` запрещены политикой.
 
 Проверяй acceptance, plan и код. Итоги прохода пиши одним блоком:

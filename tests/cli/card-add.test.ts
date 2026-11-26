@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
 import { listEvents } from '../../src/core/events.ts'
+import { updateSettings } from '../../src/core/settings.ts'
 
 const bin = resolve('bin/board.ts')
 
@@ -34,6 +35,52 @@ function json(dir: string, args: string[]) {
   return JSON.parse(result.out)
 }
 
+test('профиль card:never: add и edit сами пишут waiver', (t) => {
+  const dir = project(t)
+  const quiet = {
+    spec: 'self' as const,
+    specWords: 0,
+    card: 'never' as const,
+    reopens: 1,
+    run: 'none' as const,
+    findings: 'critical' as const,
+    package: true,
+  }
+  updateSettings(dir, { review: { profile: 'quiet', profiles: { quiet } } })
+
+  const added = json(dir, ['card', 'add', '--group', 'UI', '--title', 'тихая', '--skill', 'dev'])
+  assert.equal(added.reviewRequired, false)
+
+  const db = openDb(join(dir, '.board', 'board.db'))
+  try {
+    const waived = listEvents(db, added.id as string).filter(
+      (event) => event.type === 'card.review_waived',
+    )
+    assert.equal(waived.length, 1)
+    assert.match(waived[0].note ?? '', /профиль quiet/)
+
+    // edit --needs-merge под never тоже снимает ревью waiver'ом, а не молча.
+    db.prepare('update cards set review_required = 1 where id = ?').run(added.id)
+    db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(added.id)
+  } finally {
+    db.close()
+  }
+
+  const edited = json(dir, ['card', 'edit', added.id as string, '--needs-merge'])
+  assert.equal(edited.reviewRequired, false)
+
+  const after = openDb(join(dir, '.board', 'board.db'))
+  try {
+    const waived = listEvents(after, added.id as string).filter(
+      (event) => event.type === 'card.review_waived',
+    )
+    assert.equal(waived.length, 1)
+    assert.match(waived[0].note ?? '', /профиль quiet/)
+  } finally {
+    after.close()
+  }
+})
+
 test('card add: --no-review требует owner и причину, пишет waiver', (t) => {
   const dir = project(t)
 
@@ -60,6 +107,15 @@ test('card add: --no-review требует owner и причину, пишет w
   } finally {
     db.close()
   }
+})
+
+test('профиль max: карточка без merge всё равно в ревью', (t) => {
+  const dir = project(t)
+  json(dir, ['setup', '--profile', 'max'])
+  const card = json(dir, [
+    'card', 'add', '--group', 'UI', '--title', 'x', '--skill', 'dev', '--no-needs-merge',
+  ])
+  assert.equal(card.reviewRequired, true)
 })
 
 test('card add заводит запрос и печатает его в json', (t) => {
@@ -242,8 +298,16 @@ test('card list фильтрует и печатает карточки', (t) =>
   assert.match(human.out, /new/)
 })
 
-test('card add и edit принимают теги', (t) => {
+test('card add и edit принимают теги из реестра', (t) => {
   const dir = project(t)
+  assert.equal(run(dir, ['tag', 'add', 'backend']).code, 0)
+
+  const unknown = run(dir, [
+    'card', 'add', '--group', 'UI', '--title', 't', '--skill', 'dev', '--tag', 'nope',
+  ])
+  assert.equal(unknown.code, 3)
+  assert.match(unknown.err, /не найден/)
+
   const added = json(dir, [
     'card', 'add', '--group', 'UI', '--title', 't', '--skill', 'dev',
     '--tag', 'New', '--tag', 'backend',

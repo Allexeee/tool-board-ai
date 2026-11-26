@@ -26,6 +26,7 @@ export interface CardFilter {
   holder?: string
   group?: string
   tag?: string
+  acceptance?: boolean
 }
 
 export interface CardPatch {
@@ -37,6 +38,8 @@ export interface CardPatch {
   urgency?: number | null
   needsMerge?: boolean
   reviewRequired?: boolean
+  ownerAcceptance?: boolean
+  ownerAcceptanceManual?: boolean
   scope?: string[]
   tags?: string[]
   note?: string | null
@@ -54,6 +57,7 @@ const STATUSES: readonly CardStatus[] = [
   'blocked',
   'deferred',
   'review',
+  'acceptance',
   'done',
   'cancelled',
 ]
@@ -85,6 +89,7 @@ interface Row {
   plan_waived: number
   scope: string
   tags: string
+  legacy_ids: string
   severity: string | null
   origin_card_id: string | null
   summary: string | null
@@ -95,6 +100,9 @@ interface Row {
   spec_rev: number
   review_reopens: number
   merge_commit: string | null
+  main_commit: string | null
+  owner_acceptance: number
+  owner_acceptance_manual: number
   in_dev: number
   in_main: number
   reverted_at: string | null
@@ -115,6 +123,7 @@ const toCard = (row: Row): Card => ({
   id: row.id,
   group: row.group_prefix,
   groupSeq: row.group_seq,
+  legacyIds: JSON.parse(row.legacy_ids) as string[],
   title: row.title,
   body: row.body,
   acceptance: row.acceptance,
@@ -139,6 +148,9 @@ const toCard = (row: Row): Card => ({
   specRev: row.spec_rev,
   reviewReopens: row.review_reopens,
   mergeCommit: row.merge_commit,
+  mainCommit: row.main_commit,
+  ownerAcceptance: row.owner_acceptance === 1,
+  ownerAcceptanceManual: row.owner_acceptance_manual === 1,
   inDev: row.in_dev === 1,
   inMain: row.in_main === 1,
   revertedAt: row.reverted_at,
@@ -290,9 +302,22 @@ export function getCard(db: DatabaseSync, id: string): Card | null {
   return row ? toCard(row) : null
 }
 
+/** Текущий ID по старому: ищет в legacy_ids после rekey. */
+export function resolveCardId(db: DatabaseSync, id: string): string | null {
+  if (getCard(db, id)) return id
+  const row = db
+    .prepare(
+      `select id from cards
+       where exists (select 1 from json_each(cards.legacy_ids) where json_each.value = ?)
+       limit 1`,
+    )
+    .get(id) as { id: string } | undefined
+  return row?.id ?? null
+}
+
 export function listCards(db: DatabaseSync, filter: CardFilter = {}): Card[] {
   const where: string[] = []
-  const params: string[] = []
+  const params: (string | number)[] = []
 
   if (filter.phase !== undefined) {
     const phases = filterValues(filter.phase, PHASES, 'фаза')
@@ -319,6 +344,10 @@ export function listCards(db: DatabaseSync, filter: CardFilter = {}): Card[] {
   if (filter.tag !== undefined) {
     where.push('exists (select 1 from json_each(cards.tags) where json_each.value = ?)')
     params.push(filter.tag)
+  }
+  if (filter.acceptance !== undefined) {
+    where.push('owner_acceptance = ?')
+    params.push(filter.acceptance ? 1 : 0)
   }
 
   const sql =
@@ -465,6 +494,20 @@ export function editCard(
       sets.push('note = ?')
       params.push(patch.note === null ? null : patch.note)
     }
+    if (patch.ownerAcceptance !== undefined) {
+      if (card.status === 'done' || card.status === 'cancelled') {
+        throw new UserError(
+          3,
+          `приёмку карточки ${card.id} нельзя менять в статусе ${card.status}`,
+        )
+      }
+      sets.push('owner_acceptance = ?')
+      params.push(patch.ownerAcceptance ? 1 : 0)
+    }
+    if (patch.ownerAcceptanceManual !== undefined) {
+      sets.push('owner_acceptance_manual = ?')
+      params.push(patch.ownerAcceptanceManual ? 1 : 0)
+    }
 
     if (sets.length === 0) return card
 
@@ -479,6 +522,121 @@ export function editCard(
     appendEvent(db, {
       type: 'card.edited',
       actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+    })
+    return updated
+  })
+}
+
+/** Тег идеи: карточка живёт вне очереди, мержа и ревью. */
+export const IDEA_TAG = 'idea'
+
+export function isIdeaCard(card: Card): boolean {
+  return card.tags.includes(IDEA_TAG)
+}
+
+function ideaTitle(text: string, title?: string): string {
+  const explicit = title?.trim()
+  if (explicit) return explicit
+  const first = text.trim().split(/\r?\n/)[0]?.trim() ?? ''
+  return first.length > 80 ? `${first.slice(0, 77)}…` : first
+}
+
+/** Идея: карточка группы IDEA, status deferred, без мержа и ревью. */
+export function addIdea(
+  db: DatabaseSync,
+  input: { text: string; title?: string; actor?: string },
+): Card {
+  return tx(db, () => {
+    const text = input.text?.trim() ?? ''
+    if (text === '') throw new UserError(3, 'нужен текст идеи')
+    const actor = input.actor?.trim() || 'owner'
+    const card = createCard(db, {
+      group: 'IDEA',
+      title: ideaTitle(text, input.title),
+      body: text,
+      skill: 'owner',
+      author: actor,
+      tags: [IDEA_TAG],
+      needsMerge: false,
+    })
+    db.prepare(
+      "update cards set status = 'deferred', review_required = 0, updated_at = ? where id = ?",
+    ).run(nowIso(), card.id)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, { type: 'idea.added', actor, subject: card.id, after: updated })
+    return updated
+  })
+}
+
+function requireIdea(db: DatabaseSync, id: string): Card {
+  const card = getCard(db, id)
+  if (!card || !isIdeaCard(card)) throw new UserError(3, `идея ${id} не найдена`)
+  return card
+}
+
+/** Активные идеи: deferred + тег idea, свежие сверху. */
+export function listIdeas(db: DatabaseSync): Card[] {
+  return listCards(db, { status: 'deferred', tag: IDEA_TAG }).sort((left, right) => {
+    const byTime = right.updatedAt.localeCompare(left.updatedAt)
+    return byTime !== 0 ? byTime : left.id.localeCompare(right.id)
+  })
+}
+
+export function editIdea(
+  db: DatabaseSync,
+  input: { id: string; text?: string; title?: string; actor?: string },
+): Card {
+  return tx(db, () => {
+    const card = requireIdea(db, input.id)
+    const sets: string[] = []
+    const params: string[] = []
+    if (input.text !== undefined) {
+      const text = input.text.trim()
+      if (text === '') throw new UserError(3, 'текст идеи пуст')
+      sets.push('body = ?')
+      params.push(text)
+    }
+    if (input.title !== undefined) {
+      const title = ideaTitle(input.text ?? card.body, input.title)
+      if (title === '') throw new UserError(3, 'заголовок идеи пуст')
+      sets.push('title = ?')
+      params.push(title)
+    }
+    if (sets.length === 0) return card
+
+    sets.push('updated_at = ?')
+    params.push(nowIso())
+    db.prepare(`update cards set ${sets.join(', ')} where id = ?`).run(...params, card.id)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'idea.edited',
+      actor: input.actor?.trim() || 'owner',
+      subject: card.id,
+      before: card,
+      after: updated,
+    })
+    return updated
+  })
+}
+
+/** drop идеи — отмена карточки; идеи нет в очереди и ревью, гасить нечего. */
+export function dropIdea(
+  db: DatabaseSync,
+  input: { id: string; actor?: string },
+): Card {
+  return tx(db, () => {
+    const card = requireIdea(db, input.id)
+    const at = nowIso()
+    db.prepare(
+      "update cards set status = 'cancelled', cancel_reason = ?, updated_at = ? where id = ?",
+    ).run('идея убрана', at, card.id)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'idea.dropped',
+      actor: input.actor?.trim() || 'owner',
       subject: card.id,
       before: card,
       after: updated,

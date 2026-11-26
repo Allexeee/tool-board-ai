@@ -10,6 +10,9 @@ export const COMMANDS_WITH_SUB = new Set([
   'term',
   'command',
   'review',
+  'idea',
+  'tag',
+  'acceptance',
 ])
 
 // Флаги CLI из спецификации §12. Неизвестный флаг — ошибка ввода (код 3).
@@ -22,11 +25,13 @@ const KNOWN_FLAGS = new Set([
   'findings', 'reviewer', 'run-size', 'worktree', 'suggest', 'cards', 'before',
   'top', 'bottom', 'mine', 'limit', 'all', 'by', 'force', 'fresh', 'no-merge', 'no-plan', 'new-group',
   'backlog-path', 'backlog-auto', 'no-backlog-auto', 'backlog-refresh', 'html', 'open',
-  'no-decisions', 'defaults', 'name',
+  'no-decisions', 'defaults', 'name', 'profile', 'merge', 'dry-run', 'since', 'package',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
   'large-spec', 'max-spec', 'branch-main', 'branch-dev', 'no-git', 'standalone', 'sync', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
-  'format', 'out', 'md', 'events',
+  'format', 'out', 'md', 'events', 'description', 'owner-acceptance', 'no-owner-acceptance', 'reject', 'acceptance-only',
+  'include-group', 'include-tag', 'include-skill', 'include-path',
+  'exclude-group', 'exclude-tag', 'exclude-skill', 'exclude-path',
 ])
 
 const BOOLEAN_FLAGS = new Set([
@@ -34,7 +39,8 @@ const BOOLEAN_FLAGS = new Set([
   'waive-dependents', 'done', 'reopen', 'top', 'bottom', 'mine', 'all', 'block',
   'force', 'fresh', 'no-merge', 'yes', 'show', 'refresh', 'review-after-run',
   'no-review-after-run', 'allow-downgrade', 'clear-tags', 'md', 'events', 'no-git', 'standalone', 'no-plan', 'new-group',
-  'backlog-auto', 'no-backlog-auto', 'html', 'open', 'no-decisions', 'defaults',
+  'backlog-auto', 'no-backlog-auto', 'html', 'open', 'no-decisions', 'defaults', 'merge', 'dry-run',
+  'owner-acceptance', 'no-owner-acceptance', 'reject', 'acceptance-only',
 ])
 
 export type FlagValue = string | boolean | string[]

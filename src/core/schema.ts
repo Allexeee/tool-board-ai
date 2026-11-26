@@ -1,6 +1,7 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
+import { nowIso } from './clock.ts'
 
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 11
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -22,6 +23,12 @@ create table groups (
   created_at text not null
 );
 
+create table tags (
+  name text primary key,
+  description text,
+  created_at text not null
+);
+
 create table cards (
   id text primary key,
   group_prefix text not null,
@@ -40,6 +47,7 @@ create table cards (
   plan_waived integer not null default 0,
   scope text not null default '[]',
   tags text not null default '[]',
+  legacy_ids text not null default '[]',
   severity text,
   origin_card_id text,
   summary text,
@@ -50,6 +58,9 @@ create table cards (
   spec_rev integer not null default 1,
   review_reopens integer not null default 0,
   merge_commit text,
+  main_commit text,
+  owner_acceptance integer not null default 0,
+  owner_acceptance_manual integer not null default 0,
   in_dev integer not null default 0,
   in_main integer not null default 0,
   reverted_at text,
@@ -173,6 +184,18 @@ create table reviews (
   plan_compliance text,
   acceptance text
 );
+
+create table review_packages (
+  id integer primary key autoincrement,
+  at text not null,
+  actor text not null,
+  since text,
+  verdict text not null,
+  note text,
+  cards text not null default '[]',
+  commits text not null default '[]',
+  findings text not null default '[]'
+);
 `
 
 /** Добавляет поля v2 к существующей базе v1 без пересоздания таблиц. */
@@ -214,6 +237,72 @@ const MIGRATE_V5_TO_V6 = `
 alter table reviews add column acceptance text;
 `
 
+/** Старые ID карточки после rekey: поиск и связь с ветками/коммитами. */
+const MIGRATE_V6_TO_V7 = `
+alter table cards add column legacy_ids text not null default '[]';
+`
+
+/** Проход пакетного ревью: карточки, коммиты, вердикт и находки одной записью. */
+const MIGRATE_V7_TO_V8 = `
+create table review_packages (
+  id integer primary key autoincrement,
+  at text not null,
+  actor text not null,
+  since text,
+  verdict text not null,
+  note text,
+  cards text not null default '[]',
+  commits text not null default '[]',
+  findings text not null default '[]'
+);
+`
+
+/** Пакетный релиз: коммит main, которым карточка попала в main через cherry-pick. */
+const MIGRATE_V8_TO_V9 = `
+alter table cards add column main_commit text;
+`
+
+/** Реестр тегов: свободные строки карточек получают словарь проекта. */
+const MIGRATE_V9_TO_V10 = `
+create table if not exists tags (
+  name text primary key,
+  description text,
+  created_at text not null
+);
+`
+
+/** Приёмка владельцем: флаг, ручной выбор и статус acceptance. */
+const MIGRATE_V10_TO_V11 = `
+alter table cards add column owner_acceptance integer not null default 0;
+alter table cards add column owner_acceptance_manual integer not null default 0;
+`
+
+/** Наполняет реестр служебными тегами и тегами существующих карточек. */
+function seedTags(db: DatabaseSync): void {
+  const hasCards = db
+    .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+    .get()
+  const hasTags = hasCards
+    ? (db.prepare('pragma table_info(cards)').all() as Array<{ name: string }>).some(
+        (row) => row.name === 'tags',
+      )
+    : false
+
+  const insert = db.prepare(
+    'insert or ignore into tags (name, description, created_at) values (?, null, ?)',
+  )
+  const at = nowIso()
+  for (const name of ['new', 'improve', 'review', 'idea']) insert.run(name, at)
+
+  if (!hasTags) return
+  const rows = db
+    .prepare('select distinct value from cards, json_each(cards.tags)')
+    .all() as Array<{ value: string }>
+  for (const row of rows) {
+    if (row.value.trim() !== '') insert.run(row.value.trim().toLowerCase(), at)
+  }
+}
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -248,16 +337,46 @@ export function migrate(db: DatabaseSync): number {
       db.exec(MIGRATE_V4_TO_V5)
     } else if (from === 4) {
       db.exec(MIGRATE_V4_TO_V5)
-    } else if (from !== 5) {
+    } else if (
+      from !== 5 &&
+      from !== 6 &&
+      from !== 7 &&
+      from !== 8 &&
+      from !== 9 &&
+      from !== 10
+    ) {
       throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     }
 
-    // Синтетические базы тестов могут не иметь reviews: тогда колонку некуда добавить.
+    // Синтетические базы тестов могут не иметь reviews/cards: тогда колонку некуда добавить.
     if (from >= 1 && from < 6) {
       const hasReviews = db
         .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'reviews'")
         .get()
       if (hasReviews) db.exec(MIGRATE_V5_TO_V6)
+    }
+    if (from >= 1 && from < 7) {
+      const hasCards = db
+        .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+        .get()
+      if (hasCards) db.exec(MIGRATE_V6_TO_V7)
+    }
+    if (from >= 1 && from < 8) db.exec(MIGRATE_V7_TO_V8)
+    if (from >= 1 && from < 9) {
+      const hasCards = db
+        .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+        .get()
+      if (hasCards) db.exec(MIGRATE_V8_TO_V9)
+    }
+    if (from < 10) {
+      db.exec(MIGRATE_V9_TO_V10)
+      seedTags(db)
+    }
+    if (from >= 1 && from < 11) {
+      const hasCards = db
+        .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+        .get()
+      if (hasCards) db.exec(MIGRATE_V10_TO_V11)
     }
 
     if (from === 1 || from === 2) {

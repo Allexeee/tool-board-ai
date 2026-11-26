@@ -247,6 +247,46 @@ test('init печатает мастер и proposal без TTY', (t) => {
   assert.equal(proposal.missing.groups, true)
 })
 
+test('setup --profile меняет профиль, --show печатает', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const updated = json(fixture.root, ['setup', '--profile', 'max'])
+  assert.equal((updated.review as { profile: string }).profile, 'max')
+
+  const shown = run(fixture.root, ['setup', '--show'])
+  assert.match(shown.out, /Профиль ревью: max/)
+})
+
+test('setup --show: high печатает эффективный профиль', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  json(fixture.root, ['setup', '--profile', 'high'])
+
+  const shown = run(fixture.root, ['setup', '--show'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /Профиль ревью: high/)
+  assert.match(shown.out, /Ревью spec: auto, порог 250 слов/)
+  assert.match(shown.out, /Ревью в конце забега: subagent/)
+  assert.match(shown.out, /Реревью: 2/)
+  assert.match(shown.out, /Находки: critical \+ important/)
+  assert.match(shown.out, /Пакет ревью: требуется/)
+  assert.doesNotMatch(shown.out, /Порог max/)
+})
+
+test('setup --show: custom сохраняет legacy-поля', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+  assert.equal(run(fixture.root, ['setup', '--spec-review', 'self']).code, 0)
+
+  const shown = run(fixture.root, ['setup', '--show'])
+  assert.equal(shown.code, 0, shown.err)
+  assert.match(shown.out, /Профиль ревью: custom/)
+  assert.match(shown.out, /Ревью spec: self/)
+  assert.match(shown.out, /Порог max: 1500 символов/)
+  assert.match(shown.out, /Ревью в конце забега:/)
+})
+
 test('setup --defaults: умолчания, developer один раз, бэклог собран', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)

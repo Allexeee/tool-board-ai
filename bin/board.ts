@@ -23,7 +23,7 @@ const HELP = `board — доска карточек для людей и аге�
                           --no-review-after-run
 
   executor add|list|edit|remove
-  group list|add             области проекта (префиксы карточек)
+  group list|add|rename     области проекта (префиксы карточек)
   card add|list|show|edit  карточки
   card shape|submit|spec-review|approve|amend|reject|verdict
   card done|cancel|reopen|defer|resume
@@ -38,8 +38,12 @@ const HELP = `board — доска карточек для людей и аге�
   decision add|list|supersede|obsolete
   term add|list|show
   command add|list
-  review list|finding|submit|waive
-  release / now / doctor / backup / export / sync
+  review list|package|finding|submit|waive
+  acceptance rule add|list|remove / check   правила приёмки владельцем
+  idea add|list|edit|drop   идеи: карточки вне очереди, мержа и ревью
+  tag add|list|rename|remove  реестр тегов карточек
+  release [--package <executor|skill>] [--no-review --reason "..."] / now / doctor / backup / export / sync
+  bump patch|minor|major  поднять версию проекта и CHANGELOG
   backlog [--out <path>] [--html] [--open]  md- или html-бэклог; --open — в браузере
 
   --json                  машинный вывод
@@ -76,11 +80,30 @@ const COMMAND_HELP: Record<string, string> = {
   'run note': 'board run note <RUN> --text "..." --as <ревьюер>',
   'queue move': 'board queue move <ID> --before <ID> | --top | --bottom',
   'group add': 'board group add <PREFIX> [--name <название>] [--as <id>]',
+  'group rename':
+    'board group rename <OLD> <NEW> [--merge] [--name <название>] [--dry-run] [--as <id>]',
   'review submit':
     'board review submit <ID> --plan done|failed [--acceptance done|failed] --verdict done|reopen --reviewer <id> --note "..."',
+  'review package':
+    'board review package [--since <ref>] [--verdict done|reopen --reviewer <id> --note "..." --findings findings.json]',
   'review waive': 'board review waive <ID> --reason "..." --as owner',
+  'idea add': 'board idea add "текст" [--title "..."] [--as <id>]',
+  'idea list': 'board idea list [--json]',
+  'idea edit': 'board idea edit <ID> [--text "..."] [--title "..."] [--as <id>]',
+  'idea drop': 'board idea drop <ID> [--as <id>]',
+  'tag add': 'board tag add <name> [--description "..."] [--as <id>]',
+  'tag list': 'board tag list [--json]',
+  'tag rename': 'board tag rename <old> <new> [--as <id>]',
+  'tag remove': 'board tag remove <name> [--as <id>]',
+  'card accept': 'board card accept <ID> [--note "..."] | --reject --reason "..." --as owner',
+  'acceptance rule':
+    'board acceptance rule add <name> [--include-group G] [--include-tag T] [--include-skill S] [--include-path P] [--exclude-tag T] ... | list | remove <name>',
+  'acceptance check': 'board acceptance check <ID>',
+  'card tag': 'board card tag add|remove|list <ID> [тег] [--as <id>]',
+  'release': 'board release [--package <executor|skill>] [--no-review --reason "..."] --as owner',
+  'bump': 'board bump patch|minor|major',
   setup:
-    'board setup [--show] [--defaults] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
+    'board setup [--show] [--defaults] [--profile auto|low|default|high|max|custom] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',
   backup: 'board backup [path]',
   export: 'board export [--format json|md] [--out path] [--md]',
   'sync push': 'board sync push — копия базы в приватный git',

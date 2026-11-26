@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildBacklog } from '../../src/core/backlog.ts'
+import { addIdea } from '../../src/core/cards.ts'
 import { renderBacklogPage } from '../../src/core/backlog-view.ts'
 import { makeBoard, seedCard } from '../helpers/board.ts'
 
@@ -16,8 +17,73 @@ test('buildBacklog: группы по навыку и человеческие �
     data.skills.map((section) => section.label),
     ['владельца', 'dev'],
   )
-  assert.equal(data.skills[1].rows[0].status, 'готов к работе')
+  assert.equal(data.skills[1].rows[0].status, 'в очереди')
   assert.equal(data.skills[0].rows[0].status, 'разбор')
+})
+
+test('renderBacklogPage: цвета статусов и легенда', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev' })
+  seedCard(board.db, { phase: 'task', status: 'review', skill: 'dev' })
+  seedCard(board.db, { phase: 'task', status: 'acceptance', skill: 'dev' })
+
+  const html = renderBacklogPage(buildBacklog(board.db))
+  assert.match(html, /class="legend"/)
+  assert.match(html, /dot status-ready/)
+  assert.match(html, /class="status-ready"/)
+  assert.match(html, /class="status-review"/)
+  assert.match(html, /class="status-acceptance"/)
+  assert.match(html, /tr\.status-ready/)
+  assert.match(html, /tr\.status-booked \{ --row: #34d399; \}/)
+  assert.match(html, /tr\.status-done \{ --row: #16a34a; \}/)
+})
+
+test('неизвестный статус не ломает бэклог', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const card = seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev' })
+  board.db.prepare("update cards set status = 'weird' where id = ?").run(card.id)
+
+  const data = buildBacklog(board.db)
+  const row = data.skills.flatMap((section) => section.rows).find((item) => item.id === card.id)
+  assert.equal(row?.status, 'weird')
+  assert.doesNotThrow(() => renderBacklogPage(data))
+})
+
+test('buildBacklog: waiting и blocked после доступных', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const ready = seedCard(board.db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    importance: 0,
+    urgency: 0,
+  })
+  const waiting = seedCard(board.db, {
+    phase: 'task',
+    status: 'waiting',
+    skill: 'dev',
+    importance: 3,
+    urgency: 3,
+  })
+
+  const section = buildBacklog(board.db).skills.find((item) => item.skill === 'dev')
+  assert.ok(section)
+  assert.equal(section.rows[0].id, ready.id)
+  assert.equal(section.rows[1].id, waiting.id)
+})
+
+test('renderBacklogPage: идеи в конце отдельной таблицей', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  addIdea(board.db, { text: 'Идея в html', actor: 'owner' })
+
+  const html = renderBacklogPage(buildBacklog(board.db))
+  assert.match(html, /<h2>Идеи<\/h2>/)
+  assert.match(html, /Идея в html/)
+  assert.ok(html.indexOf('Идея в html') > html.indexOf('Бэклог'))
 })
 
 test('renderBacklogPage: автообновление, кнопка и крупный шрифт', (t) => {
@@ -29,7 +95,7 @@ test('renderBacklogPage: автообновление, кнопка и круп�
   assert.match(html, /<html lang="ru">/)
   assert.match(html, /--bg: #0f0f10/)
   assert.match(html, /font: 16px\/1\.6/)
-  assert.match(html, /готов к работе/)
+  assert.match(html, /в очереди/)
   assert.match(html, /location\.reload\(\)/)
   assert.match(html, /sessionStorage/)
   assert.match(html, /setInterval\(/)
