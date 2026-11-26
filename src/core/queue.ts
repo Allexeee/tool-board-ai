@@ -100,6 +100,7 @@ export function listQueue(
   const queueClass = filter.class
   const queue = cards
     .filter((card) => inQueue(phase, card.status))
+    .filter((card) => card.position !== null)
     .filter((card) => queueClass === undefined || cardQueueClass(card) === queueClass)
     .sort(
       (left, right) =>
@@ -257,9 +258,9 @@ function normalizeClasses(db: DatabaseSync, cards: Card[], requests: boolean): v
             (right.importance ?? 0) - (left.importance ?? 0) ||
             left.createdAt.localeCompare(right.createdAt) ||
             left.id.localeCompare(right.id)
-          : score(right) - score(left) ||
-            (left.position ?? Number.MAX_SAFE_INTEGER) -
-              (right.position ?? Number.MAX_SAFE_INTEGER),
+          : (left.position ?? Number.MAX_SAFE_INTEGER) -
+              (right.position ?? Number.MAX_SAFE_INTEGER) ||
+            score(right) - score(left),
     )
     if (sorted.length > 0) renumber(db, sorted.map((card) => card.id))
   }
@@ -269,7 +270,7 @@ function normalizeClasses(db: DatabaseSync, cards: Card[], requests: boolean): v
 export function ensureSkillQueues(db: DatabaseSync): void {
   tx(db, () => {
     const groups = new Map<string, Card[]>()
-    for (const card of listQueue(db)) {
+    for (const card of listCards(db, { phase: 'task', status: ['ready', 'waiting'] })) {
       const key = cardQueueClass(card)
       groups.set(key, [...(groups.get(key) ?? []), card])
     }

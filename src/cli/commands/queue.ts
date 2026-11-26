@@ -56,5 +56,5 @@ export default async function command(args: ParsedArgs) {
 }
 
 function formatQueueRow(card: Card): string {
-  return `  ${String(card.position).padStart(2)}  ${card.id.padEnd(8)} ${card.status}`
+  return `  ${String(card.position).padStart(2)}  ${card.id.padEnd(8)} ${card.status}  · ${cardQueueClass(card)}`
 }

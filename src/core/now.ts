@@ -493,7 +493,7 @@ function renderOpen(lines: string[], data: NowView, painter: Painter): void {
       const holder = card.holder ? ` ${painter(card.holder, agentColor(card.holder))}` : ''
       lines.push(
         `  ${String(card.position).padStart(2)}  ${card.id.padEnd(7)} ${card.title}  ` +
-          `${statusWord(card, painter)}${holder}`,
+          `${statusWord(card, painter)}${holder}  · ${card.skill ?? 'executors'}`,
       )
     }
     if (data.moreQueue) lines.push('  ...')
