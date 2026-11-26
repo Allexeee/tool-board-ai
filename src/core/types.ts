@@ -92,6 +92,7 @@ export interface Card {
   id: string
   group: string
   groupSeq: number
+  legacyIds: string[]
   title: string
   body: string
   acceptance: string

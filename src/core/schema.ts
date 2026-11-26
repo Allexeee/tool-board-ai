@@ -1,6 +1,6 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -40,6 +40,7 @@ create table cards (
   plan_waived integer not null default 0,
   scope text not null default '[]',
   tags text not null default '[]',
+  legacy_ids text not null default '[]',
   severity text,
   origin_card_id text,
   summary text,
@@ -214,6 +215,11 @@ const MIGRATE_V5_TO_V6 = `
 alter table reviews add column acceptance text;
 `
 
+/** Старые ID карточки после rekey: поиск и связь с ветками/коммитами. */
+const MIGRATE_V6_TO_V7 = `
+alter table cards add column legacy_ids text not null default '[]';
+`
+
 export function schemaVersionOf(db: DatabaseSync): number {
   const hasMeta = db
     .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'meta'")
@@ -248,16 +254,22 @@ export function migrate(db: DatabaseSync): number {
       db.exec(MIGRATE_V4_TO_V5)
     } else if (from === 4) {
       db.exec(MIGRATE_V4_TO_V5)
-    } else if (from !== 5) {
+    } else if (from !== 5 && from !== 6) {
       throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     }
 
-    // Синтетические базы тестов могут не иметь reviews: тогда колонку некуда добавить.
+    // Синтетические базы тестов могут не иметь reviews/cards: тогда колонку некуда добавить.
     if (from >= 1 && from < 6) {
       const hasReviews = db
         .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'reviews'")
         .get()
       if (hasReviews) db.exec(MIGRATE_V5_TO_V6)
+    }
+    if (from >= 1 && from < 7) {
+      const hasCards = db
+        .prepare("select 1 as found from sqlite_master where type = 'table' and name = 'cards'")
+        .get()
+      if (hasCards) db.exec(MIGRATE_V6_TO_V7)
     }
 
     if (from === 1 || from === 2) {

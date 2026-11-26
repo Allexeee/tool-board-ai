@@ -69,6 +69,10 @@ board now
 Поменять / Не сейчас». `board setup --defaults` применяет умолчания разом;
 `/setup` и флаги `board setup` меняют отдельные настройки.
 
+Области можно переименовать или слить: `board group rename OLD NEW [--merge] [--dry-run]`.
+Переносятся карточки и все ссылки; старые ID остаются в `legacy_ids`, `card show` по ним работает.
+Карточки в `in_progress`/`booked`/`shaping` сначала закрываются.
+
 `init` создаёт:
 
 - `.board/board.db` — базу (истина доски) и исполнителя `owner`;
