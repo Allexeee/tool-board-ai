@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import type { DatabaseSync } from 'node:sqlite'
 import { editCard, getCard } from '../../src/core/cards.ts'
 import {
+  ensureSkillQueues,
   insertIntoQueue,
   listQueue,
   moveCard,
@@ -371,4 +372,29 @@ test('queue reorder не нумерует owner-запросы', (t) => {
     false,
   )
   assert.equal(getCard(db, normal.id)!.position, 1)
+})
+
+test('ensureSkillQueues нумерует 1..N внутри навыка для всех статусов очереди', (t) => {
+  const { db } = board(t)
+  const devReady = task(db, { skill: 'dev', position: 1 })
+  const devReview = task(db, { status: 'review', skill: 'dev', position: 5 })
+  const devBooked = task(db, { status: 'booked', skill: 'dev', position: 9 })
+  const uiReview = task(db, { status: 'review', skill: 'ui', position: 4 })
+  const blocked = task(db, { status: 'blocked', skill: 'dev', position: null })
+
+  ensureSkillQueues(db)
+
+  assert.deepEqual(
+    listQueue(db, { class: 'dev' }).map((card) => card.position),
+    [1, 2, 3],
+  )
+  assert.deepEqual(
+    listQueue(db, { class: 'ui' }).map((card) => card.position),
+    [1],
+  )
+  assert.equal(getCard(db, devReady.id)!.position, 1)
+  assert.equal(getCard(db, blocked.id)!.position, null)
+  assert.ok(listQueue(db, { class: 'dev' }).some((card) => card.id === devReview.id))
+  assert.ok(listQueue(db, { class: 'dev' }).some((card) => card.id === devBooked.id))
+  assert.equal(getCard(db, uiReview.id)!.position, 1)
 })

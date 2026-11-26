@@ -89,7 +89,7 @@ test('queue move переставляет наверх, вниз и перед �
   assert.match(human.out, /UI-2 · позиция 1/)
 })
 
-test('queue reorder пересобирает очередь по оценкам', (t) => {
+test('queue reorder сохраняет ручной порядок и нумерует 1..N', (t) => {
   const dir = project(t)
   const { high, mid, low } = seedQueue(dir)
   json(dir, ['queue', 'move', low, '--top'])
@@ -97,7 +97,7 @@ test('queue reorder пересобирает очередь по оценкам'
   const reordered = json(dir, ['queue', 'reorder'])
   assert.deepEqual(
     reordered.map((card: { id: string }) => card.id),
-    [high, mid, low],
+    [low, high, mid],
   )
   assert.deepEqual(
     reordered.map((card: { position: number }) => card.position),
