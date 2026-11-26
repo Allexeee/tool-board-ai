@@ -233,6 +233,11 @@ export function submitPackage(db: DatabaseSync, input: SubmitPackageInput): Revi
         verdict: input.verdict,
         cards: input.cards.map((card) => card.id),
         commits,
+        findings: findings.map((finding) => ({
+          cardId: finding.cardId ?? null,
+          findingId: finding.findingId ?? null,
+          severity: finding.severity,
+        })),
       },
     })
     return {
