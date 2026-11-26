@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { addDep } from '../../src/core/deps.ts'
+import { addIdea } from '../../src/core/cards.ts'
 import {
   backlogStatePath,
   flushBacklog,
@@ -66,6 +67,20 @@ test('renderBacklog: статусы, группы, отложенные и го�
   assert.match(md, /## Готово за последние 12 часов/)
   assert.match(md, /Готово/)
   assert.doesNotMatch(md, /отменена/)
+})
+
+test('renderBacklog: идеи — отдельная таблица в конце, не в отложенных', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  card(board, 'deferred', { note: 'обычная', title: 'Отложенная задача' })
+  const idea = addIdea(board.db, { text: 'Идея на будущее', actor: 'owner' })
+
+  const md = renderBacklog(board.db)
+  assert.match(md, /## Идеи/)
+  assert.match(md, new RegExp(`\\| ${idea.id} \\| Идея на будущее \\|`))
+  const beforeIdeas = md.split('## Идеи')[0]
+  assert.doesNotMatch(beforeIdeas, /Идея на будущее/)
+  assert.match(beforeIdeas, /Отложенная задача/)
 })
 
 test('writeBacklog: путь из настроек, файл создаётся', (t) => {

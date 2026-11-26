@@ -39,6 +39,7 @@ const HELP = `board — доска карточек для людей и аге�
   term add|list|show
   command add|list
   review list|package|finding|submit|waive
+  idea add|list|edit|drop   идеи: карточки вне очереди, мержа и ревью
   release [--no-review --reason "..."] / now / doctor / backup / export / sync
   backlog [--out <path>] [--html] [--open]  md- или html-бэклог; --open — в браузере
 
@@ -83,6 +84,10 @@ const COMMAND_HELP: Record<string, string> = {
   'review package':
     'board review package [--since <ref>] [--verdict done|reopen --reviewer <id> --note "..." --findings findings.json]',
   'review waive': 'board review waive <ID> --reason "..." --as owner',
+  'idea add': 'board idea add "текст" [--title "..."] [--as <id>]',
+  'idea list': 'board idea list [--json]',
+  'idea edit': 'board idea edit <ID> [--text "..."] [--title "..."] [--as <id>]',
+  'idea drop': 'board idea drop <ID> [--as <id>]',
   'release': 'board release [--no-review --reason "..."] --as owner',
   setup:
     'board setup [--show] [--defaults] [--profile auto|low|default|high|max|custom] [--spec-review auto|none|self|subagent] [--max-spec N] [--large-spec N] [--branch-main NAME] [--branch-dev NAME] [--sync <git-url>] [--backlog-path <path>] [--backlog-refresh <sec>] [--backlog-auto|--no-backlog-auto] [--run-review ...] [--reviewer-model provider/model]',

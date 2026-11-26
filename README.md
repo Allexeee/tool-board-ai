@@ -167,6 +167,19 @@ board review package --verdict done --reviewer reviewer --note "ИТОГИ: ..."
 
 CLI субагентов не порождает — он готовит пакет и принимает вердикты. Субагент `board-reviewer` работает на default-варианте `reviewer.model`, не в Max; `self` использует модель основной сессии.
 
+## Идеи
+
+Идея — карточка группы `IDEA`: статус `deferred`, тег `idea`, без мержа, ревью и очереди.
+
+```bash
+board idea add "Тёмная тема" [--title "..."]
+board idea list
+board idea edit IDEA-1 --text "..." --title "..."
+board idea drop IDEA-1
+```
+
+В бэклоге идеи идут отдельной таблицей «Идеи» в конце; в задачи, отложенные и готовые они не попадают. В плагине — `board_idea`.
+
 ## Настройки
 
 Настройки лежат в `.board/settings.json` и не попадают в git. Мастер

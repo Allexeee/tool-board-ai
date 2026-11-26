@@ -312,6 +312,25 @@ function backupArgs(input) {
   return args
 }
 
+function ideaArgs(input) {
+  const args = ['idea', input.action]
+  const a = input.action
+  if (a === 'add') {
+    if (input.text) args.push(String(input.text))
+    flag(args, 'title', input.title)
+    flag(args, 'as', input.as)
+  } else if (a === 'edit') {
+    if (input.id) args.push(input.id)
+    flag(args, 'text', input.text)
+    flag(args, 'title', input.title)
+    flag(args, 'as', input.as)
+  } else if (a === 'drop') {
+    if (input.id) args.push(input.id)
+    flag(args, 'as', input.as)
+  }
+  return args
+}
+
 function reviewArgs(input) {
   const args = ['review', input.action]
   const a = input.action
@@ -683,6 +702,19 @@ export default Plugin.define({
           mode: { type: 'string' },
         }, ['action']),
         execute: (input, context) => call(ctx, reviewArgs(input), context),
+      })
+
+      editor.add({
+        name: 'idea',
+        description: 'Идеи: add|list|edit|drop',
+        input: schema({
+          action: { type: 'string' },
+          id: { type: 'string' },
+          text: { type: 'string' },
+          title: { type: 'string' },
+          as: { type: 'string' },
+        }, ['action']),
+        execute: (input, context) => call(ctx, ideaArgs(input), context),
       })
 
       editor.add({

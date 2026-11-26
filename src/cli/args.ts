@@ -10,6 +10,7 @@ export const COMMANDS_WITH_SUB = new Set([
   'term',
   'command',
   'review',
+  'idea',
 ])
 
 // Флаги CLI из спецификации §12. Неизвестный флаг — ошибка ввода (код 3).
