@@ -14,6 +14,7 @@ import {
   writeReviewerAgent,
 } from '../../src/core/opencode.ts'
 import { initProject } from '../../src/core/project.ts'
+import { normalizeGroupPrefix } from '../../src/core/groups.ts'
 import { DEFAULT_SETTINGS } from '../../src/core/settings.ts'
 
 process.env.BOARD_ALLOW_GLOBAL = '1'
@@ -87,6 +88,24 @@ test('закоммиченные .opencode файлы совпадают с ша
   }
   const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
   assert.ok(eol(agents).includes(eol(AGENTS_BLOCK)), 'AGENTS.md: блок board совпадает')
+})
+
+test('примеры префиксов в AGENTS и навыке проходят валидатор', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const skill = readFileSync(
+    new URL('../../.opencode/skills/board-spec/SKILL.md', import.meta.url),
+    'utf8',
+  )
+  const examples = [
+    /Префикс — область проекта \(([^)]+)\)/.exec(agents),
+    /область проекта\*\* \(([^)]+)\)/.exec(skill),
+  ]
+  for (const match of examples) {
+    assert.ok(match, 'нет примеров префиксов')
+    for (const prefix of match[1].split(',')) {
+      assert.doesNotThrow(() => normalizeGroupPrefix(prefix.trim()), prefix)
+    }
+  }
 })
 
 test('после обновления агент пересказывает «Что нового» и предлагает adopt', () => {
