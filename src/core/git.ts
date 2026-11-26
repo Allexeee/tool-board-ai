@@ -502,7 +502,7 @@ export function revertMerge(root: string, mergeCommit: string): string {
 }
 
 /** Тег релиза `v<версия>`: ставится один раз, повторный release не падает. */
-export function tagRelease(root: string, version: string): boolean {
+export function tagRelease(root: string, version: string, commit?: string): boolean {
   const tag = `v${version}`
   try {
     runGit(root, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])
@@ -510,7 +510,9 @@ export function tagRelease(root: string, version: string): boolean {
   } catch {
     // тега ещё нет — ставим ниже
   }
-  runGit(root, ['tag', '-a', tag, '-m', `release ${tag}`])
+  const args = ['tag', '-a', tag, '-m', `release ${tag}`]
+  if (commit) args.push(commit)
+  runGit(root, args)
   return true
 }
 
