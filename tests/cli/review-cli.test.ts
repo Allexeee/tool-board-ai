@@ -157,3 +157,23 @@ test('review package: пустой cardId в findings.json — ошибка', (t
   assert.equal(result.code, 3)
   assert.match(result.err, /cardId/)
 })
+
+test('review submit считает уникальные находки при слиянии', (t) => {
+  const { root, db } = fixture(t)
+  const card = seedCard(db, { phase: 'task', status: 'review' })
+  const file = join(root, 'findings.json')
+  writeFileSync(
+    file,
+    JSON.stringify([
+      { severity: 'other', text: 'одна и та же' },
+      { severity: 'important', text: 'одна  и  та же' },
+    ]),
+    'utf8',
+  )
+
+  const result = run(root, [
+    'review', 'submit', card.id, '--verdict', 'done', '--plan', 'done', '--reviewer', 'reviewer', '--findings', file,
+  ])
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /находок: 1/)
+})

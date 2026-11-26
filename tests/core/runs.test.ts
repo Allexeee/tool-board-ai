@@ -4,7 +4,6 @@ import type { DatabaseSync } from 'node:sqlite'
 import { editCard, getCard, listCards } from '../../src/core/cards.ts'
 import { addDep } from '../../src/core/deps.ts'
 import { listEvents } from '../../src/core/events.ts'
-import { moveCard } from '../../src/core/queue.ts'
 import {
   addToRun,
   dropFromRun,
@@ -60,8 +59,6 @@ function task(
 function fourTasks(db: DatabaseSync): Card[] {
   return [1, 2, 3, 4].map((position) => task(db, { position }))
 }
-
-const ids = (cards: Card[]): string[] => cards.map((card) => card.id)
 
 test('startRun бронирует карточки и запрещает второй активный забег', (t) => {
   const { db } = board(t)

@@ -5,7 +5,7 @@ import { listCards } from './cards.ts'
 import { todayStartIso } from './clock.ts'
 import { openQuestions, type Discussion } from './discussion.ts'
 import { getExecutor, listExecutors } from './executors.ts'
-import { listQueue } from './queue.ts'
+import { listQueue, score } from './queue.ts'
 import { reclaimExpired, suggestVariantRuns } from './runs.ts'
 import { variantOf } from './tags.ts'
 import type { Card, CardPhase, CardStatus } from './types.ts'
@@ -284,15 +284,10 @@ function byCardOrder(left: Card, right: Card): number {
     (CARD_ORDER[left.status] ?? 9) - (CARD_ORDER[right.status] ?? 9) ||
     Number(left.position === null) - Number(right.position === null) ||
     (left.position ?? 0) - (right.position ?? 0) ||
-    (right.importance ?? 0) * (right.urgency ?? 0) -
-      (left.importance ?? 0) * (left.urgency ?? 0) ||
+    score(right) - score(left) ||
     left.createdAt.localeCompare(right.createdAt) ||
     left.id.localeCompare(right.id)
   )
-}
-
-function byPosition(left: Card, right: Card): number {
-  return (left.position ?? 0) - (right.position ?? 0) || left.id.localeCompare(right.id)
 }
 
 /** Вкладка запросов и очереди §11.5: только открытые запросы с лимитами и счётчиками. */

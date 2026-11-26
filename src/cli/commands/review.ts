@@ -133,7 +133,7 @@ export default async function command(args: ParsedArgs) {
       severity,
       text,
     })
-    ok(created, `${created.id} · находка ${severity} по ревью ${cardId}`)
+    ok(created, `${created.id} · находка ${created.severity} по ревью ${cardId}`)
     return 0
   }
 
