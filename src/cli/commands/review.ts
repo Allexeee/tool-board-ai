@@ -250,7 +250,7 @@ export default async function command(args: ParsedArgs) {
   }
 }
 
-/** `findings.json`: массив `{ severity, text, skill?, scope? }` (§9.6). */
+/** `findings.json`: массив `{ severity, text, cardId?, skill?, scope? }` (§9.6). */
 function parseFindings(path: string): FindingInput[] {
   let text: string
   try {
@@ -273,6 +273,15 @@ function parseFindings(path: string): FindingInput[] {
     const finding = item as FindingInput
     if (!finding.severity || !finding.text) {
       throw new UserError(3, `файл ${path}: у находки #${index + 1} нет severity или text`)
+    }
+    if (
+      finding.cardId !== undefined &&
+      (typeof finding.cardId !== 'string' || !finding.cardId.trim())
+    ) {
+      throw new UserError(
+        3,
+        `файл ${path}: у находки #${index + 1} пустой cardId`,
+      )
     }
     return finding
   })

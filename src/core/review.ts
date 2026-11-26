@@ -16,6 +16,10 @@ export interface FindingInput {
   text: string
   skill?: string
   scope?: string[]
+  /** Пакетное ревью: карточка пакета, к которой относится находка. */
+  cardId?: string
+  /** Заполняется при записи пакета: карточка-находка. */
+  findingId?: string
 }
 
 export interface AddFindingInput {
@@ -170,10 +174,40 @@ export function submitPackage(db: DatabaseSync, input: SubmitPackageInput): Revi
   if (input.cards.length === 0) {
     throw new UserError(2, 'пакет ревью пуст: в dev нет непокрытых done-карточек')
   }
+  const packageIds = new Set(input.cards.map((card) => card.id))
+  for (const item of input.findings ?? []) {
+    if (!item.cardId) {
+      throw new UserError(3, 'находка пакета без cardId: укажите карточку пакета')
+    }
+    if (!packageIds.has(item.cardId)) {
+      throw new UserError(
+        3,
+        `находка пакета ссылается на ${item.cardId}, которой нет в пакете`,
+      )
+    }
+  }
+
   return tx(db, () => {
     const at = nowIso()
     const commits = [...new Set(input.cards.map((card) => card.commit))]
-    const findings = input.findings ?? []
+    // Находки пакета идут тем же путём, что и находки рана: карточка, дедупликация,
+    // критическая — зависимость исходной карточки.
+    const findings: FindingInput[] = []
+    for (const item of input.findings ?? []) {
+      const finding = addFinding(db, {
+        cardId: item.cardId!,
+        reviewer: input.actor,
+        severity: item.severity,
+        text: item.text,
+        skill: item.skill,
+        scope: item.scope,
+      })
+      if (item.severity === 'critical') {
+        addDep(db, item.cardId!, finding.id, input.actor, 'критическая находка пакетного ревью')
+      }
+      findings.push({ ...item, findingId: finding.id })
+    }
+
     const result = db
       .prepare(
         `insert into review_packages (at, actor, since, verdict, note, cards, commits, findings)
@@ -256,7 +290,29 @@ export interface SubmitVerdictInput {
 }
 
 const SEVERITIES: readonly Severity[] = ['critical', 'important', 'other']
+const SEVERITY_RANK: Record<Severity, number> = { other: 0, important: 1, critical: 2 }
 const OWNER = 'owner'
+
+/** Текст находки для сравнения дублей: без крайних пробелов и повторных пробелов. */
+function normalizeFindingText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ')
+}
+
+/** Открытая находка той же исходной карточки с тем же текстом, если она есть. */
+function findOpenFinding(db: DatabaseSync, originId: string, text: string): Card | null {
+  const rows = db
+    .prepare(
+      `select id from cards
+       where origin_card_id = ? and status not in ('done', 'cancelled') order by id`,
+    )
+    .all(originId) as Array<{ id: string }>
+  const wanted = normalizeFindingText(text)
+  for (const row of rows) {
+    const card = getCard(db, row.id)
+    if (card && normalizeFindingText(card.body) === wanted) return card
+  }
+  return null
+}
 
 function requireCard(db: DatabaseSync, id: string): Card {
   const card = getCard(db, id)
@@ -291,6 +347,8 @@ export function listReviewCards(db: DatabaseSync): Card[] {
 /**
  * Находка — отдельная карточка-запрос в группе проверяемой карточки. Наследует
  * `skill`, `needs_merge` и `scope`; `skill`/`scope` можно перекрыть. `body` — текст.
+ * Повтор той же открытой находки не плодит карточку: severity поднимается до
+ * максимума, слияние пишется в журнал. Закрытая находка дублем не считается.
  */
 export function addFinding(db: DatabaseSync, input: AddFindingInput): Card {
   return tx(db, () => {
@@ -298,6 +356,30 @@ export function addFinding(db: DatabaseSync, input: AddFindingInput): Card {
     const reviewer = requiredText(input.reviewer, 'нужен ревьюер')
     const severity = normalizeSeverity(input.severity)
     const text = requiredText(input.text, 'нужен текст находки')
+
+    const duplicate = findOpenFinding(db, origin.id, text)
+    if (duplicate) {
+      const current = duplicate.severity ?? 'other'
+      const highest =
+        SEVERITY_RANK[severity] > SEVERITY_RANK[current] ? severity : current
+      if (highest !== duplicate.severity) {
+        db.prepare('update cards set severity = ?, updated_at = ? where id = ?').run(
+          highest,
+          nowIso(),
+          duplicate.id,
+        )
+      }
+      const merged = getCard(db, duplicate.id)!
+      appendEvent(db, {
+        type: 'review.finding.merged',
+        actor: reviewer,
+        subject: duplicate.id,
+        before: duplicate,
+        after: merged,
+        note: `повтор находки из ревью ${origin.id}`,
+      })
+      return merged
+    }
 
     const finding = createCard(db, {
       group: origin.group,
