@@ -1,5 +1,5 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { listCards } from './cards.ts'
@@ -301,5 +301,11 @@ function checkCards(
 }
 
 function normalizePath(path: string): string {
-  return resolve(path).replace(/\\/g, '/').toLowerCase()
+  let resolved = path
+  try {
+    resolved = realpathSync.native(path)
+  } catch {
+    // путь может ещё не существовать — сравниваем как есть
+  }
+  return resolve(resolved).replace(/\\/g, '/').toLowerCase()
 }

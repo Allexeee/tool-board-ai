@@ -80,12 +80,13 @@ test('writeOpenCodeFiles создаёт auditor.md при модели', () => {
 })
 
 test('закоммиченные .opencode файлы совпадают с шаблонами', () => {
+  const eol = (text: string): string => text.replace(/\r\n/g, '\n')
   for (const [relative, source] of OPENCODE_FILES) {
     const committed = readFileSync(new URL(`../../${relative}`, import.meta.url), 'utf8')
-    assert.equal(committed, source, relative)
+    assert.equal(eol(committed), eol(source), relative)
   }
   const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
-  assert.ok(agents.includes(AGENTS_BLOCK), 'AGENTS.md: блок board совпадает')
+  assert.ok(eol(agents).includes(eol(AGENTS_BLOCK)), 'AGENTS.md: блок board совпадает')
 })
 
 test('после обновления агент пересказывает «Что нового» и предлагает adopt', () => {

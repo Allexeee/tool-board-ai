@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { UserError } from '../cli/errors.ts'
@@ -245,7 +245,16 @@ function branchExists(dir: string, name: string): boolean {
   }
 }
 
-const normalizePath = (value: string): string => resolve(value).replace(/\\/g, '/').toLowerCase()
+/** Путь для сравнения: длинное имя (без 8.3), прямые слэши, нижний регистр. */
+const normalizePath = (value: string): string => {
+  let path = value
+  try {
+    path = realpathSync.native(value)
+  } catch {
+    // путь может ещё не существовать — сравниваем как есть
+  }
+  return resolve(path).replace(/\\/g, '/').toLowerCase()
+}
 
 /** Каталог числится за git рабочим каталогом: его можно переиспользовать. */
 function isRegisteredWorktree(root: string, dir: string): boolean {
