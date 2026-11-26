@@ -1,7 +1,7 @@
 import { writeReviewerAgent } from '../../core/opencode.ts'
 import { openDb } from '../../core/db.ts'
 import { findProject } from '../../core/project.ts'
-import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
+import { effectiveReviewerModel, modelContext, resolveReviewProfile } from '../../core/review-policy.ts'
 import { applySetupDefaults } from '../../core/setup.ts'
 import {
   readSettings,
@@ -16,10 +16,28 @@ import { UserError } from '../errors.ts'
 import { isJsonMode, ok } from '../output.ts'
 
 function human(settings: BoardSettings, effectiveModel: string | null): string {
+  const { name, profile } = resolveReviewProfile(settings, modelContext(process.env))
+  const review =
+    name === 'custom'
+      ? [
+          'Профиль ревью: custom (старые настройки)',
+          `Ревью spec: ${settings.specReview.mode}`,
+          `Порог max: ${settings.specReview.maxSpecChars} символов`,
+          `Порог остальных: ${settings.specReview.largeSpecChars} символов`,
+          `Ревью в конце забега: ${settings.runReview.mode}`,
+        ]
+      : [
+          `Профиль ревью: ${settings.review.profile === 'auto' ? `auto → ${name}` : name}`,
+          `Ревью spec: ${profile.spec}${
+            profile.spec === 'auto' ? `, порог ${profile.specWords} слов` : ''
+          }`,
+          `Ревью в конце забега: ${profile.run}`,
+          `Реревью: ${profile.reopens}`,
+          `Находки: ${profile.findings === 'critical+important' ? 'critical + important' : 'critical'}`,
+          `Пакет ревью: ${profile.package ? 'требуется' : 'не требуется'}`,
+        ]
   const lines = [
-    `Ревью spec: ${settings.specReview.mode}`,
-    `Порог max: ${settings.specReview.maxSpecChars} символов`,
-    `Порог остальных: ${settings.specReview.largeSpecChars} символов`,
+    ...review,
     `Ветки: ${settings.branches.main ?? 'авто'} / ${settings.branches.dev ?? 'авто'}`,
     `Синхронизация базы: ${settings.sync.remote ?? 'не настроена'}`,
     `Бэклог: ${settings.backlog.path}${settings.backlog.auto ? ' (авто)' : ''}${
@@ -27,8 +45,6 @@ function human(settings: BoardSettings, effectiveModel: string | null): string {
         ? `, обновление ${settings.backlog.refreshSeconds} с`
         : ', без автообновления'
     }`,
-    `Ревью в конце забега: ${settings.runReview.mode}`,
-    `Профиль ревью: ${settings.review.profile}`,
     `Модель ревьюера: ${effectiveModel ?? 'не задана'} (default-вариант)`,
     settings.setupAt
       ? `Мастер настроек: ${settings.setupAt}`
