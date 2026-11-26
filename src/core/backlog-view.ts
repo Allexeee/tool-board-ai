@@ -136,34 +136,82 @@ function rowsFor(rows: BacklogRow[]): string[][] {
   ])
 }
 
-/** Самодостаточный HTML-снимок бэклога. refreshSeconds > 0 — страница сама перезагружается. */
+/** Самодостаточный HTML-снимок бэклога. refreshSeconds > 0 — страница сама подтягивает изменения. */
 export function renderBacklogPage(data: BacklogData, refreshSeconds = 5): string {
   const auto = refreshSeconds > 0
   const scripts =
     `<script>
 (function () {
-  var key = 'board-backlog-scroll'
-  function save() { try { sessionStorage.setItem(key, String(window.scrollY)) } catch (e) {} }
-  function restore() { try { var y = sessionStorage.getItem(key); if (y !== null) window.scrollTo(0, Number(y)) } catch (e) {} }
-  window.boardReload = function () { save(); location.reload() }
-  window.addEventListener('scroll', save, { passive: true })
-  window.addEventListener('pagehide', save)
-  restore()
-  var deferred = document.getElementById('deferred')
-  if (deferred) {
-    var deferredKey = 'board-deferred-open'
-    try { if (sessionStorage.getItem(deferredKey) === '1') deferred.open = true } catch (e) {}
-    deferred.addEventListener('toggle', function () {
-      try { sessionStorage.setItem(deferredKey, deferred.open ? '1' : '0') } catch (e) {}
+  var scrollKey = 'board-backlog-scroll'
+  var deferredKey = 'board-deferred-open'
+  var revisionMeta = document.querySelector('meta[name="board-revision"]')
+  var revision = revisionMeta ? revisionMeta.content : ''
+  var busy = false
+
+  function saveScroll() {
+    try { sessionStorage.setItem(scrollKey, String(window.scrollY)) } catch (e) {}
+  }
+  function restoreScroll() {
+    try {
+      var y = sessionStorage.getItem(scrollKey)
+      if (y !== null) window.scrollTo(0, Number(y))
+    } catch (e) {}
+  }
+  function bindDeferred() {
+    var details = document.getElementById('deferred')
+    if (!details) return
+    try { if (sessionStorage.getItem(deferredKey) === '1') details.open = true } catch (e) {}
+    details.addEventListener('toggle', function () {
+      try { sessionStorage.setItem(deferredKey, details.open ? '1' : '0') } catch (e) {}
     })
   }
+  function apply(html, force) {
+    var doc = new DOMParser().parseFromString(html, 'text/html')
+    var nextMeta = doc.querySelector('meta[name="board-revision"]')
+    var nextRevision = nextMeta ? nextMeta.content : ''
+    if (!force && nextRevision === revision) return false
+
+    var nextWrap = doc.querySelector('.wrap')
+    var currentWrap = document.querySelector('.wrap')
+    if (!nextWrap || !currentWrap) return false
+
+    saveScroll()
+    var wasOpen = false
+    var currentDetails = document.getElementById('deferred')
+    if (currentDetails) wasOpen = currentDetails.open
+
+    currentWrap.replaceWith(document.importNode(nextWrap, true))
+    revision = nextRevision
+    if (revisionMeta) revisionMeta.content = nextRevision
+    bindDeferred()
+    var nextDetails = document.getElementById('deferred')
+    if (nextDetails && wasOpen) nextDetails.open = true
+    restoreScroll()
+    return true
+  }
+  function refresh(force) {
+    if (busy) return
+    busy = true
+    fetch(location.href, { cache: 'no-store' })
+      .then(function (response) { return response.text() })
+      .then(function (html) { apply(html, force === true) })
+      .catch(function () { if (force === true) location.reload() })
+      .then(function () { busy = false })
+  }
+
+  window.boardReload = function () { saveScroll(); refresh(true) }
+  window.boardRefresh = refresh
+  window.addEventListener('scroll', saveScroll, { passive: true })
+  window.addEventListener('pagehide', saveScroll)
+  restoreScroll()
+  bindDeferred()
 })()
 </script>` +
     (auto
       ? `<script>
 setInterval(function () {
   if (document.visibilityState !== 'visible') return
-  window.boardReload()
+  window.boardRefresh()
 }, ${Math.round(refreshSeconds) * 1000})
 </script>`
       : '')
@@ -231,6 +279,7 @@ setInterval(function () {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="board-revision" content="${esc(data.generatedAt)}">
 <title>Бэклог</title>
 <style>${STYLE}</style>
 </head>
