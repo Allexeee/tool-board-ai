@@ -25,6 +25,7 @@ export default async function command(args: ParsedArgs) {
     const resolution = resolveSpecReviewMode({
       settings: readSettings(project.root),
       specLength: (existing?.body.length ?? 0) + (existing?.acceptance.length ?? 0),
+      specText: existing ? `${existing.body}\n${existing.acceptance}` : '',
       context: modelContext(process.env),
     })
 

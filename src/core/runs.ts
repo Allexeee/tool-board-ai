@@ -24,10 +24,12 @@ import type {
 /** Лёгкий ран для auto-ревью: мало карточек, малый дифф, без опасных путей. */
 export function isLightRun(db: DatabaseSync, run: Run, root?: string): boolean {
   const cards = listRunCards(db, run.id)
+    .filter((row) => row.status !== 'dropped')
     .map((row) => getCard(db, row.cardId))
     .filter((card): card is Card => card !== null)
   if (cards.length > 2) return false
   if (cards.some((card) => /^(sec|perf):/i.test(card.title))) return false
+  if (cards.some((card) => card.needsMerge && !card.mergeCommit)) return false
   const openFinding = db
     .prepare(
       "select 1 as found from cards where severity in ('critical', 'important') and status not in ('done', 'cancelled') limit 1",
@@ -38,7 +40,7 @@ export function isLightRun(db: DatabaseSync, run: Run, root?: string): boolean {
 
   let lines = 0
   let files = 0
-  const dangerous = /^(src\/core\/(schema|settings|lifecycle|release|git)\.ts|\.opencode\/)/
+  const dangerous = /^(src\/core\/(schema|settings|lifecycle|release|git|review|review-policy|runs|steps)\.ts|src\/cli\/|bin\/|\.opencode\/)/
   for (const card of cards) {
     if (!card.mergeCommit) continue
     try {

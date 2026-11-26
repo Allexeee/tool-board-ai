@@ -453,6 +453,32 @@ test('review submit без acceptance сохраняет null', (t) => {
   assert.equal(row.acceptance, null)
 })
 
+test('лимит реревью из профиля: 0 запрещает, 3 разрешает', (t) => {
+  const { db } = board(t)
+  const first = seedCard(db, { phase: 'task', status: 'review' })
+  assert.throws(
+    () =>
+      submitVerdict(db, {
+        cardId: first.id,
+        reviewer: 'reviewer-1',
+        verdict: 'reopen',
+        note: 'x',
+        reopensLimit: 0,
+      }),
+    /лимит/,
+  )
+
+  const second = seedCard(db, { phase: 'task', status: 'review' })
+  const reopened = submitVerdict(db, {
+    cardId: second.id,
+    reviewer: 'reviewer-1',
+    verdict: 'reopen',
+    note: 'x',
+    reopensLimit: 3,
+  })
+  assert.equal(reopened.card.status, 'ready')
+})
+
 test('waiveReview: только владелец, причина, идемпотентность', (t) => {
   const { db } = board(t)
   const card = seedCard(db, { phase: 'task', status: 'done' })
