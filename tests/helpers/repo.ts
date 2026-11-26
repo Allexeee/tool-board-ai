@@ -81,11 +81,16 @@ if (args[0] === 'init') {
   writeFileSync(join(work, 'src', 'core', 'now.ts'), 'export const now = true\n')
   writeFileSync(join(work, 'package.json'), JSON.stringify({ name: 'tool-board-ai', version: '1.0.0' }))
 
+  const notes = join(work, 'docs', 'whats-new')
+  mkdirSync(notes, { recursive: true })
+  writeFileSync(join(notes, '1.0.0.md'), '# v1.0.0\n\n- Первый выпуск.\n')
+
   git(work, ['add', '.'])
   git(work, ['commit', '-m', 'v1.0.0'])
   git(work, ['tag', 'v1.0.0'])
 
   writeFileSync(join(work, 'package.json'), JSON.stringify({ name: 'tool-board-ai', version: '1.1.0' }))
+  writeFileSync(join(notes, '1.1.0.md'), '# v1.1.0\n\n- Новая возможность.\n- Второй пункт.\n')
   git(work, ['add', '.'])
   git(work, ['commit', '-m', 'v1.1.0'])
   git(work, ['tag', 'v1.1.0'])

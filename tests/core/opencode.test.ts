@@ -88,6 +88,28 @@ test('закоммиченные .opencode файлы совпадают с ша
   assert.ok(agents.includes(AGENTS_BLOCK), 'AGENTS.md: блок board совпадает')
 })
 
+test('после обновления агент пересказывает «Что нового» и предлагает adopt', () => {
+  const root = tmp()
+  writeOpenCodeFiles(root)
+  const plugin = pluginSource(root)
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8')
+  const hook = plugin.slice(
+    plugin.indexOf("ctx.session.hook('context'"),
+    plugin.indexOf('ctx.tool.transform'),
+  )
+
+  for (const text of [hook, agents]) {
+    assert.match(text, /board upgrade/)
+    assert.match(text, /init --refresh/)
+    assert.match(text, /Что нового/)
+    assert.match(text, /без флагов и CLI-жаргона/)
+    assert.match(text, /изменений нет/i)
+    assert.match(text, /board adopt --check/)
+    assert.match(text, /ничего не создаёт/)
+    assert.match(text, /остаток/)
+  }
+})
+
 test('навыки ссылаются на terminology.md и на порядок работы', () => {
   const root = tmp()
   writeOpenCodeFiles(root)
@@ -114,6 +136,9 @@ test('плагин объявляет board_now и board_setup и зовёт CLI
   const plugin = readFileSync(join(root, '.opencode', 'plugins', 'board', 'index.ts'), 'utf8')
   assert.match(plugin, /board_now/)
   assert.match(plugin, /board_setup/)
+  assert.match(plugin, /board_adopt/)
+  assert.match(plugin, /name: 'adopt'/)
+  assert.match(plugin, /'adopt', '--check'/)
   assert.match(plugin, /name: 'setup'/)
   assert.match(plugin, /name: 'idea'/)
   assert.match(plugin, /ideaArgs/)
@@ -154,10 +179,10 @@ test('плагин держит правила отчёта в системно�
   const hook = plugin.slice(start, end)
 
   for (const rule of [
-    'Беру в работу',
-    'Приступаю к {ID}',
+    'Начинаю RUN-',
+    'Беру в работу {ID}',
+    'Понял. Вношу',
     'Сделал {ID}',
-    'Перехожу к {ID}',
     'только «Сделал»',
     'Завершил {RUN}',
     'Что сделано',
@@ -165,10 +190,8 @@ test('плагин держит правила отчёта в системно�
     'Решений не принимал',
     'Предлагаю дальше',
     'Утверждаешь? Тогда',
-    '7–10 карточк',
-    'больше 10',
-    'Настоятельно рекомендую',
-    'Ран не прерываем',
+    'без утверждения',
+    'автоматическое',
     'только важное для человека',
     'до следующего вызова инструмента',
     'не заменяет',
@@ -176,6 +199,8 @@ test('плагин держит правила отчёта в системно�
   ]) {
     assert.ok(hook.includes(rule), rule)
   }
+  assert.doesNotMatch(hook, /Перехожу/)
+  assert.doesNotMatch(hook, /7–10 карточк|больше 10|Настоятельно рекомендую/)
 })
 
 test('навыки говорят, когда продлевать lease', () => {
@@ -491,9 +516,8 @@ test('четыре навыка: разные description и свои прави
     assert.match(read('board-spec'), new RegExp(kind), kind)
   }
   assert.match(read('board-work'), /Сделал \{ID\}/)
-  assert.match(read('board-work'), /Перехожу/)
-  assert.match(read('board-work'), /две строки/)
-  assert.match(read('board-work'), /Перехожу к \{ID\}/)
+  assert.match(read('board-work'), /Начинаю RUN-/)
+  assert.doesNotMatch(read('board-work'), /Перехожу/)
   assert.match(read('board-run'), /Завершил \{RUN\}/)
   assert.match(read('board-run'), /Что сделано/)
   assert.match(read('board-run'), /Решения, которые я принял сам/)
@@ -501,10 +525,9 @@ test('четыре навыка: разные description и свои прави
   assert.doesNotMatch(read('board-run'), /Ревью ожидают задачи/)
   assert.match(read('board-run'), /Предлагаю дальше/)
   assert.match(read('board-run'), /Утверждаешь\? Тогда/)
-  assert.match(read('board-run'), /7–10 карточек/)
-  assert.match(read('board-run'), /больше 10/)
-  assert.match(read('board-run'), /Настоятельно рекомендую/)
-  assert.match(read('board-run'), /Ран не прерываем/)
+  assert.match(read('board-run'), /без утверждения/i)
+  assert.match(read('board-run'), /автоматическ/)
+  assert.doesNotMatch(read('board-run'), /7–10 карточек|больше 10|Настоятельно рекомендую/)
   assert.match(read('board-work'), /первая карточка забега — без «Сделал»/)
   assert.match(read('board-work'), /это шум/)
   assert.match(read('board-work'), /все тесты прошли/)
@@ -513,6 +536,9 @@ test('четыре навыка: разные description и свои прави
   assert.match(agents, /Ревьюер закончил работу/)
   assert.match(agents, /Ревью обнаружило n критичных/)
   assert.match(agents, /не пиши «suite»/)
+  assert.match(agents, /Начинаю RUN-/)
+  assert.doesNotMatch(agents, /Перехожу/)
+  assert.doesNotMatch(agents, /7–10 карточк|больше 10|Настоятельно рекомендую/)
   const review = readFileSync(join(root, '.opencode', 'command', 'review.md'), 'utf8')
   assert.match(review, /Ревьюер закончил работу/)
   assert.match(review, /Находки в чате не перечисляй/)
@@ -522,9 +548,13 @@ test('четыре навыка: разные description и свои прави
   assert.match(read('board-run'), /Пакет и проход ревью/)
   assert.match(read('board-run'), /7 находок/)
   assert.match(read('board-run'), /## Ран/)
-  assert.match(read('board-run'), /Беру в работу/)
+  assert.match(read('board-run'), /Начинаю RUN-/)
+  assert.doesNotMatch(read('board-run'), /Перехожу/)
   assert.match(read('board-work'), /Разобрал/)
-  assert.match(read('board-work'), /Приступаю/)
+  assert.match(read('board-work'), /Беру в работу \{ID\}/)
+  assert.match(read('board-work'), /Понял\. Вношу/)
+  assert.match(read('board-spec'), /Беру в работу \{ID\}/)
+  assert.doesNotMatch(read('board-spec'), /Приступаю к выполнению/)
 })
 
 test('отчёт: шесть моментов и запрет отчёта по вызовам инструментов', () => {
@@ -534,9 +564,10 @@ test('отчёт: шесть моментов и запрет отчёта по 
     readFileSync(join(root, '.opencode', 'skills', name, 'SKILL.md'), 'utf8')
 
   const report = `${read('board-work')}\n${read('board-run')}`
-  assert.match(report, /Беру в работу/)
+  assert.match(report, /Начинаю RUN-/)
+  assert.doesNotMatch(report, /Перехожу/)
   assert.match(report, /Разобрал/)
-  assert.match(report, /Приступаю/)
+  assert.match(report, /Беру в работу/)
   assert.match(report, /Сделал/)
   assert.match(report, /Снял/)
   assert.match(report, /Завершил \{RUN\}/)

@@ -1,17 +1,26 @@
 ﻿import { writeReviewerAgent } from '../../core/opencode.ts'
 import { openDb } from '../../core/db.ts'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { initProject } from '../../core/project.ts'
 import { effectiveReviewerModel, modelContext } from '../../core/review-policy.ts'
 import { buildSetupProposal, type SetupProposal } from '../../core/setup.ts'
 import { ensureSettings, updateSettings, type BoardSettings } from '../../core/settings.ts'
 import { SUPERPOWERS_ADVICE, superpowersConfigured } from '../../core/superpowers.ts'
 import { runSetupWizard, shouldRunSetup } from '../setup-wizard.ts'
+import {
+  collectWhatsNew,
+  markAnnouncedVersion,
+  readAnnouncedVersion,
+  whatsNewDir,
+  whatsNewLines,
+} from '../../core/whats-new.ts'
 import { boolFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { ok, isJsonMode } from '../output.ts'
 
 export default async function command(args: ParsedArgs) {
   const dir = args.positionals[0] ?? process.cwd()
+  // Читаем отметку до initProject: установка может сразу записать новую версию.
+  const announced = readAnnouncedVersion(resolve(dir))
   const { created, updated, warnings, root, boardVersion } = initProject(dir, {
     refresh: boolFlag(args, 'refresh'),
     boardVersion: stringFlag(args, 'board-version'),
@@ -37,6 +46,11 @@ export default async function command(args: ParsedArgs) {
     settings = await runSetupWizard(root, settings)
     writeReviewerAgent(root, settings, true)
   }
+
+  // Отметку пишет каждый вызов init: upgrade заранее запоминает from и не теряет
+  // диапазон, даже если вложенный init уже отметил новую версию.
+  const whatsNew = collectWhatsNew(announced, boardVersion, whatsNewDir(root))
+  markAnnouncedVersion(root, boardVersion ?? '')
 
   const lines: string[] = []
   if (created.length > 0) {
@@ -81,6 +95,7 @@ export default async function command(args: ParsedArgs) {
   if (recommendations.length > 0) {
     lines.push('', ...recommendations.map((item) => '*   ' + item))
   }
+  if (boardVersion !== null) lines.push('', ...whatsNewLines(whatsNew))
   lines.push('', 'Проект: ' + root)
 
   const setupRequired = settings.setupAt === null
@@ -90,6 +105,9 @@ export default async function command(args: ParsedArgs) {
       created,
       updated,
       boardVersion,
+      from: whatsNew.from,
+      to: whatsNew.to,
+      whatsNew: whatsNew.whatsNew,
       settings,
       setupRequired,
       recommendations,

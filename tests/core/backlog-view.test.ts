@@ -21,7 +21,7 @@ test('buildBacklog: группы по навыку и человеческие �
   assert.equal(data.skills[0].rows[0].status, 'разбор')
 })
 
-test('renderBacklogPage: цвета статусов и легенда', (t) => {
+test('renderBacklogPage: цвета статусов остаются, легенды нет', (t) => {
   const board = makeBoard()
   t.after(board.close)
   seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev' })
@@ -29,8 +29,8 @@ test('renderBacklogPage: цвета статусов и легенда', (t) => 
   seedCard(board.db, { phase: 'task', status: 'acceptance', skill: 'dev' })
 
   const html = renderBacklogPage(buildBacklog(board.db))
-  assert.match(html, /class="legend"/)
-  assert.match(html, /dot status-ready/)
+  assert.doesNotMatch(html, /class="legend"/)
+  assert.doesNotMatch(html, /legend-item/)
   assert.match(html, /class="status-ready"/)
   assert.match(html, /class="status-review"/)
   assert.match(html, /class="status-acceptance"/)
@@ -75,15 +75,60 @@ test('buildBacklog: waiting и blocked после доступных', (t) => {
   assert.equal(section.rows[1].id, waiting.id)
 })
 
-test('renderBacklogPage: идеи в конце отдельной таблицей', (t) => {
+test('renderBacklogPage: идеи в конце отдельной таблицей и коротким заголовком', (t) => {
   const board = makeBoard()
   t.after(board.close)
-  addIdea(board.db, { text: 'Идея в html', actor: 'owner' })
+  addIdea(board.db, {
+    text: 'Короткая идея\nОчень длинное описание, которое не должно попасть в HTML.',
+    title: 'feat: Короткая идея',
+    actor: 'owner',
+  })
 
   const html = renderBacklogPage(buildBacklog(board.db))
   assert.match(html, /<h2>Идеи<\/h2>/)
-  assert.match(html, /Идея в html/)
-  assert.ok(html.indexOf('Идея в html') > html.indexOf('Бэклог'))
+  assert.match(html, /Короткая идея/)
+  assert.doesNotMatch(html, /feat: Короткая идея/)
+  assert.doesNotMatch(html, /Очень длинное описание/)
+  assert.match(html, /class="idea-text"><div class="clamp2">/)
+  assert.ok(html.indexOf('Короткая идея') > html.indexOf('Бэклог'))
+})
+
+test('renderBacklogPage: Отложенные свёрнуты, причина короткая', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  const card = seedCard(board.db, { phase: 'task', status: 'deferred', skill: 'dev' })
+  board.db
+    .prepare('update cards set note = ? where id = ?')
+    .run('Первая фраза. Вторая фраза, которая не должна попасть в колонку причины.', card.id)
+
+  const data = buildBacklog(board.db)
+  assert.equal(data.deferred[0].reason, 'Первая фраза.')
+  assert.match(data.deferred[0].note, /Вторая фраза/)
+
+  const html = renderBacklogPage(data)
+  assert.match(html, /<details id="deferred">/)
+  assert.match(html, /<summary>Отложенные \(1\)<\/summary>/)
+  assert.match(html, /class="note reason"><div class="clamp2">Первая фраза\.<\/div>/)
+  assert.match(html, /board-deferred-open/)
+  assert.match(html, /details:not\(\[open\]\) > table/)
+  assert.doesNotMatch(html, /Вторая фраза/)
+})
+
+test('renderBacklogPage: Inter, размеры, ширина и zoom', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  seedCard(board.db, { phase: 'task', status: 'ready', skill: 'dev' })
+
+  const html = renderBacklogPage(buildBacklog(board.db))
+  assert.match(html, /@font-face/)
+  assert.match(html, /src: url\("Inter\.ttf"\) format\("truetype"\)/)
+  assert.match(html, /font: 16px\/1\.6 "Inter"/)
+  assert.match(html, /html \{ zoom: 0\.8; \}/)
+  assert.match(html, /max-width: 1440px/)
+  assert.match(html, /"IBM Plex Mono"/)
+  assert.match(html, /td\.id \{[^}]*font-size: 20px/)
+  assert.match(html, /-webkit-line-clamp: 2/)
+  assert.doesNotMatch(html, /table-layout\s*:/)
 })
 
 test('renderBacklogPage: автообновление, кнопка и крупный шрифт', (t) => {
@@ -102,7 +147,20 @@ test('renderBacklogPage: автообновление, кнопка и круп�
   assert.match(html, /boardReload/)
   assert.match(html, /Обновить/)
   assert.match(html, /авто 5 с/)
-  assert.doesNotMatch(html, /fetch\(/)
+  assert.match(html, /meta name="board-revision"/)
+  assert.match(html, /fetch\(location\.href, options\)/)
+  assert.match(html, /DOMParser/)
+  assert.match(html, /replaceWith\(document\.importNode/)
+  assert.match(html, /stopAuto/)
+  assert.match(html, /AbortController/)
+  assert.match(html, /· F5/)
+  assert.match(html, /currentStyle\.textContent = nextStyle\.textContent/)
+  for (const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+    assert.doesNotThrow(() => new Function(script[1]), 'inline script синтаксически валиден')
+  }
+  const interval = html.slice(html.lastIndexOf('setInterval('))
+  assert.match(interval, /refresh\(false\)/)
+  assert.doesNotMatch(interval, /location\.reload/)
 
   const staticHtml = renderBacklogPage(buildBacklog(board.db), 0)
   assert.doesNotMatch(staticHtml, /setInterval\(/)

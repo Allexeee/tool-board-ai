@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { isIdeaCard, listCards } from './cards.ts'
 import { listDeps } from './deps.ts'
 import { readSettings, type BoardSettings } from './settings.ts'
@@ -16,7 +17,7 @@ export const STATUS_LABEL: Record<CardStatus, string> = {
   ready: 'в очереди',
   booked: 'забронирована',
   in_progress: 'в работе',
-  review: 'ждет финального ревью',
+  review: 'проходит ревью',
   acceptance: 'требует приёмки владельцем',
   blocked: 'заблокирована',
   deferred: 'отложена',
@@ -39,6 +40,8 @@ export interface BacklogRow {
   status: string
   statusKey: CardStatus
   note: string
+  /** Короткая причина для HTML: первая фраза до 90 символов. */
+  reason?: string
 }
 
 export interface BacklogDone {
@@ -49,6 +52,9 @@ export interface BacklogDone {
 
 export interface BacklogIdea {
   id: string
+  /** Короткий заголовок для HTML без spec. */
+  title: string
+  /** Полный текст для md. */
   text: string
   updatedAt: string
 }
@@ -75,6 +81,17 @@ function shortTime(iso: string): string {
   const date = new Date(iso)
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/** Причина в HTML: первая фраза, не длиннее 90 символов. */
+function shortReason(note: string | null): string {
+  const text = cell(note ?? '')
+  if (text === '') return ''
+  const first = text.split(/(?<=[.!?])\s+/)[0] ?? text
+  if (first.length <= 90) return first
+  const cut = first.slice(0, 89)
+  const safe = cut.replace(/\s+\S*$/, '')
+  return `${safe || cut}…`
 }
 
 function score(card: Card): number {
@@ -148,6 +165,7 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     .map((card) => ({
       id: card.id,
+      title: card.title.replace(/^(feat|fix|perf|sec|docs|test|chore|review):\s*/i, ''),
       text: card.body.trim() || card.title,
       updatedAt: card.updatedAt,
     }))
@@ -168,7 +186,7 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
     skills: sections,
     deferred: sortCards(
       listCards(db, { status: 'deferred' }).filter((card) => !isIdeaCard(card)),
-    ).map((card) => row(db, card)),
+    ).map((card) => ({ ...row(db, card), reason: shortReason(card.note) })),
     done: done
       .sort((left, right) => (right.doneAt ?? '').localeCompare(left.doneAt ?? ''))
       .map((card) => ({ id: card.id, title: card.title, doneAt: card.doneAt! })),
@@ -267,6 +285,19 @@ export function writeBacklog(
   return path
 }
 
+/** Шрифт панели OpenCode: копируется рядом с HTML, чтобы страница была самодостаточной. */
+const BACKLOG_FONT_SOURCE = fileURLToPath(new URL('../../assets/Inter.ttf', import.meta.url))
+export const BACKLOG_FONT_NAME = 'Inter.ttf'
+
+function copyBacklogFont(htmlPath: string): void {
+  if (!existsSync(BACKLOG_FONT_SOURCE)) return
+  try {
+    copyFileSync(BACKLOG_FONT_SOURCE, join(dirname(htmlPath), BACKLOG_FONT_NAME))
+  } catch {
+    // без шрифта HTML остаётся читаемым: системный fallback из CSS
+  }
+}
+
 /** HTML-снимок рядом с md: открывается в браузере, обновляется по F5. */
 export function writeBacklogHtml(
   db: DatabaseSync,
@@ -275,6 +306,7 @@ export function writeBacklogHtml(
 ): string {
   const path = backlogHtmlPath(root, settings)
   writeAtomic(path, renderBacklogPage(buildBacklog(db), settings.backlog.refreshSeconds))
+  copyBacklogFont(path)
   return path
 }
 

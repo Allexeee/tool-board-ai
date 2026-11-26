@@ -354,6 +354,7 @@ test('block в фазе request освобождает держателя и п�
   assert.equal(blocked.status, 'blocked')
   assert.equal(blocked.phase, 'request')
   assert.equal(blocked.holder, null)
+  assert.equal(blocked.note, 'какой SSO?')
 
   const event = listEvents(db, card.id).at(-1)!
   assert.equal(event.type, 'card.blocked')

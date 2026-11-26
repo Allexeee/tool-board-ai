@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { currentBoardVersion } from '../../src/core/git.ts'
 import { makeBoardSource, makeRepo } from '../helpers/repo.ts'
@@ -12,6 +12,26 @@ function run(dir: string, args: string[]) {
   return spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
+    windowsHide: true,
+  })
+}
+
+/** Обходит локальный CLI: в тесте он заглушка без «Что нового». */
+function runGlobal(dir: string, args: string[]) {
+  return spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
+    windowsHide: true,
+  })
+}
+
+/** Имитирует запуск локального CLI диспетчером: BOARD_DELEGATED уже стоит. */
+function runDelegated(dir: string, args: string[]) {
+  return spawnSync(process.execPath, [bin, ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, BOARD_DELEGATED: '1' },
     windowsHide: true,
   })
 }
@@ -34,17 +54,82 @@ test('init в git-проекте ставит submodule и генерирует 
 
   const data = JSON.parse(result.stdout) as {
     boardVersion: string
+    from: string | null
+    to: string | null
+    whatsNew: Array<{ version: string; points: string[] }>
     proposal: unknown
     proposalWarning: string | null
     recommendations: string[]
   }
   assert.equal(data.boardVersion, '1.1.0')
+  assert.equal(data.from, null)
+  assert.equal(data.to, '1.1.0')
+  assert.deepEqual(data.whatsNew.map((entry) => entry.version), ['1.0.0', '1.1.0'])
   assert.equal(data.proposal, null)
   assert.match(data.proposalWarning ?? '', /не совместима/)
   assert.ok(data.recommendations.includes(data.proposalWarning!))
   assert.equal(currentBoardVersion(repo.root), '1.1.0')
   assert.ok(existsSync(join(repo.root, 'tools', 'board', 'bin', 'board.ts')))
   assert.ok(existsSync(join(repo.root, '.opencode', 'plugins', 'board', 'index.ts')))
+})
+
+test('init --refresh не повторяет уже показанное «Что нового»', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+  const source = makeBoardSource()
+  t.after(source.close)
+
+  const first = run(repo.root, [
+    'init', '--board-version', 'v1.1.0', '--board-source', source.source, '--json',
+  ])
+  assert.equal(first.status, 0, first.stderr || first.stdout)
+
+  const refreshed = runGlobal(repo.root, ['init', '--refresh', '--json'])
+  assert.equal(refreshed.status, 0, refreshed.stderr || refreshed.stdout)
+  const data = JSON.parse(refreshed.stdout) as {
+    from: string | null
+    to: string | null
+    whatsNew: Array<{ version: string }>
+  }
+  assert.equal(data.from, '1.1.0')
+  assert.equal(data.to, '1.1.0')
+  assert.deepEqual(data.whatsNew, [])
+
+  const text = runGlobal(repo.root, ['init', '--refresh'])
+  assert.equal(text.status, 0, text.stderr || text.stdout)
+  assert.match(text.stdout, /Что нового: изменений нет\./)
+})
+
+test('init --refresh через локальный CLI пишет отметку whats-new', (t) => {
+  const repo = makeRepo()
+  t.after(repo.close)
+  const source = makeBoardSource()
+  t.after(source.close)
+
+  const init = run(repo.root, [
+    'init', '--board-version', 'v1.1.0', '--board-source', source.source, '--json',
+  ])
+  assert.equal(init.status, 0, init.stderr || init.stdout)
+  // Имитируем проект, где старый init не успел записать отметку.
+  rmSync(join(repo.root, '.board', 'whats-new.json'), { force: true })
+
+  const first = runDelegated(repo.root, ['init', '--refresh', '--json'])
+  assert.equal(first.status, 0, first.stderr || first.stdout)
+  const firstData = JSON.parse(first.stdout) as {
+    from: string | null
+    whatsNew: Array<{ version: string }>
+  }
+  assert.equal(firstData.from, null)
+  assert.deepEqual(firstData.whatsNew.map((entry) => entry.version), ['1.0.0', '1.1.0'])
+
+  const second = runDelegated(repo.root, ['init', '--refresh', '--json'])
+  assert.equal(second.status, 0, second.stderr || second.stdout)
+  const secondData = JSON.parse(second.stdout) as {
+    from: string | null
+    whatsNew: Array<{ version: string }>
+  }
+  assert.equal(secondData.from, '1.1.0')
+  assert.deepEqual(secondData.whatsNew, [])
 })
 
 test('init в репозитории board не добавляет submodule', (t) => {

@@ -363,7 +363,7 @@ const STATUS_WORDS: Record<CardStatus, string> = {
   in_progress: 'в работе',
   blocked: 'заблокирована',
   deferred: 'отложена',
-  review: 'ждет финального ревью',
+  review: 'проходит ревью',
   acceptance: 'требует приёмки',
   done: 'сделано',
   cancelled: 'отменена',

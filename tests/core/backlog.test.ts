@@ -2,17 +2,20 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { addDep } from '../../src/core/deps.ts'
 import { addIdea } from '../../src/core/cards.ts'
+import { deferCard } from '../../src/core/lifecycle.ts'
 import {
+  BACKLOG_FONT_NAME,
   backlogStatePath,
   buildBacklog,
   flushBacklog,
   renderBacklog,
   writeBacklog,
+  writeBacklogHtml,
 } from '../../src/core/backlog.ts'
 import { readSettings, updateSettings } from '../../src/core/settings.ts'
-import { makeBoard, seedCard } from '../helpers/board.ts'
+import { makeBoard, seedCard, seedExecutor } from '../helpers/board.ts'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 function card(
   board: ReturnType<typeof makeBoard>,
@@ -61,13 +64,30 @@ test('renderBacklog: статусы, группы, отложенные и го�
   assert.match(md, /ждёт другие карточки/)
   assert.match(md, /\| Ждёт \|.*ждёт: /)
   assert.match(md, /в работе/)
-  assert.match(md, /ждет финального ревью/)
+  assert.match(md, /проходит ревью/)
   assert.match(md, /заблокирована/)
   assert.match(md, /## Отложенные/)
   assert.match(md, /позже/)
   assert.match(md, /## Готово за последние 12 часов/)
   assert.match(md, /Готово/)
   assert.doesNotMatch(md, /отменена/)
+})
+
+test('renderBacklog: причина отложенной приходит из defer --note', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  seedExecutor(board.db)
+  const card = seedCard(board.db, { phase: 'task', status: 'ready', position: 1 })
+
+  deferCard(board.db, {
+    id: card.id,
+    actor: 'developer',
+    note: 'Ждём макет. Вторая фраза не в колонку.',
+  })
+
+  const row = buildBacklog(board.db).deferred.find((item) => item.id === card.id)!
+  assert.equal(row.note, 'Ждём макет. Вторая фраза не в колонку.')
+  assert.equal(row.reason, 'Ждём макет.')
 })
 
 test('renderBacklog: приёмка — в начале задач владельца, без отдельной секции', (t) => {
@@ -98,10 +118,16 @@ test('renderBacklog: идеи — отдельная таблица в конц�
   t.after(board.close)
   card(board, 'deferred', { note: 'обычная', title: 'Отложенная задача' })
   const idea = addIdea(board.db, { text: 'Идея на будущее', actor: 'owner' })
+  const detailed = addIdea(board.db, {
+    text: 'Короткий заголовок\nПодробный текст идеи для md.',
+    title: 'Короткий заголовок',
+    actor: 'owner',
+  })
 
   const md = renderBacklog(board.db)
   assert.match(md, /## Идеи/)
   assert.match(md, new RegExp(`\\| ${idea.id} \\| Идея на будущее \\|`))
+  assert.match(md, new RegExp(`\\| ${detailed.id} \\| Короткий заголовок Подробный текст идеи для md\\. \\|`))
   const beforeIdeas = md.split('## Идеи')[0]
   assert.doesNotMatch(beforeIdeas, /Идея на будущее/)
   assert.match(beforeIdeas, /Отложенная задача/)
@@ -117,6 +143,16 @@ test('writeBacklog: путь из настроек, файл создаётся'
 
   assert.equal(path, join(board.root, 'docs/board/BACKLOG.md'))
   assert.match(readFileSync(path, 'utf8'), /Одна/)
+})
+
+test('writeBacklogHtml: Inter.ttf копируется рядом с HTML', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  card(board, 'ready', { title: 'Со шрифтом' })
+
+  const path = writeBacklogHtml(board.db, board.root, readSettings(board.root))
+  assert.ok(existsSync(join(dirname(path), BACKLOG_FONT_NAME)))
+  assert.match(readFileSync(path, 'utf8'), /url\("Inter\.ttf"\)/)
 })
 
 test('flushBacklog: флаг по ревизии, без изменений файлы не трогает', (t) => {
