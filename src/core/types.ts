@@ -11,6 +11,7 @@ export type CardStatus =
   | 'blocked'
   | 'deferred'
   | 'review'
+  | 'acceptance'
   | 'done'
   | 'cancelled'
 
@@ -30,6 +31,7 @@ export type RunCardStatus =
   | 'done'
   | 'review'
   | 'reviewed'
+  | 'acceptance'
 
 export interface Run {
   id: string
@@ -119,6 +121,8 @@ export interface Card {
   reviewReopens: number
   mergeCommit: string | null
   mainCommit: string | null
+  ownerAcceptance: boolean
+  ownerAcceptanceManual: boolean
   inDev: boolean
   inMain: boolean
   revertedAt: string | null

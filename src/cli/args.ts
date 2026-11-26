@@ -12,6 +12,7 @@ export const COMMANDS_WITH_SUB = new Set([
   'review',
   'idea',
   'tag',
+  'acceptance',
 ])
 
 // Флаги CLI из спецификации §12. Неизвестный флаг — ошибка ввода (код 3).
@@ -28,7 +29,9 @@ const KNOWN_FLAGS = new Set([
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
   'large-spec', 'max-spec', 'branch-main', 'branch-dev', 'no-git', 'standalone', 'sync', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
-  'format', 'out', 'md', 'events', 'description',
+  'format', 'out', 'md', 'events', 'description', 'owner-acceptance', 'no-owner-acceptance', 'reject', 'acceptance-only',
+  'include-group', 'include-tag', 'include-skill', 'include-path',
+  'exclude-group', 'exclude-tag', 'exclude-skill', 'exclude-path',
 ])
 
 const BOOLEAN_FLAGS = new Set([
@@ -37,6 +40,7 @@ const BOOLEAN_FLAGS = new Set([
   'force', 'fresh', 'no-merge', 'yes', 'show', 'refresh', 'review-after-run',
   'no-review-after-run', 'allow-downgrade', 'clear-tags', 'md', 'events', 'no-git', 'standalone', 'no-plan', 'new-group',
   'backlog-auto', 'no-backlog-auto', 'html', 'open', 'no-decisions', 'defaults', 'merge', 'dry-run',
+  'owner-acceptance', 'no-owner-acceptance', 'reject', 'acceptance-only',
 ])
 
 export type FlagValue = string | boolean | string[]

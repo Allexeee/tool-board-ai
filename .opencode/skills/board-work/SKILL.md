@@ -46,6 +46,7 @@ description: Доска: исполнить карточку — take, план 
 - important — finding-карточка `board review finding <ID> --severity important --text "..."` встаёт в очередь; release не блокирует, берётся следующим раном по приоритету.
 - other — один сборник `review notes` в `deferred`.
 - Перед релизом — `board review package`: пакет done-карточек dev вне main, проход записывается `--verdict done|reopen` и покрывает коммиты; release без пакета — `--no-review --reason` владельца.
+- Если карточка требует приёмки, вердикт `done` ведёт в `acceptance`; владелец закрывает `board card accept` или отклоняет `--reject --reason`. Релиз ждёт обе проверки.
 - Свою карточку не ревьюй: вердикт даёт свежий субагент. `critical` блокирует release.
 
 ## Правила

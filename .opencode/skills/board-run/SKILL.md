@@ -9,7 +9,7 @@ description: Доска: забег — «Ран», состав, порядок
 
 1. `board run start --as <исполнитель> --cards <ID>,...` (или `--suggest 1|2|3` — вариант new/improve/review). На старте не больше 3 карточек.
 2. `board run next --as <исполнитель>` — следующая карточка забега.
-3. `board run end --as <исполнитель> [--review|--no-review]` — закрыть забег; если `reviewMode` не `none`, запусти `/review`.
+3. `board run end --as <исполнитель> [--review|--no-review]` — закрыть забег; если `reviewMode` не `none`, запусти `/review`. Карточки в `acceptance` считаются сданными: забег закрывается, `run next` их не выдаёт.
 4. `board run add <ID>`, `board run drop <ID>` — состав забега.
 
 ## Ран

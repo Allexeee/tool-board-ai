@@ -180,6 +180,20 @@ board idea drop IDEA-1
 
 В бэклоге идеи идут отдельной таблицей «Идеи» в конце; в задачи, отложенные и готовые они не попадают. В плагине — `board_idea`.
 
+## Приёмка владельцем
+
+Флаг `owner_acceptance` означает, что результат должен посмотреть владелец. Сданная карточка с флагом встаёт в статус `acceptance`; после код-ревью — тоже туда, а не в `done`. Релиз ждёт обе проверки: ревью и приёмку.
+
+```bash
+board acceptance rule add visual --include-tag ui --include-path "src/components/**" --exclude-tag no-acceptance
+board acceptance rule list
+board acceptance check CORE-1
+board card accept CORE-1 [--note "..."]
+board card accept CORE-1 --reject --reason "кнопка не та" --as owner
+```
+
+Правила живут в `acceptance.rules`: `include`/`exclude` по группам, тегам, навыкам и путям; общий `exclude` снимает приёмку. Проверка идёт по заявленному scope и фактическому diff на `finish`. Явный `--owner-acceptance` / `--no-owner-acceptance` сильнее правил. В бэклоге карточки приёмки — в начале «Задачи для владельца»; в `now` — счётчик и пометка «ждёт приёмки».
+
 ## Настройки
 
 Настройки лежат в `.board/settings.json` и не попадают в git. Мастер

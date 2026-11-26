@@ -65,6 +65,7 @@ export interface NowView {
   moreRequests?: number
   deferredCount?: number
   reviewCount?: number
+  acceptanceCount?: number
 }
 
 export interface NowOptions {
@@ -151,8 +152,17 @@ function computeHeader(db: DatabaseSync): NowHeader {
 /** Вкладка владельцу §11.2: на утверждении, owner-карточки в ready, открытые вопросы. */
 function ownerView(
   db: DatabaseSync,
-): Pick<NowView, 'approvals' | 'ownerCards' | 'questions' | 'deferredCount' | 'reviewCount'> {
+): Pick<
+  NowView,
+  'approvals' | 'ownerCards' | 'questions' | 'deferredCount' | 'reviewCount' | 'acceptanceCount'
+> {
   const approvals = listCards(db, { status: 'approval' })
+  const acceptance = listCards(db, { status: 'acceptance' }).sort(
+    (left, right) =>
+      (right.importance ?? -1) - (left.importance ?? -1) ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id),
+  )
   const ownerCards = listCards(db, { skill: 'owner', status: ['ready', 'waiting'] }).sort(
     (left, right) =>
       (right.importance ?? -1) - (left.importance ?? -1) ||
@@ -162,7 +172,14 @@ function ownerView(
   const questions = openQuestions(db)
   const deferredCount = listCards(db, { status: 'deferred' }).length
   const reviewCount = listCards(db, { status: 'review' }).length
-  return { approvals, ownerCards, questions, deferredCount, reviewCount }
+  return {
+    approvals,
+    ownerCards: [...acceptance, ...ownerCards],
+    questions,
+    deferredCount,
+    reviewCount,
+    acceptanceCount: acceptance.length,
+  }
 }
 
 /** Вкладка «мои задачи» §11.3: карточки на руках и очередь по навыкам агента. */
@@ -346,7 +363,8 @@ const STATUS_WORDS: Record<CardStatus, string> = {
   in_progress: 'в работе',
   blocked: 'заблокирована',
   deferred: 'отложена',
-  review: 'на ревью',
+  review: 'ждет финального ревью',
+  acceptance: 'требует приёмки',
   done: 'сделано',
   cancelled: 'отменена',
 }
@@ -360,6 +378,7 @@ const STATUS_COLORS: Partial<Record<CardStatus, ColorName>> = {
   booked: 'cyan',
   in_progress: 'cyan',
   review: 'magenta',
+  acceptance: 'yellow',
   blocked: 'yellow',
   deferred: 'gray',
   approval: 'yellow',
@@ -492,7 +511,8 @@ function renderOwner(lines: string[], data: NowView, painter: Painter): void {
   if (data.ownerCards && data.ownerCards.length > 0) {
     lines.push(`ЗАДАЧИ (${data.ownerCards.length})`)
     for (const card of data.ownerCards) {
-      lines.push(`  ${card.id.padEnd(7)} ${card.title}`)
+      const mark = card.status === 'acceptance' ? '  · ждёт приёмки' : ''
+      lines.push(`  ${card.id.padEnd(7)} ${card.title}${mark}`)
     }
   }
   if (data.questions && data.questions.length > 0) {

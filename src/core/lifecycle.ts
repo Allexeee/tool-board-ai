@@ -27,6 +27,8 @@ import { insertIntoQueue, moveCard, reorderQueue } from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
 import { getActiveRun, listRunCards, requireStandaloneCard, RUN_LEASE_MS } from './runs.ts'
+import { readSettings } from './settings.ts'
+import { recalculateAcceptance } from './acceptance.ts'
 import { assertSpecReview, type SpecReviewGate } from './spec-review.ts'
 import type { Card, CardStatus, Run } from './types.ts'
 
@@ -1239,7 +1241,18 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
       )
     }
 
-    const status = current.reviewRequired || input.forceReview === true ? 'review' : 'done'
+    const statusCard = recalculateAcceptance(
+      db,
+      input.root,
+      { ...current, mergeCommit: plan.mergeCommit },
+      readSettings(input.root),
+    )
+    const status =
+      current.reviewRequired || input.forceReview === true
+        ? 'review'
+        : statusCard.ownerAcceptance
+          ? 'acceptance'
+          : 'done'
     const at = nowIso()
     db.prepare(
       `update cards set status = ?, summary = ?, done_at = ?, merge_commit = ?, in_dev = ?, in_main = 0,
@@ -1264,6 +1277,109 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
       before: plan.card,
       after: updated,
       note: plan.summary,
+    })
+    return updated
+  })
+}
+
+/**
+ * Приёмка владельцем: acceptance → done. Только owner.
+ */
+export function acceptCard(
+  db: DatabaseSync,
+  input: { id: string; actor: string; note?: string },
+): Card {
+  return tx(db, () => {
+    if (input.actor !== OWNER) throw new UserError(3, 'приёмка — команда владельца')
+    const card = requireCard(db, input.id)
+    if (card.status !== 'acceptance') {
+      throw new UserError(3, `карточка ${card.id} не ждёт приёмки: ${card.status}`)
+    }
+    const at = nowIso()
+    const note = input.note?.trim() || null
+    db.prepare(
+      `update cards set status = 'done', done_at = ?, updated_at = ?,
+       note = coalesce(?, note) where id = ?`,
+    ).run(at, at, note, card.id)
+    if (card.runId) {
+      db.prepare("update run_cards set status = 'done' where run_id = ? and card_id = ?").run(
+        card.runId,
+        card.id,
+      )
+    }
+    refreshReadiness(db)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.accepted',
+      actor: input.actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+      note: note ?? undefined,
+    })
+    return updated
+  })
+}
+
+/**
+ * Отклонение приёмки: возвращает карточку в работу к прошлому держателю,
+ * если он свободен; иначе — в начало очереди.
+ */
+export function rejectAcceptance(
+  db: DatabaseSync,
+  input: { id: string; actor: string; reason: string },
+): Card {
+  return tx(db, () => {
+    if (input.actor !== OWNER) throw new UserError(3, 'отклонение приёмки — команда владельца')
+    const card = requireCard(db, input.id)
+    if (card.status !== 'acceptance') {
+      throw new UserError(3, `карточка ${card.id} не ждёт приёмки: ${card.status}`)
+    }
+    const reason = requireReason(input.reason)
+
+    const previous = card.previousHolder
+    const busy =
+      previous === null
+        ? true
+        : db
+            .prepare(
+              "select 1 as found from cards where holder = ? and status = 'in_progress' and id != ? limit 1",
+            )
+            .get(previous, card.id) !== undefined
+
+    const run = previous !== null && card.runId ? getActiveRun(db, previous) : null
+    const restoreRun = previous !== null && !busy && run !== null && run.id === card.runId
+    const at = nowIso()
+    const leaseUntil = new Date(Date.now() + RUN_LEASE_MS).toISOString()
+
+    if (previous !== null && !busy) {
+      db.prepare(
+        `update cards set status = 'in_progress', holder = ?, run_id = ?, lease_until = ?,
+         position = null, done_at = null, note = ?, updated_at = ? where id = ?`,
+      ).run(previous, restoreRun ? card.runId : null, leaseUntil, reason, at, card.id)
+      if (restoreRun) {
+        db.prepare(
+          "update run_cards set status = 'in_progress' where run_id = ? and card_id = ?",
+        ).run(run.id, card.id)
+      }
+    } else {
+      db.prepare(
+        `update cards set status = 'ready', holder = null, run_id = null, lease_until = null,
+         done_at = null, note = ?, updated_at = ? where id = ?`,
+      ).run(reason, at, card.id)
+      if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
+      moveCard(db, card.id, { top: true })
+    }
+
+    refreshReadiness(db)
+    const updated = getCard(db, card.id)!
+    appendEvent(db, {
+      type: 'card.acceptance_rejected',
+      actor: input.actor,
+      subject: card.id,
+      before: card,
+      after: updated,
+      note: reason,
     })
     return updated
   })

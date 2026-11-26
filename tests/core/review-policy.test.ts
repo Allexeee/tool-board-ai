@@ -30,6 +30,7 @@ const base: BoardSettings = {
     modelMap: { low: 'low', default: 'default', high: 'high', max: 'max' },
     profiles: {},
   },
+  acceptance: { rules: [] },
   branches: { main: null, dev: null },
   git: true,
   sync: { remote: null },

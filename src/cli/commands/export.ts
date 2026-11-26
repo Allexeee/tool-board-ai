@@ -35,6 +35,7 @@ function renderMarkdown(cards: Card[]): string {
     lines.push(`## ${card.id} — ${card.title}`)
     const skill = card.skill ? `, навык: ${card.skill}` : ''
     lines.push(`- статус: ${card.status}${skill}`)
+    lines.push(`- приёмка владельца: ${card.ownerAcceptance ? 'да' : 'нет'}`)
     if (card.body.trim()) {
       lines.push('', card.body.trim())
     }

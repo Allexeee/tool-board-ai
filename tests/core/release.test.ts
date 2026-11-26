@@ -12,7 +12,7 @@ import {
   runGit,
   startCardBranch,
 } from '../../src/core/git.ts'
-import { cancelCard, finishCard } from '../../src/core/lifecycle.ts'
+import { acceptCard, cancelCard, finishCard } from '../../src/core/lifecycle.ts'
 import { initProject } from '../../src/core/project.ts'
 import { release } from '../../src/core/release.ts'
 import { collectPackage, submitPackage, waiveReview } from '../../src/core/review.ts'
@@ -389,6 +389,16 @@ test('release --package: конфликт переноса не меняет mai
   )
   assert.equal(runGit(root, ['rev-parse', 'HEAD']), before)
   assert.equal(runGit(root, ['show', 'main:src/conflict.txt']).trim(), 'main')
+})
+
+test('release ждёт приёмку владельцем и проходит после accept', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("update cards set status = 'acceptance', done_at = null where id = ?").run(card.id)
+
+  assert.throws(() => release(db, root, 'owner'), /приёмки/)
+  acceptCard(db, { id: card.id, actor: 'owner' })
+  assert.equal(release(db, root, 'owner').commit.length, 40)
 })
 
 test('release ставит тег версии, повторный release не падает', (t) => {

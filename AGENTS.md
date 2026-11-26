@@ -13,6 +13,7 @@
 - «Открой/покажи бэклог» — `board backlog --open`; если доступен инструмент браузера, открой `docs/board/BACKLOG.html` в панели Review (`browser.preview`). В чат HTML не вставляй.
 - Идеи — `board idea add|list|edit|drop` (или `board_idea`): карточки IDEA, вне очереди, мержа и ревью; в бэклоге отдельная таблица.
 - Теги — реестр `board tag add|list|rename|remove` (или `board_tag`); на `card shape` теги берутся из дизайна задачи, `card tag add|remove` — точечно.
+- Приёмка владельцем: флаг `owner_acceptance` и статус `acceptance`; правила — `board acceptance rule add|list|remove` и `check`; владелец закрывает `card accept` или отклоняет `--reject --reason`; релиз ждёт и ревью, и приёмку.
 - Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.
 - `writing-plans`, `executing-plans` и другие конкурирующие навыки superpowers в проекте выключены правами OpenCode: план — steps карточки, отдельного plan-файла нет.
 - `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.

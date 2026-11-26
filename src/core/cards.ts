@@ -26,6 +26,7 @@ export interface CardFilter {
   holder?: string
   group?: string
   tag?: string
+  acceptance?: boolean
 }
 
 export interface CardPatch {
@@ -37,6 +38,8 @@ export interface CardPatch {
   urgency?: number | null
   needsMerge?: boolean
   reviewRequired?: boolean
+  ownerAcceptance?: boolean
+  ownerAcceptanceManual?: boolean
   scope?: string[]
   tags?: string[]
   note?: string | null
@@ -54,6 +57,7 @@ const STATUSES: readonly CardStatus[] = [
   'blocked',
   'deferred',
   'review',
+  'acceptance',
   'done',
   'cancelled',
 ]
@@ -97,6 +101,8 @@ interface Row {
   review_reopens: number
   merge_commit: string | null
   main_commit: string | null
+  owner_acceptance: number
+  owner_acceptance_manual: number
   in_dev: number
   in_main: number
   reverted_at: string | null
@@ -143,6 +149,8 @@ const toCard = (row: Row): Card => ({
   reviewReopens: row.review_reopens,
   mergeCommit: row.merge_commit,
   mainCommit: row.main_commit,
+  ownerAcceptance: row.owner_acceptance === 1,
+  ownerAcceptanceManual: row.owner_acceptance_manual === 1,
   inDev: row.in_dev === 1,
   inMain: row.in_main === 1,
   revertedAt: row.reverted_at,
@@ -309,7 +317,7 @@ export function resolveCardId(db: DatabaseSync, id: string): string | null {
 
 export function listCards(db: DatabaseSync, filter: CardFilter = {}): Card[] {
   const where: string[] = []
-  const params: string[] = []
+  const params: (string | number)[] = []
 
   if (filter.phase !== undefined) {
     const phases = filterValues(filter.phase, PHASES, 'фаза')
@@ -336,6 +344,10 @@ export function listCards(db: DatabaseSync, filter: CardFilter = {}): Card[] {
   if (filter.tag !== undefined) {
     where.push('exists (select 1 from json_each(cards.tags) where json_each.value = ?)')
     params.push(filter.tag)
+  }
+  if (filter.acceptance !== undefined) {
+    where.push('owner_acceptance = ?')
+    params.push(filter.acceptance ? 1 : 0)
   }
 
   const sql =
@@ -481,6 +493,20 @@ export function editCard(
     if (patch.note !== undefined) {
       sets.push('note = ?')
       params.push(patch.note === null ? null : patch.note)
+    }
+    if (patch.ownerAcceptance !== undefined) {
+      if (card.status === 'done' || card.status === 'cancelled') {
+        throw new UserError(
+          3,
+          `приёмку карточки ${card.id} нельзя менять в статусе ${card.status}`,
+        )
+      }
+      sets.push('owner_acceptance = ?')
+      params.push(patch.ownerAcceptance ? 1 : 0)
+    }
+    if (patch.ownerAcceptanceManual !== undefined) {
+      sets.push('owner_acceptance_manual = ?')
+      params.push(patch.ownerAcceptanceManual ? 1 : 0)
     }
 
     if (sets.length === 0) return card

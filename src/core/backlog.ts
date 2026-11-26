@@ -17,6 +17,7 @@ export const STATUS_LABEL: Record<CardStatus, string> = {
   booked: 'готов к работе',
   in_progress: 'в работе',
   review: 'ждет финального ревью',
+  acceptance: 'требует приёмки владельцем',
   blocked: 'заблокирована',
   deferred: 'отложена',
   done: 'готово',
@@ -111,7 +112,10 @@ function sortCards(cards: Card[]): Card[] {
 
 /** Данные бэклога: таблицы по навыкам, отложенные и недавно готовые. */
 export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): BacklogData {
-  const cards = listCards(db).filter((card) => !HIDDEN.includes(card.status) && !isIdeaCard(card))
+  const cards = listCards(db).filter(
+    (card) => !HIDDEN.includes(card.status) && !isIdeaCard(card) && card.status !== 'acceptance',
+  )
+  const acceptance = sortCards(listCards(db, { status: 'acceptance' })).map((card) => row(db, card))
 
   const bySkill = new Map<string, Card[]>()
   for (const card of cards) {
@@ -140,13 +144,20 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
       updatedAt: card.updatedAt,
     }))
 
+  const sections = skills.map((skill) => ({
+    skill,
+    label: SKILL_LABEL[skill] ?? skill,
+    rows: sortCards(bySkill.get(skill)!).map((card) => row(db, card)),
+  }))
+  if (acceptance.length > 0) {
+    const owner = sections.find((section) => section.skill === 'owner')
+    if (owner) owner.rows = [...acceptance, ...owner.rows]
+    else sections.unshift({ skill: 'owner', label: 'владельца', rows: acceptance })
+  }
+
   return {
     generatedAt: reference.toISOString(),
-    skills: skills.map((skill) => ({
-      skill,
-      label: SKILL_LABEL[skill] ?? skill,
-      rows: sortCards(bySkill.get(skill)!).map((card) => row(db, card)),
-    })),
+    skills: sections,
     deferred: sortCards(
       listCards(db, { status: 'deferred' }).filter((card) => !isIdeaCard(card)),
     ).map((card) => row(db, card)),
