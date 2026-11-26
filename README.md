@@ -52,6 +52,20 @@ submodule коммитится вместе с `.gitmodules` и `.opencode`. CI-
 печатается понятное сообщение. После обновления агент пересказывает блок
 человеческим языком и предлагает `board adopt --check`.
 
+### План обновления adopt
+
+```bash
+board adopt --check       # план по проекту, ничего не создаёт
+```
+
+`adopt` смотрит, чего не хватает проекту: областей, словаря тегов, профиля
+ревью (`auto` с эффективным профилем текущей модели), правил приёмки,
+исполнителей, бэклога и задач в `docs/inbox` и файлах-чеклистах. Доска только
+показывает план и готовые команды; создаёт всё агент после согласия владельца
+обычными `group add`, `tag add`, `setup --profile`, `acceptance rule add`,
+`executor add` и `card add`. Повторный `--check` идемпотентен и показывает
+остаток, дублей нет.
+
 ## Установка в существующий проект
 
 Старый `toolbox-al` или `.toolbox-al` в проекте не нужен. `init` создаёт
@@ -303,6 +317,7 @@ board command add "RUN" "начать забег по очереди" --as owner
 |---|---|
 | `init [каталог] [--yes] [--refresh] [--board-version <ref>] [--board-source <url>]` | скелет проекта, submodule `tools/board`, мастер настроек и обновление `.opencode` |
 | `upgrade <ref>\|--latest [--allow-downgrade]` | переключить `tools/board` и перегенерировать `.opencode` |
+| `adopt --check` | план обновления проекта: области, теги, профиль, приёмка, исполнители, бэклог и задачи; ничего не создаёт |
 | `setup [--show\|--spec-review\|--max-spec\|--large-spec\|--run-review\|--reviewer-model]` | настройки доски |
 | `executor add\|list\|edit\|remove` | исполнители и навыки |
 | `card add\|list\|show\|edit` | карточки |

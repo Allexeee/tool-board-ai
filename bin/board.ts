@@ -19,6 +19,7 @@ const HELP = `board — доска карточек для людей и аге�
                           перезаписывает сгенерированные .opencode-файлы
   upgrade <ref>|--latest [--allow-downgrade]
                           переключить tools/board на другую версию
+  adopt --check           план обновления проекта; ничего не создаёт
   setup                   мастер настроек: --show, --review-after-run,
                           --no-review-after-run
 
@@ -62,6 +63,8 @@ const HELP = `board — доска карточек для людей и аге�
 `
 
 const COMMAND_HELP: Record<string, string> = {
+  adopt:
+    'board adopt --check — план обновления: области, теги, профиль, приёмка, исполнители, бэклог и задачи из docs/inbox. Ничего не создаёт.',
   'card add':
     'board card add [--group <P>] --title "<тип: заголовок>" --skill <s> [--new-group] [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review|--no-review --reason "..."] [--no-needs-merge] [--as <id>]',
   'card edit':
@@ -192,6 +195,7 @@ if (!globalFlag && !allowGlobal && !process.env.BOARD_DELEGATED && !local) {
 /** Команды, после которых бэклог заведомо не меняется. */
 const NO_BACKLOG_FLUSH = new Set([
   'init',
+  'adopt',
   'backlog',
   'doctor',
   'now',
