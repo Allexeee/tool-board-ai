@@ -849,6 +849,38 @@ test('suggestVariantRuns не берёт waiting с внешней зависи�
   assert.equal(runs.some((run) => run.cards.some((card) => card.id === waiting.id)), false)
 })
 
+test('suggestVariantRuns: карточка без позиции — после позиционной, бронь ставит позицию', (t) => {
+  const { db, close } = makeBoard()
+  t.after(close)
+  seedExecutor(db, { id: 'dev', skills: ['dev'], runSize: 3 })
+  const queued = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    position: 1,
+    importance: 1,
+    urgency: 1,
+    tags: ['new'],
+  })
+  const loose = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    importance: 3,
+    urgency: 3,
+    tags: ['new'],
+  })
+
+  const runs = suggestVariantRuns(db, 'dev')
+  assert.deepEqual(
+    runs.find((run) => run.tag === 'new')!.cards.map((card) => card.id),
+    [queued.id, loose.id],
+  )
+
+  startRun(db, { executorId: 'dev', cardIds: [queued.id, loose.id], actor: 'dev' })
+  const booked = getCard(db, loose.id)!
+  assert.equal(booked.status, 'booked')
+  assert.ok(booked.position)
+})
+
 test('startRun принимает запрос как planned и заполняет run_id', (t) => {
   const { db, close } = makeBoard()
   t.after(close)
