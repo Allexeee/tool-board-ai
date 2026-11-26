@@ -129,7 +129,7 @@ test('runSetupWizard: пустые ответы оставляют текущи�
   assert.deepEqual(next.specReview, { mode: 'auto', maxSpecChars: 1500, largeSpecChars: 6000 })
   assert.deepEqual(next.runReview, { mode: 'none' })
   assert.deepEqual(next.reviewer, { model: null })
-  assert.equal(next.review.profile, 'custom')
+  assert.equal(next.review.profile, 'auto')
   assert.ok(next.setupAt)
 })
 
