@@ -7,6 +7,7 @@
 - Читай `docs/board/terminology.md` в начале сессии и перед разбором; команды владельца авторитетны.
 - Карточка: запрос → `card shape` (spec + критерии приёмки) → `card spec-review` → `card submit` → владелец `card approve`.
 - Решений владельца нет — `card submit --no-decisions`: карточка сразу в очередь, approve не нужен. Решения — окно выбора (2–4 варианта) и обычный `card approve`.
+- Правка владельца к уже сделанной работе — продолжение той же карточки: reopen из review/acceptance или amend spec, затем доработка. Новую карточку заводи только для отдельной задачи.
 - Префикс — область проекта (CORE, UI, SITE), не ярлык задачи: сначала `board group list`, новый — только с `--new-group`; в пустом проекте — CARD.
 - После approve plan пишет исполнитель при `take`; plan — это steps + scope + проверки.
 - Работа: `run start` → `take` (plan) → `finish --summary` → `run next` → `run end`; одиночный `take` без забега тоже работает.
