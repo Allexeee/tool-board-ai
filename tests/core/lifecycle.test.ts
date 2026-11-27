@@ -868,7 +868,7 @@ test('approve ставит новую задачу в конец, огромны
     status: 'approval',
     position: 9,
     importance: 4,
-    urgency: 4,
+    urgency: 5,
   })
   db.prepare("update cards set skill = 'dev' where id = ?").run(huge.id)
   assert.equal(approveCard(db, { id: huge.id, actor: 'owner' }).position, 4)

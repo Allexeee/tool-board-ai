@@ -499,7 +499,12 @@ test('пузыри: новая задача вниз, огромный пузы�
   insertIntoQueue(db, normal.id, { bubble: true })
   assert.equal(getCard(db, normal.id)!.position, 6)
 
-  const huge = task(db, { skill: 'dev', importance: 4, urgency: 4 })
+  // 4 × 4 = 16 — ещё не огромный пузырь: высокая оценка, но место в конце.
+  const strong = task(db, { skill: 'dev', importance: 4, urgency: 4 })
+  insertIntoQueue(db, strong.id, { bubble: true })
+  assert.equal(getCard(db, strong.id)!.position, 7)
+
+  const huge = task(db, { skill: 'dev', importance: 4, urgency: 5 })
   insertIntoQueue(db, huge.id, { bubble: true })
   assert.equal(getCard(db, huge.id)!.position, 4)
 })
@@ -546,7 +551,7 @@ test('пузыри: огромный пузырь входит в первую �
   task(db, { skill: 'dev', position: 2 })
   task(db, { skill: 'dev', position: 3 })
   task(db, { skill: 'dev', position: 4 })
-  const huge = task(db, { skill: 'dev', position: 5, importance: 4, urgency: 4 })
+  const huge = task(db, { skill: 'dev', position: 5, importance: 4, urgency: 5 })
 
   db.prepare("update cards set status = 'done' where id = ?").run(first.id)
   bubbleAfterLeave(db, first)

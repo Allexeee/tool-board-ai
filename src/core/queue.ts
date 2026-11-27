@@ -66,9 +66,9 @@ export function score(card: Card): number {
   return (card.importance ?? 0) * (card.urgency ?? 0)
 }
 
-/** Огромный пузырь: обе оценки не ниже 4 — единственный, кто входит в первые 3 сам. */
+/** Огромный пузырь: важность × срочность ≥ 20 — единственный, кто входит в первые 3 сам. */
 export function isHuge(card: Card): boolean {
-  return (card.importance ?? 0) >= 4 && (card.urgency ?? 0) >= 4
+  return score(card) >= 20
 }
 
 /** Место в очереди задаёт `position`; карточка без него в очередь ещё не встала. */
