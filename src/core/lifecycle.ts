@@ -23,7 +23,12 @@ import {
   startCardBranch,
   syncWithDev,
 } from './git.ts'
-import { insertIntoQueue, moveCard, reorderQueue } from './queue.ts'
+import {
+  bubbleAfterLeave,
+  insertIntoQueue,
+  reorderQueue,
+  restoreQueuePosition,
+} from './queue.ts'
 import { addRef, type RefKind } from './refs.ts'
 import { revalidateDependents } from './review.ts'
 import { getActiveRun, listRunCards, requireStandaloneCard, RUN_LEASE_MS } from './runs.ts'
@@ -225,7 +230,7 @@ export function submitCard(
           `update cards set phase = 'task', status = 'waiting', holder = null, lease_until = null,
            position = null, approved_at = ?, updated_at = ? where id = ?`,
         ).run(at, at, card.id)
-        insertIntoQueue(db, card.id)
+        insertIntoQueue(db, card.id, { bubble: true })
         refreshReadiness(db)
       }
       const updated = getCard(db, card.id)!
@@ -290,7 +295,7 @@ export function approveCard(
         `update cards set status = 'waiting', approved_at = ?, position = null, updated_at = ?
          where id = ?`,
       ).run(at, at, card.id)
-      insertIntoQueue(db, card.id)
+      insertIntoQueue(db, card.id, { bubble: true })
       refreshReadiness(db)
     }
 
@@ -574,7 +579,9 @@ export function resumeCard(db: DatabaseSync, input: { id: string; actor: string 
     }
 
     db.prepare('update cards set status = ?, updated_at = ? where id = ?').run(next, at, card.id)
-    if (next === 'new' || next === 'ready' || next === 'waiting') insertIntoQueue(db, card.id)
+    if (next === 'new' || next === 'ready' || next === 'waiting') {
+      insertIntoQueue(db, card.id, { bubble: true, middle: true })
+    }
 
     const updated = getCard(db, card.id)!
     appendEvent(db, {
@@ -686,6 +693,7 @@ export function cancelCard(
        updated_at = ? where id = ?`,
     ).run(reason, input.waiveDeps === true ? 1 : 0, revertedAt, revertCommit, at, card.id)
 
+    if (card.skill !== OWNER) bubbleAfterLeave(db, card)
     refreshReadiness(db)
     if (!input.waiveDeps) revalidateDependents(db, card.id)
 
@@ -725,17 +733,16 @@ export function reopenCard(
     const ready = listDeps(db, card.id).every((dep) => isSatisfied(db, dep))
     const status = ready ? 'ready' : 'waiting'
     const at = nowIso()
+    const saved = card.position
 
     db.prepare(
       `update cards set status = ?, attempt = attempt + 1, reverted_at = null,
        previous_holder = ?, holder = null, run_id = null, lease_until = null,
-       updated_at = ? where id = ?`,
+       position = null, updated_at = ? where id = ?`,
     ).run(status, card.holder, at, card.id)
 
     // Owner-карточка не встаёт в очередь: её закрывает и переоткрывает владелец.
-    if (card.skill !== OWNER) {
-      if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
-    }
+    if (card.skill !== OWNER) restoreQueuePosition(db, card.id, saved)
 
     refreshReadiness(db)
     revalidateDependents(db, card.id)
@@ -772,7 +779,7 @@ export function resumeAfterAnswer(db: DatabaseSync, cardId: string, actor: strin
     db.prepare(
       'update cards set status = ?, position = null, updated_at = ? where id = ?',
     ).run(status, at, cardId)
-    insertIntoQueue(db, cardId)
+    insertIntoQueue(db, cardId, { bubble: true, middle: true })
 
     const updated = getCard(db, cardId)!
     appendEvent(db, {
@@ -1266,6 +1273,9 @@ export function finishCard(db: DatabaseSync, input: FinishInput): Card {
       )
     }
 
+    // Ревью остаётся в очереди на своём месте; done и приёмка освобождают его.
+    if (status !== 'review' && current.skill !== OWNER) bubbleAfterLeave(db, current)
+
     refreshReadiness(db)
 
     const updated = getCard(db, current.id)!
@@ -1354,7 +1364,7 @@ export function rejectAcceptance(
     if (previous !== null && !busy) {
       db.prepare(
         `update cards set status = 'in_progress', holder = ?, run_id = ?, lease_until = ?,
-         position = null, done_at = null, note = ?, updated_at = ? where id = ?`,
+         done_at = null, note = ?, updated_at = ? where id = ?`,
       ).run(previous, restoreRun ? card.runId : null, leaseUntil, reason, at, card.id)
       if (restoreRun) {
         db.prepare(
@@ -1364,10 +1374,9 @@ export function rejectAcceptance(
     } else {
       db.prepare(
         `update cards set status = 'ready', holder = null, run_id = null, lease_until = null,
-         done_at = null, note = ?, updated_at = ? where id = ?`,
+         done_at = null, position = null, note = ?, updated_at = ? where id = ?`,
       ).run(reason, at, card.id)
-      if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
-      moveCard(db, card.id, { top: true })
+      restoreQueuePosition(db, card.id, card.position)
     }
 
     refreshReadiness(db)

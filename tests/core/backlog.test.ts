@@ -249,3 +249,31 @@ test('зависимая карточка идёт после блокирующ
   const ids = dev.rows.map((row) => row.id)
   assert.ok(ids.indexOf(blocker.id) < ids.indexOf(dependent.id))
 })
+
+test('зависимость в другой секции уводит карточку в конец своей', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+
+  const dependent = seedCard(board.db, {
+    phase: 'task',
+    status: 'waiting',
+    skill: 'dev',
+    position: 1,
+  })
+  const other = seedCard(board.db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 2,
+  })
+  const external = seedCard(board.db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'marketing',
+    position: 1,
+  })
+  addDep(board.db, dependent.id, external.id, 'owner')
+
+  const dev = buildBacklog(board.db).skills.find((section) => section.skill === 'dev')!
+  assert.deepEqual(dev.rows.map((row) => row.id), [other.id, dependent.id])
+})

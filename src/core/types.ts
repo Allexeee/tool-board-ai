@@ -106,6 +106,8 @@ export interface Card {
   position: number | null
   /** Сколько раз владелец вручную понизил карточку. */
   demons: number
+  /** Прогресс пузыря: шаги к следующему подъёму. */
+  bubbles: number
   needsMerge: boolean
   reviewRequired: boolean
   /** Осознанно без плана: маленькая задача, шаги не нужны. */
