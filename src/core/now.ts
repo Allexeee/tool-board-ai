@@ -97,12 +97,12 @@ const OPEN_REQUEST_STATUSES: readonly CardStatus[] = ['new', 'shaping', 'blocked
 /** Порядок карточек в едином списке: сначала в работе/ревью, затем доступные. */
 const CARD_ORDER: Record<string, number> = {
   in_progress: 0,
-  review: 1,
-  acceptance: 2,
-  blocked: 3,
-  booked: 4,
-  ready: 5,
-  waiting: 6,
+  booked: 1,
+  ready: 2,
+  waiting: 3,
+  review: 4,
+  acceptance: 5,
+  blocked: 6,
   new: 7,
   shaping: 8,
 }
