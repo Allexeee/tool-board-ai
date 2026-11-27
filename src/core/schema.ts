@@ -1,7 +1,7 @@
 ﻿import type { DatabaseSync } from 'node:sqlite'
 import { nowIso } from './clock.ts'
 
-export const SCHEMA_VERSION = 13
+export const SCHEMA_VERSION = 14
 
 /** Схема v2: spec/acceptance, версии spec и режимы ревью. */
 const DDL = `
@@ -62,6 +62,7 @@ create table cards (
   owner_acceptance integer not null default 0,
   owner_acceptance_manual integer not null default 0,
   demons integer not null default 0,
+  bubbles integer not null default 0,
   in_dev integer not null default 0,
   in_main integer not null default 0,
   reverted_at text,
@@ -289,6 +290,11 @@ update cards set importance = 1 where importance = 0;
 update cards set urgency = 1 where urgency = 0;
 `
 
+/** v13 → v14: прогресс пузыря — сколько шагов карточка накопила к подъёму. */
+const MIGRATE_V13_TO_V14 = `
+alter table cards add column bubbles integer not null default 0;
+`
+
 /** Наполняет реестр служебными тегами и тегами существующих карточек. */
 function seedTags(db: DatabaseSync): void {
   const hasCards = db
@@ -357,7 +363,8 @@ export function migrate(db: DatabaseSync): number {
       from !== 9 &&
       from !== 10 &&
       from !== 11 &&
-      from !== 12
+      from !== 12 &&
+      from !== 13
     ) {
       throw new Error(`нет миграции схемы ${from} → ${SCHEMA_VERSION}`)
     }
@@ -404,6 +411,14 @@ export function migrate(db: DatabaseSync): number {
       ).map((row) => row.name)
       if (columns.includes('importance') && columns.includes('urgency')) {
         db.exec(MIGRATE_V12_TO_V13)
+      }
+    }
+    if (from >= 1 && from < 14) {
+      const columns = (
+        db.prepare('pragma table_info(cards)').all() as Array<{ name: string }>
+      ).map((row) => row.name)
+      if (columns.includes('demons') && !columns.includes('bubbles')) {
+        db.exec(MIGRATE_V13_TO_V14)
       }
     }
 

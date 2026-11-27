@@ -132,8 +132,15 @@ function statusRank(card: Card): number {
 }
 
 function sortCards(db: DatabaseSync, cards: Card[]): Card[] {
+  const ids = new Set(cards.map((card) => card.id))
+  // Зависимость в другой таблице здесь не поставить: такая карточка ждёт
+  // и уходит в конец своей секции.
+  const externalWaiting = (card: Card): boolean =>
+    card.status === 'waiting' &&
+    listDeps(db, card.id).some((id) => !ids.has(id))
   const base = [...cards].sort(
     (left, right) =>
+      Number(externalWaiting(left)) - Number(externalWaiting(right)) ||
       (left.position ?? Number.MAX_SAFE_INTEGER) -
         (right.position ?? Number.MAX_SAFE_INTEGER) ||
       statusRank(left) - statusRank(right) ||
@@ -143,9 +150,8 @@ function sortCards(db: DatabaseSync, cards: Card[]): Card[] {
   )
   // Dependency-first: карточка не встаёт раньше своей незакрытой зависимости
   // из той же секции. Внешние зависимости и циклы не ломают порядок.
-  const ids = new Set(base.map((card) => card.id))
   const placed = new Set<string>()
-  const pending = [...base]
+  const pending = base.filter((card) => !externalWaiting(card))
   const result: Card[] = []
   while (pending.length > 0) {
     const index = pending.findIndex((card) =>
@@ -161,7 +167,7 @@ function sortCards(db: DatabaseSync, cards: Card[]): Card[] {
     result.push(next)
     placed.add(next.id)
   }
-  return result
+  return [...result, ...base.filter(externalWaiting)]
 }
 
 /** Данные бэклога: таблицы по навыкам, отложенные и недавно готовые. */

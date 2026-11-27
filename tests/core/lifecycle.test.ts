@@ -846,6 +846,34 @@ test('approve сбрасывает позицию запроса и ставит
   assert.equal(approved.position, 1)
 })
 
+test('approve ставит новую задачу в конец, огромный пузырь — на позицию 4', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  for (let position = 1; position <= 4; position++) {
+    seedCard(db, { phase: 'task', status: 'ready', position, importance: 1, urgency: 1 })
+  }
+
+  const normal = seedCard(db, {
+    phase: 'task',
+    status: 'approval',
+    position: 9,
+    importance: 5,
+    urgency: 3,
+  })
+  db.prepare("update cards set skill = 'dev' where id = ?").run(normal.id)
+  assert.equal(approveCard(db, { id: normal.id, actor: 'owner' }).position, 5)
+
+  const huge = seedCard(db, {
+    phase: 'task',
+    status: 'approval',
+    position: 9,
+    importance: 4,
+    urgency: 4,
+  })
+  db.prepare("update cards set skill = 'dev' where id = ?").run(huge.id)
+  assert.equal(approveCard(db, { id: huge.id, actor: 'owner' }).position, 4)
+})
+
 test('запрос из shape-файла, resume и amend получают позицию', (t) => {
   const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })

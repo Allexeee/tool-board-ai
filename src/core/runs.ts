@@ -299,7 +299,9 @@ function bookCard(
 ): void {
   // Карточка без позиции (например, из fallback предложения) получает место в
   // очереди навыка, иначе после брони она выпадет из очередей.
-  if (card.phase === 'task' && card.position === null) insertIntoQueue(db, card.id)
+  if (card.phase === 'task' && card.position === null) {
+    insertIntoQueue(db, card.id, { bubble: true })
+  }
   const updatedAt = nowIso()
   db.prepare(
     `update cards set status = 'booked', holder = ?, run_id = ?, lease_until = ?, updated_at = ?
@@ -367,7 +369,7 @@ function releaseCard(
 
   const released = getCard(db, card.id)!
   if (released.phase === 'task' && released.position === null) {
-    insertIntoQueue(db, card.id)
+    insertIntoQueue(db, card.id, { bubble: true })
   }
 
   appendEvent(db, {

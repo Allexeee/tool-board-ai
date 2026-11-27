@@ -85,6 +85,7 @@ interface Row {
   urgency: number | null
   position: number | null
   demons: number
+  bubbles: number
   needs_merge: number
   review_required: number
   plan_waived: number
@@ -135,6 +136,7 @@ const toCard = (row: Row): Card => ({
   urgency: row.urgency,
   position: row.position,
   demons: row.demons ?? 0,
+  bubbles: row.bubbles ?? 0,
   needsMerge: row.needs_merge === 1,
   reviewRequired: row.review_required === 1,
   planWaived: row.plan_waived === 1,
