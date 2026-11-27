@@ -258,6 +258,29 @@ test('setup --profile меняет профиль, --show печатает', (t)
   assert.match(shown.out, /Профиль ревью: max/)
 })
 
+test('setup --profile auto: без варианта ошибка, с флагом — max', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const failed = run(fixture.root, ['setup', '--profile', 'auto'])
+  assert.equal(failed.code, 3)
+  assert.match(failed.err, /вариант модели/)
+
+  const shown = run(fixture.root, ['setup', '--show'])
+  assert.match(shown.out, /auto → default \(вариант модели не передан\)/)
+
+  const updated = json(fixture.root, [
+    'setup', '--profile', 'auto', '--model-variant', 'max',
+  ])
+  assert.equal((updated.review as { profile: string }).profile, 'auto')
+
+  const shownMax = run(fixture.root, ['setup', '--show', '--model-variant', 'max'])
+  assert.equal(shownMax.code, 0, shownMax.err)
+  assert.match(shownMax.out, /Профиль ревью: auto → max/)
+  assert.match(shownMax.out, /Реревью: 3/)
+  assert.match(shownMax.out, /Находки: critical \+ important/)
+})
+
 test('setup --show: high печатает эффективный профиль', (t) => {
   const fixture = makeBoard()
   t.after(fixture.close)

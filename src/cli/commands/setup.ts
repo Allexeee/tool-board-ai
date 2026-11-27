@@ -15,8 +15,13 @@ import { boolFlag, numberFlag, stringFlag, type ParsedArgs } from '../args.ts'
 import { UserError } from '../errors.ts'
 import { isJsonMode, ok } from '../output.ts'
 
-function human(settings: BoardSettings, effectiveModel: string | null): string {
-  const { name, profile } = resolveReviewProfile(settings, modelContext(process.env))
+function human(
+  settings: BoardSettings,
+  effectiveModel: string | null,
+  context: ReturnType<typeof modelContext>,
+): string {
+  const { name, profile } = resolveReviewProfile(settings, context)
+  const autoUnknown = settings.review.profile === 'auto' && context.variant === null
   const review =
     name === 'custom'
       ? [
@@ -27,7 +32,9 @@ function human(settings: BoardSettings, effectiveModel: string | null): string {
           `Ревью в конце забега: ${settings.runReview.mode}`,
         ]
       : [
-          `Профиль ревью: ${settings.review.profile === 'auto' ? `auto → ${name}` : name}`,
+          `Профиль ревью: ${settings.review.profile === 'auto' ? `auto → ${name}` : name}${
+            autoUnknown ? ' (вариант модели не передан)' : ''
+          }`,
           `Ревью spec: ${profile.spec}${
             profile.spec === 'auto' ? `, порог ${profile.specWords} слов` : ''
           }`,
@@ -58,7 +65,16 @@ export default async function command(args: ParsedArgs) {
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
 
   const current = readSettings(project.root)
-  const context = modelContext(process.env)
+  const variantFlag = stringFlag(args, 'model-variant')
+  if (variantFlag !== undefined && !['low', 'default', 'high', 'max'].includes(variantFlag)) {
+    throw new UserError(3, '--model-variant: low, default, high или max')
+  }
+  const sessionModelFlag = stringFlag(args, 'session-model')
+  const context = modelContext({
+    ...process.env,
+    ...(variantFlag !== undefined ? { BOARD_MODEL_VARIANT: variantFlag } : {}),
+    ...(sessionModelFlag !== undefined ? { BOARD_SESSION_MODEL: sessionModelFlag } : {}),
+  })
   const currentReviewer = effectiveReviewerModel(current, context)
   const show = boolFlag(args, 'show')
   const defaults = boolFlag(args, 'defaults')
@@ -82,6 +98,13 @@ export default async function command(args: ParsedArgs) {
   const noBacklogAuto = boolFlag(args, 'no-backlog-auto')
   const reviewerModel = stringFlag(args, 'reviewer-model')
   const profile = stringFlag(args, 'profile')
+
+  if (profile === 'auto' && context.variant === null) {
+    throw new UserError(
+      3,
+      'вариант модели неизвестен: укажите --model-variant low|default|high|max или явный --profile default|high|max',
+    )
+  }
 
   if (runMode !== undefined && (reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, 'не сочетайте --run-review с устаревшими --review-after-run/--no-review-after-run')
@@ -133,7 +156,7 @@ export default async function command(args: ParsedArgs) {
   }
 
   if (show || (!changes && isJsonMode())) {
-    ok({ ...current, effectiveReviewerModel: currentReviewer }, human(current, currentReviewer))
+    ok({ ...current, effectiveReviewerModel: currentReviewer }, human(current, currentReviewer, context))
     return 0
   }
 
@@ -178,12 +201,12 @@ export default async function command(args: ParsedArgs) {
     const next = updateSettings(project.root, patch)
     writeReviewerAgent(project.root, next, true)
     const effective = effectiveReviewerModel(next, context)
-    ok({ ...next, effectiveReviewerModel: effective }, human(next, effective))
+    ok({ ...next, effectiveReviewerModel: effective }, human(next, effective, context))
     return 0
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    const lines = [human(current, currentReviewer), '', 'Запустите в терминале: board setup']
+    const lines = [human(current, currentReviewer, context), '', 'Запустите в терминале: board setup']
     ok({ ...current, effectiveReviewerModel: currentReviewer }, lines.join('\n'))
     return 0
   }
@@ -191,6 +214,6 @@ export default async function command(args: ParsedArgs) {
   const next = await runSetupWizard(project.root, current)
   writeReviewerAgent(project.root, next, true)
   const effective = effectiveReviewerModel(next, context)
-  ok({ ...next, effectiveReviewerModel: effective }, human(next, effective))
+  ok({ ...next, effectiveReviewerModel: effective }, human(next, effective, context))
   return 0
 }

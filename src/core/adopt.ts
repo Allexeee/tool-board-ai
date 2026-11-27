@@ -322,21 +322,31 @@ export function buildAdoptPlan(
   )
 
   const resolved = resolveReviewProfile(settings, context)
+  const variantUnknown = context.variant === null
   const profile: AdoptProfilePlan = {
     configured: settings.review.profile,
     resolved: resolved.name,
     effective:
-      settings.review.profile === 'auto' ? `auto → ${resolved.name}` : resolved.name,
+      settings.review.profile === 'auto'
+        ? `auto → ${resolved.name}${variantUnknown ? ' (вариант неизвестен)' : ''}`
+        : resolved.name,
     spec: resolved.profile.spec,
     run: resolved.profile.run,
     findings: resolved.profile.findings,
     package: resolved.profile.package,
     reopens: resolved.profile.reopens,
-    command: settings.review.profile === 'auto' ? null : 'board setup --profile auto',
+    command:
+      settings.review.profile === 'auto' || variantUnknown
+        ? null
+        : 'board setup --profile auto',
     note:
       settings.review.profile === 'auto'
-        ? 'auto пересчитывается при смене модели'
-        : 'сейчас профиль фиксирован; auto подстроится под модель',
+        ? variantUnknown
+          ? 'auto не разрешить: вариант модели не передан'
+          : 'auto пересчитывается при смене модели'
+        : variantUnknown
+          ? 'вариант модели неизвестен: укажите --model-variant или явный профиль'
+          : 'сейчас профиль фиксирован; auto подстроится под модель',
   }
 
   const acceptance = {
