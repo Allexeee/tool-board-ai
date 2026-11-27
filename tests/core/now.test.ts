@@ -118,6 +118,8 @@ test('now 3: запросы — только открытые, до 10 по вр
   }
   seedCard(db, { phase: 'request', status: 'cancelled', title: 'Отменённый' })
   seedCard(db, { phase: 'request', status: 'done', title: 'Закрытый' })
+  // Одинаковое время не должно ломать порядок: номер карточки сравнивается числом.
+  db.prepare("update cards set created_at = '2026-01-01T00:00:00.000Z' where phase = 'request'").run()
 
   const data = nowData(db, { view: 3, executorId: 'owner', root })
   assert.equal(data.requests!.length, 10)
@@ -126,9 +128,11 @@ test('now 3: запросы — только открытые, до 10 по вр
   assert.ok(
     data.requests!.every((card) => card.status !== 'cancelled' && card.status !== 'done'),
   )
-  // порядок — по created_at
-  assert.equal(data.requests![0].title, 'Запрос 0')
-  assert.equal(data.requests![9].title, 'Запрос 9')
+  // порядок — по created_at, при равенстве — по числовому номеру
+  assert.deepEqual(
+    data.requests!.map((card) => card.title),
+    Array.from({ length: 10 }, (_, index) => `Запрос ${index}`),
+  )
 })
 
 test('now 3: фильтры по группе, статусу, навыку и «моё»', (t) => {
