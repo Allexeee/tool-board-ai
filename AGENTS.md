@@ -18,6 +18,7 @@
 - Теги — реестр `board tag add|list|rename|remove` (или `board_tag`); на `card shape` теги берутся из дизайна задачи, `card tag add|remove` — точечно.
 - Приёмка владельцем: флаг `owner_acceptance` и статус `acceptance`; правила — `board acceptance rule add|list|remove` и `check`; владелец закрывает `card accept` или отклоняет `--reject --reason`; релиз ждёт и ревью, и приёмку.
 - Исполнение Native: агент делает сам, без субагентов-исполнителей; план — steps карточки.
+- Черновики — только `.drafts/<исполнитель>/<тема>/` в корне проекта, не в worktree; папка вне git. Финал копируется в проект и коммитится; чужие черновики — только читать.
 - `writing-plans`, `executing-plans` и другие конкурирующие навыки superpowers в проекте выключены правами OpenCode: план — steps карточки, отдельного plan-файла нет.
 - `ask` — асинхронный вопрос; `block` — только если без ответа нельзя продолжать.
 - Spec review — `/spec-review` (self или субагент), run review — `/review` (plan + код).

@@ -82,11 +82,22 @@ export function findProject(
 const GITIGNORE_ENTRIES = [
   '.board/',
   '.worktrees/',
+  '.drafts/',
   '.opencode/agents/board-reviewer.md',
   'docs/board/BACKLOG.md',
   'docs/board/BACKLOG.html',
   'docs/board/Inter.ttf',
 ]
+
+const DRAFTS_README = `# Черновики
+
+Личные рабочие материалы агентов. Папка не попадает в git.
+
+- путь: .drafts/<исполнитель>/<тема>/
+- писать только в свой черновик, чужие — только читать
+- финальные файлы копируются в проект и коммитятся обычным порядком
+- автоматической очистки нет
+`
 
 function updateGitignore(root: string): boolean {
   const path = join(root, '.gitignore')
@@ -230,6 +241,17 @@ export function initProject(
   if (!existsSync(docsDir)) {
     mkdirSync(docsDir, { recursive: true })
     created.push('docs/board/')
+  }
+
+  const draftsDir = join(root, '.drafts')
+  if (!existsSync(draftsDir)) {
+    mkdirSync(draftsDir, { recursive: true })
+    created.push('.drafts/')
+  }
+  const draftsPointer = join(draftsDir, 'README.md')
+  if (!existsSync(draftsPointer)) {
+    writeFileSync(draftsPointer, DRAFTS_README, 'utf8')
+    created.push('.drafts/README.md')
   }
 
   const dbPath = join(boardDir, 'board.db')
