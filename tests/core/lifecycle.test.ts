@@ -435,15 +435,40 @@ test('cancel отменяет карточку: держатель или вла
   assert.equal(byOwner.waiveDeps, false)
 })
 
-test('reopen — только владелец, не-owner не обходит review', (t) => {
+test('reopen: агент возвращает review и acceptance, done — только владелец', (t) => {
   const { db } = board(t)
-  const card = seedCard(db, { phase: 'task', status: 'review', position: 1 })
+  const review = seedCard(db, {
+    phase: 'task',
+    status: 'review',
+    position: 1,
+    holder: 'developer',
+  })
+  const acceptance = seedCard(db, { phase: 'task', status: 'acceptance', position: 2 })
+  const done = seedCard(db, { phase: 'task', status: 'done', position: 3 })
+
+  const reopenedReview = reopenCard(db, {
+    id: review.id,
+    actor: 'developer',
+    reason: 'правки владельца',
+  })
+  assert.equal(reopenedReview.status, 'ready')
+  assert.equal(reopenedReview.attempt, review.attempt + 1)
+
+  const reopenedAcceptance = reopenCard(db, {
+    id: acceptance.id,
+    actor: 'developer',
+    reason: 'правки владельца',
+  })
+  assert.equal(reopenedAcceptance.status, 'ready')
+  assert.equal(reopenedAcceptance.attempt, acceptance.attempt + 1)
 
   assert.throws(
-    () => reopenCard(db, { id: card.id, actor: 'developer', reason: 'обойти ревью' }),
+    () => reopenCard(db, { id: done.id, actor: 'developer', reason: 'правки' }),
     /владелец/,
   )
-  assert.equal(getCard(db, card.id)!.status, 'review')
+  assert.equal(getCard(db, done.id)!.status, 'done')
+
+  assert.equal(reopenCard(db, { id: done.id, actor: 'owner', reason: 'правки' }).status, 'ready')
 })
 
 test('reopen увеличивает попытку, пишет previous_holder и двигает в начало очереди', (t) => {
