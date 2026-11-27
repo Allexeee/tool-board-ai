@@ -462,8 +462,9 @@ export default Plugin.define({
   async setup(ctx) {
     // Брейншторм — часть работы по доске; строка в системном промпте не зависит
     // от того, загрузился ли навык, и от содержимого AGENTS.md.
+    const boardConnected = existsSync(join(projectRoot(ctx), '.board', 'board.db'))
     await ctx.session.hook('context', (event) => {
-      if (existsSync(join(projectRoot(ctx), '.board', 'board.db'))) {
+      if (boardConnected) {
         event.system.push({
           type: 'text',
           text: 'В проекте подключена доска карточек. Правила — в AGENTS.md. Не говори, что не знаком с доской: сначала посмотри её состояние через board_now 0. В чат — простой язык без команд и внутренних параметров.',
