@@ -68,8 +68,8 @@ const OWNER_SKILL = 'owner'
 /** Навык меняется только до submit: дальше карточку отменяют и создают новую. */
 const SKILL_EDITABLE: readonly CardStatus[] = ['new', 'shaping']
 
-const SCORE_MIN = 0
-const SCORE_MAX = 3
+const SCORE_MIN = 1
+const SCORE_MAX = 5
 
 interface Row {
   id: string
