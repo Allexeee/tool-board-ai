@@ -338,7 +338,7 @@ export function buildAdoptPlan(
     command:
       settings.review.profile === 'auto' || variantUnknown
         ? null
-        : 'board setup --profile auto',
+        : `board setup --profile auto --model-variant ${context.variant}`,
     note:
       settings.review.profile === 'auto'
         ? variantUnknown

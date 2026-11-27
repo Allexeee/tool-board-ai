@@ -18,7 +18,7 @@ function run(dir: string, args: string[], env: NodeJS.ProcessEnv = {}): Result {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
-    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1', ...env },
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1', BOARD_MODEL_VARIANT: '', BOARD_SESSION_MODEL: '', ...env },
     windowsHide: true,
   })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
@@ -262,12 +262,16 @@ test('setup --profile auto: без варианта ошибка, с флаго�
   const fixture = makeBoard()
   t.after(fixture.close)
 
+  const defaultShown = run(fixture.root, ['setup', '--show'])
+  assert.match(defaultShown.out, /auto → default \(вариант модели не передан\)/)
+
+  json(fixture.root, ['setup', '--profile', 'high'])
   const failed = run(fixture.root, ['setup', '--profile', 'auto'])
   assert.equal(failed.code, 3)
   assert.match(failed.err, /вариант модели/)
 
-  const shown = run(fixture.root, ['setup', '--show'])
-  assert.match(shown.out, /auto → default \(вариант модели не передан\)/)
+  const stillHigh = run(fixture.root, ['setup', '--show'])
+  assert.match(stillHigh.out, /Профиль ревью: high/)
 
   const updated = json(fixture.root, [
     'setup', '--profile', 'auto', '--model-variant', 'max',

@@ -104,7 +104,7 @@ test('adopt --check: auto показывает эффективный профи
   )
 
   const known = buildAdoptPlan(board.db, board.root, { variant: 'max', sessionModel: null })
-  assert.equal(known.profile.command, 'board setup --profile auto')
+  assert.equal(known.profile.command, 'board setup --profile auto --model-variant max')
   assert.ok(known.steps.some((step) => step.area === 'profile'))
 })
 
