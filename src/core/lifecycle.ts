@@ -43,7 +43,7 @@ const BLOCKABLE_REQUEST: readonly CardStatus[] = ['new', 'shaping']
 const BLOCKABLE_TASK: readonly CardStatus[] = ['booked', 'in_progress']
 
 /** Переоткрытие возвращает карточку в работу из ревью или done. */
-const REOPENABLE: readonly CardStatus[] = ['review', 'done']
+const REOPENABLE: readonly CardStatus[] = ['review', 'acceptance', 'done']
 
 /** Amend меняет уже утверждённый spec; в работе и ревью сначала block/reopen. */
 const AMENDABLE: readonly CardStatus[] = ['approval', 'ready', 'waiting', 'blocked']
@@ -715,8 +715,8 @@ export function reopenCard(
     const card = requireCard(db, input.id)
     const actor = requireActor(input.actor)
     const reason = requireReason(input.reason)
-    if (actor !== OWNER) {
-      throw new UserError(3, 'переоткрывать карточку может только владелец')
+    if (actor !== OWNER && card.status === 'done') {
+      throw new UserError(3, 'завершённую карточку переоткрывает только владелец')
     }
     if (!REOPENABLE.includes(card.status)) {
       throw new UserError(3, `карточку ${card.id} в статусе ${card.status} нельзя переоткрыть`)

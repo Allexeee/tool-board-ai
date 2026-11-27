@@ -138,7 +138,7 @@ board card add --group UI --title "Форма входа" --skill dev
 - **Scope** задаётся здесь же: `card edit UI-1 --scope 'src/**' --scope 'tests/**'`.
 - **На утверждение**: `card submit UI-1 --as developer`. Владелец утверждает **spec**: `card approve UI-1` или `card reject UI-1 --reason "..."`.
 - После approve менять spec/acceptance/scope нельзя; изменение — `card amend UI-1 --as developer --reason "..."`, затем повторный review и approve.
-- `card reopen` — команда владельца; агент не обходит ею ревью и лимит переоткрытий.
+- `card reopen` — команда владельца; агент может вернуть в работу `review` или `acceptance` с причиной, если владелец просит правки; `done` — только владелец.
 
 `needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 0–3. Зависимости — `card dep`.
 
