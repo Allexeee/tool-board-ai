@@ -206,11 +206,10 @@ export function findingsScope(
   return resolveReviewProfile(settings, context).profile.findings
 }
 
-/** Требуется ли пакетное ревью перед релизом (low — нет). */
+/** Пакетное ревью перед релизом требуется всегда; профиль его не отменяет. */
 export function packageReviewRequired(
   _settings: BoardSettings,
   _context: ModelContext,
 ): boolean {
-  // Пакетный проход перед релизом нужен всегда; профиль его не отменяет.
   return true
 }

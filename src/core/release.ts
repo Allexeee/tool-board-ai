@@ -16,7 +16,7 @@ import {
 } from './git.ts'
 import { compareSemver, parseSemver } from './version.ts'
 import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
-import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
+import { findingsScope, modelContext } from './review-policy.ts'
 import { readSettings } from './settings.ts'
 import type { Card } from './types.ts'
 
@@ -79,28 +79,25 @@ function selectPackage(db: DatabaseSync, cards: Card[], selector: string): Card[
 }
 
 /**
- * Карточки без ревью: done в dev вне main, у которых нет вердикта, waiver
- * и — когда профиль требует пакет — покрытия пакетным проходом.
+ * Карточки без ревью: done в dev вне main, у которых нет вердикта или waiver,
+ * либо нет покрытия пакетным проходом. Пакет обязателен всегда.
  */
-function reviewGap(
-  db: DatabaseSync,
-  cards: Card[],
-  packageRequired: boolean,
-): Card[] {
-  return cards.filter(
-    (card) =>
-      card.inDev &&
-      !card.inMain &&
-      card.status === 'done' &&
-      card.revertedAt === null &&
-      !hasReviewVerdict(db, card.id) &&
-      !hasReviewWaiver(db, card.id) &&
-      !(
-        packageRequired &&
-        card.mergeCommit !== null &&
-        packageCovers(db, card.mergeCommit)
-      ),
-  )
+function reviewGap(db: DatabaseSync, cards: Card[]): Card[] {
+  return cards.filter((card) => {
+    if (
+      !card.inDev ||
+      card.inMain ||
+      card.status !== 'done' ||
+      card.revertedAt !== null
+    ) {
+      return false
+    }
+    const reviewMissing = !hasReviewVerdict(db, card.id) && !hasReviewWaiver(db, card.id)
+    const waived = hasReviewWaiver(db, card.id)
+    const packageMissing =
+      !waived && card.mergeCommit !== null && !packageCovers(db, card.mergeCommit)
+    return reviewMissing || packageMissing
+  })
 }
 
 export function release(
@@ -169,8 +166,7 @@ export function release(
     throw new UserError(2, `релиз заблокирован: открыты находки: ${detail}`)
   }
 
-  const packageRequired = packageReviewRequired(settings, context)
-  const unreviewed = options.noReview ? [] : reviewGap(db, scoped, packageRequired)
+  const unreviewed = options.noReview ? [] : reviewGap(db, scoped)
   if (unreviewed.length > 0) {
     const detail = unreviewed.map((card) => card.id).join(', ')
     throw new UserError(2, `релиз заблокирован: нет ревью, пакета или waiver: ${detail}`)
