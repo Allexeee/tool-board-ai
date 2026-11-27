@@ -64,7 +64,12 @@ export interface AdoptPlan {
     suggested: Array<{ name: string; description: string; command: string }>
   }
   profile: AdoptProfilePlan
-  acceptance: { existing: string[]; suggested: AdoptAcceptanceSuggestion[] }
+  acceptance: {
+    existing: string[]
+    suggested: AdoptAcceptanceSuggestion[]
+    prompt: string | null
+    examples: string[]
+  }
   executors: {
     existing: Array<{ id: string; kind: string; skills: string[] }>
     missing: Array<{ id: string; kind: string; skills: string[]; command: string }>
@@ -272,14 +277,17 @@ function acceptanceSuggestions(
     const include = { groups: [group.prefix] }
     suggestions.push({ name, include, command: acceptanceCommand(name, include) })
   }
-  const docsInclude = { paths: ['docs/**', 'README.md'] }
-  suggestions.push({
-    name: 'документация',
-    include: docsInclude,
-    command: acceptanceCommand('документация', docsInclude),
-  })
   return suggestions
 }
+
+/** Просьба к владельцу, когда правил приёмки ещё нет. */
+const ACCEPTANCE_PROMPT =
+  'Напишите критерии, по которым я пойму, что задача должна быть принята Вами.'
+
+const ACCEPTANCE_EXAMPLES = [
+  'Приму, если на экране всё открывается без ошибок, кнопка работает, а тексты без опечаток.',
+  'Приму, когда команда на чистом проекте выполняется без ошибок и печатает понятный результат.',
+]
 
 /**
  * Строит план и ничего не пишет. Повторный вызов на неизменённой доске даёт
@@ -352,6 +360,8 @@ export function buildAdoptPlan(
   const acceptance = {
     existing: settings.acceptance.rules.map(ruleText),
     suggested: acceptanceSuggestions(settings, groups),
+    prompt: settings.acceptance.rules.length === 0 ? ACCEPTANCE_PROMPT : null,
+    examples: settings.acceptance.rules.length === 0 ? ACCEPTANCE_EXAMPLES : [],
   }
 
   const missingExecutors = executors.some((executor) => executor.id === 'developer')
@@ -484,12 +494,19 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
       }); ${plan.profile.note}`,
   )
   lines.push(
-    `  приёмка: ${
-      plan.acceptance.existing.length > 0
-        ? plan.acceptance.existing.join('; ')
-        : `правил нет; предложить: ${plan.acceptance.suggested.map((rule) => rule.name).join(', ')}`
-    }`,
+    `  приёмка: ${plan.acceptance.existing.length > 0 ? plan.acceptance.existing.join('; ') : 'правил нет'}`,
   )
+  if (plan.acceptance.prompt) {
+    lines.push(`    ${plan.acceptance.prompt}`)
+    for (const example of plan.acceptance.examples) {
+      lines.push(`      • ${example}`)
+    }
+    if (plan.acceptance.suggested.length > 0) {
+      lines.push(
+        `    предложить правила: ${plan.acceptance.suggested.map((rule) => rule.name).join(', ')}`,
+      )
+    }
+  }
   lines.push(
     `  исполнители: ${
       plan.executors.existing.length > 0

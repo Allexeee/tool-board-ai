@@ -29,7 +29,9 @@ test('adopt --check: пустой проект получает план и ни
   assert.equal(plan.profile.configured, 'auto')
   assert.equal(plan.profile.effective, 'auto → default (вариант неизвестен)')
   assert.equal(plan.acceptance.existing.length, 0)
-  assert.deepEqual(plan.acceptance.suggested.map((rule) => rule.name), ['документация'])
+  assert.deepEqual(plan.acceptance.suggested, [])
+  assert.match(plan.acceptance.prompt ?? '', /Напишите критерии/)
+  assert.equal(plan.acceptance.examples.length, 2)
   assert.deepEqual(
     plan.tags.suggested.map((tag) => tag.name),
     ['ui', 'backend', 'docs', 'test'],
@@ -187,6 +189,8 @@ test('renderAdoptPlan: остаток и честная пометка, что �
   assert.match(text, /Осталось шагов: \d+/)
   assert.match(text, /Доска ничего не создала/)
   assert.match(text, /board group add CARD/)
+  assert.match(text, /Напишите критерии/)
+  assert.equal(text.match(/•/g)?.length, 2)
 })
 
 test('settings не содержат правил после чтения плана', (t) => {
