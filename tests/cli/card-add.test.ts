@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
@@ -34,6 +34,14 @@ function json(dir: string, args: string[]) {
   assert.equal(result.code, 0, result.err)
   return JSON.parse(result.out)
 }
+
+test('card add обновляет бэклог при автообновлении', (t) => {
+  const dir = project(t)
+  const added = json(dir, ['card', 'add', '--group', 'UI', '--title', 'Новая', '--skill', 'dev'])
+  const file = join(dir, 'docs', 'board', 'BACKLOG.md')
+  assert.ok(existsSync(file))
+  assert.match(readFileSync(file, 'utf8'), new RegExp(added.id))
+})
 
 test('профиль card:never: add и edit сами пишут waiver', (t) => {
   const dir = project(t)

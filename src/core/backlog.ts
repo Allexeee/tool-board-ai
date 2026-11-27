@@ -408,7 +408,7 @@ export function flushBacklog(
   }
 }
 
-/** Автосборка после finish/run end и любой другой команды, меняющей доску. */
+/** Автосборка после любой команды, меняющей доску. */
 export function refreshBacklogIfAuto(db: DatabaseSync, root: string): string | null {
   return flushBacklog(db, root).path
 }
