@@ -92,17 +92,16 @@ test('release блокируется на done без ревью и waiver', (t)
   assert.throws(() => release(db, root, 'owner'), /нет ревью/)
 })
 
-test('профиль high блокирует открытый important', (t) => {
+test('профиль high не блокирует release из-за открытого important', (t) => {
   const { root, db } = repoBoard(t)
   merged(root, db, 'done', 'dev-a')
   const important = seedCard(db, { phase: 'request', status: 'new', skill: 'dev' })
   db.prepare("update cards set severity = 'important' where id = ?").run(important.id)
   updateSettings(root, { review: { profile: 'high' } })
 
-  assert.throws(() => release(db, root, 'owner'), /находк/)
+  assert.equal(release(db, root, 'owner').commit.length, 40)
 
   db.prepare("update cards set status = 'done' where id = ?").run(important.id)
-  assert.equal(release(db, root, 'owner').commit.length, 40)
 })
 
 test('критическая находка блокирует release, пока не закрыта', (t) => {

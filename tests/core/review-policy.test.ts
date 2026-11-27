@@ -231,7 +231,7 @@ test('spec auto: default 500 слов, high 250', () => {
   )
 })
 
-test('findings: high/max блокируют important, default — только critical', () => {
+test('findings: high/max требуют чинить important, default — только critical', () => {
   const withProfile = (profile: string) => ({ ...base, review: { ...base.review, profile } })
   assert.equal(findingsScope(withProfile('default'), context(null)), 'critical')
   assert.equal(findingsScope(withProfile('high'), context(null)), 'critical+important')
