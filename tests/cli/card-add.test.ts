@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { openDb } from '../../src/core/db.ts'
@@ -35,6 +35,14 @@ function json(dir: string, args: string[]) {
   return JSON.parse(result.out)
 }
 
+test('card add обновляет бэклог при автообновлении', (t) => {
+  const dir = project(t)
+  const added = json(dir, ['card', 'add', '--group', 'UI', '--title', 'Новая', '--skill', 'dev'])
+  const file = join(dir, 'docs', 'board', 'BACKLOG.md')
+  assert.ok(existsSync(file))
+  assert.match(readFileSync(file, 'utf8'), new RegExp(added.id))
+})
+
 test('профиль card:never: add и edit сами пишут waiver', (t) => {
   const dir = project(t)
   const quiet = {
@@ -44,7 +52,6 @@ test('профиль card:never: add и edit сами пишут waiver', (t) =>
     reopens: 1,
     run: 'none' as const,
     findings: 'critical' as const,
-    package: true,
   }
   updateSettings(dir, { review: { profile: 'quiet', profiles: { quiet } } })
 
@@ -325,10 +332,10 @@ test('card add с невалидной оценкой не создаёт кар
   const dir = project(t)
 
   const bad = run(dir, [
-    'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--importance', '4',
+    'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--importance', '6',
   ])
   assert.equal(bad.code, 3)
-  assert.match(bad.err, /0 до 3/)
+  assert.match(bad.err, /1 до 5/)
 
   const negative = run(dir, [
     'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--urgency', '-1',

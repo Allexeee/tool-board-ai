@@ -131,9 +131,16 @@ function statusRank(card: Card): number {
   return card.status === 'waiting' || card.status === 'blocked' ? 1 : 0
 }
 
-function sortCards(cards: Card[]): Card[] {
-  return [...cards].sort(
+function sortCards(db: DatabaseSync, cards: Card[]): Card[] {
+  const ids = new Set(cards.map((card) => card.id))
+  // Зависимость в другой таблице здесь не поставить: такая карточка ждёт
+  // и уходит в конец своей секции.
+  const externalWaiting = (card: Card): boolean =>
+    card.status === 'waiting' &&
+    listDeps(db, card.id).some((id) => !ids.has(id))
+  const base = [...cards].sort(
     (left, right) =>
+      Number(externalWaiting(left)) - Number(externalWaiting(right)) ||
       (left.position ?? Number.MAX_SAFE_INTEGER) -
         (right.position ?? Number.MAX_SAFE_INTEGER) ||
       statusRank(left) - statusRank(right) ||
@@ -141,6 +148,26 @@ function sortCards(cards: Card[]): Card[] {
       (left.importance ?? 0) - (right.importance ?? 0) ||
       left.id.localeCompare(right.id),
   )
+  // Dependency-first: карточка не встаёт раньше своей незакрытой зависимости
+  // из той же секции. Внешние зависимости и циклы не ломают порядок.
+  const placed = new Set<string>()
+  const pending = base.filter((card) => !externalWaiting(card))
+  const result: Card[] = []
+  while (pending.length > 0) {
+    const index = pending.findIndex((card) =>
+      listDeps(db, card.id)
+        .filter((id) => ids.has(id))
+        .every((id) => placed.has(id)),
+    )
+    if (index === -1) {
+      result.push(...pending)
+      break
+    }
+    const [next] = pending.splice(index, 1)
+    result.push(next)
+    placed.add(next.id)
+  }
+  return [...result, ...base.filter(externalWaiting)]
 }
 
 /** Данные бэклога: таблицы по навыкам, отложенные и недавно готовые. */
@@ -148,7 +175,7 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
   const cards = listCards(db).filter(
     (card) => !HIDDEN.includes(card.status) && !isIdeaCard(card) && card.status !== 'acceptance',
   )
-  const acceptance = sortCards(listCards(db, { status: 'acceptance' })).map((card) => row(db, card))
+  const acceptance = sortCards(db, listCards(db, { status: 'acceptance' })).map((card) => row(db, card))
 
   const bySkill = new Map<string, Card[]>()
   for (const card of cards) {
@@ -181,7 +208,7 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
   const sections = skills.map((skill) => ({
     skill,
     label: SKILL_LABEL[skill] ?? skill,
-    rows: sortCards(bySkill.get(skill)!).map((card) => row(db, card)),
+    rows: sortCards(db, bySkill.get(skill)!).map((card) => row(db, card)),
   }))
   if (acceptance.length > 0) {
     const owner = sections.find((section) => section.skill === 'owner')
@@ -193,6 +220,7 @@ export function buildBacklog(db: DatabaseSync, reference: Date = new Date()): Ba
     generatedAt: reference.toISOString(),
     skills: sections,
     deferred: sortCards(
+      db,
       listCards(db, { status: 'deferred' }).filter((card) => !isIdeaCard(card)),
     ).map((card) => ({ ...row(db, card), reason: shortReason(card.note) })),
     done: done
@@ -408,7 +436,7 @@ export function flushBacklog(
   }
 }
 
-/** Автосборка после finish/run end и любой другой команды, меняющей доску. */
+/** Автосборка после любой команды, меняющей доску. */
 export function refreshBacklogIfAuto(db: DatabaseSync, root: string): string | null {
   return flushBacklog(db, root).path
 }

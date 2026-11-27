@@ -66,6 +66,11 @@ export function score(card: Card): number {
   return (card.importance ?? 0) * (card.urgency ?? 0)
 }
 
+/** Огромный пузырь: важность × срочность ≥ 20 — единственный, кто входит в первые 3 сам. */
+export function isHuge(card: Card): boolean {
+  return score(card) >= 20
+}
+
 /** Место в очереди задаёт `position`; карточка без него в очередь ещё не встала. */
 function byPosition(left: Card, right: Card): number {
   return (left.position ?? 0) - (right.position ?? 0)
@@ -121,7 +126,11 @@ export function listQueue(
  * равной оценке — после всех равных. Затем все позиции перенумерованы 1..N.
  * Работает и для задач, и для запросов — у каждого своя очередь.
  */
-export function insertIntoQueue(db: DatabaseSync, cardId: string): void {
+export function insertIntoQueue(
+  db: DatabaseSync,
+  cardId: string,
+  options: { bubble?: boolean; middle?: boolean; index?: number } = {},
+): void {
   tx(db, () => {
     const card = getCard(db, cardId)
     if (!card) throw new UserError(3, `карточка ${cardId} не найдена`)
@@ -144,25 +153,115 @@ export function insertIntoQueue(db: DatabaseSync, cardId: string): void {
       return
     }
 
-    const others = listQueue(db, { class: cardQueueClass(card) }, card.phase)
-      .filter((item) => item.id !== cardId && item.position !== null)
-      .sort(
+    const others = listQueue(db, { class: cardQueueClass(card) }, card.phase).filter(
+      (item) => item.id !== cardId && item.position !== null,
+    )
+
+    // Пузыри: новая задача встаёт в конец, огромный пузырь — на позицию 4,
+    // вернувшаяся с блокировки — в середину.
+    if (options.bubble === true && card.phase === 'task') {
+      const huge = isHuge(card)
+      const ordered = [...others].sort(
         (left, right) =>
-          score(right) - score(left) ||
           (left.position ?? Number.MAX_SAFE_INTEGER) -
-            (right.position ?? Number.MAX_SAFE_INTEGER),
+          (right.position ?? Number.MAX_SAFE_INTEGER),
       )
+      const index =
+        options.index !== undefined
+          ? Math.max(0, Math.min(options.index, ordered.length))
+          : huge
+            ? Math.min(3, ordered.length)
+            : options.middle === true
+              ? Math.floor((ordered.length + 1) / 2)
+              : ordered.length
+      renumber(db, [
+        ...ordered.slice(0, index).map((item) => item.id),
+        cardId,
+        ...ordered.slice(index).map((item) => item.id),
+      ])
+      return
+    }
+
+    const byScore = [...others].sort(
+      (left, right) =>
+        score(right) - score(left) ||
+        (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER),
+    )
     const cardScore = score(card)
     let index = 0
-    for (let i = 0; i < others.length; i++) {
-      if (score(others[i]) >= cardScore) index = i + 1
+    for (let i = 0; i < byScore.length; i++) {
+      if (score(byScore[i]) >= cardScore) index = i + 1
     }
 
     renumber(db, [
-      ...others.slice(0, index).map((item) => item.id),
+      ...byScore.slice(0, index).map((item) => item.id),
       cardId,
-      ...others.slice(index).map((item) => item.id),
+      ...byScore.slice(index).map((item) => item.id),
     ])
+  })
+}
+
+/**
+ * Событие ухода: карточки ниже получают шаг пузыря и поднимаются. Готовые
+ * к подъёму обгоняют тех, кого демоны задержали. Первую тройку пузыри не
+ * переставляют: обычная карточка не обгоняет её, огромный пузырь входит
+ * в тройку. Позиции перенумеровываются.
+ */
+export function bubbleAfterLeave(db: DatabaseSync, card: Card): void {
+  if (card.phase !== 'task' || card.skill === 'owner') return
+  tx(db, () => {
+    const current = getCard(db, card.id)
+    if (!current || current.position === null || current.skill === 'owner') return
+    const position = current.position
+    const queue = listQueue(db, { class: cardQueueClass(current) }, current.phase)
+      .filter((item) => item.id !== card.id)
+      .sort(
+        (left, right) =>
+          (left.position ?? Number.MAX_SAFE_INTEGER) -
+          (right.position ?? Number.MAX_SAFE_INTEGER),
+      )
+    const above = queue.filter((item) => (item.position ?? 0) < position)
+    const below = queue.filter((item) => (item.position ?? 0) > position)
+    const top = below.filter((item) => (item.position ?? 0) <= 3)
+    const rest = below.filter((item) => (item.position ?? 0) > 3)
+    const risers: Card[] = []
+    const stayers: Card[] = []
+    for (const item of rest) {
+      const next = item.bubbles + 1
+      if (next >= 1 + item.demons) {
+        db.prepare('update cards set bubbles = 0 where id = ?').run(item.id)
+        risers.push(item)
+      } else {
+        db.prepare('update cards set bubbles = ? where id = ?').run(next, item.id)
+        stayers.push(item)
+      }
+    }
+    const huge = risers.filter(isHuge)
+    const normal = risers.filter((item) => !isHuge(item))
+    const ordered = [...above, ...top, ...normal, ...stayers]
+    // Огромный пузырь входит в первые три, но не вытесняет с первого места.
+    let at = Math.min(2, ordered.length)
+    for (const item of huge) {
+      ordered.splice(at, 0, item)
+      at += 1
+    }
+    renumber(db, ordered.map((item) => item.id))
+  })
+}
+
+/**
+ * Возврат на сохранённое место: карточка встаёт туда, где была до ревью,
+ * приёмки или другого ухода. Без сохранённой позиции — в конец.
+ */
+export function restoreQueuePosition(
+  db: DatabaseSync,
+  cardId: string,
+  saved: number | null,
+): void {
+  insertIntoQueue(db, cardId, {
+    bubble: true,
+    index: saved === null ? undefined : Math.max(0, saved - 1),
   })
 }
 

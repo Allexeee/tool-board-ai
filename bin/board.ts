@@ -54,8 +54,8 @@ const HELP = `board — доска карточек для людей и аге�
   --acceptance "..."      критерий приёмки (можно несколько)
   --tag <tag>             тег карточки: new, improve, review
   --review / --no-review  обязательное ревью после finish
-  --importance 0..3       важность
-  --urgency 0..3          срочность
+  --importance 1..5       важность
+  --urgency 1..5          срочность
 
   «board card add --help» и подобные печатают справку по подкоманде.
 
@@ -66,9 +66,9 @@ const COMMAND_HELP: Record<string, string> = {
   adopt:
     'board adopt --check — план обновления: области, теги, профиль, приёмка, исполнители, бэклог и задачи из docs/inbox. Ничего не создаёт.',
   'card add':
-    'board card add [--group <P>] --title "<тип: заголовок>" --skill <s> [--new-group] [--spec "..."] [--acceptance "..."] [--tag new] [--importance 0..3] [--urgency 0..3] [--scope <path>] [--review|--no-review --reason "..."] [--no-needs-merge] [--as <id>]',
+    'board card add [--group <P>] --title "<тип: заголовок>" --skill <s> [--new-group] [--spec "..."] [--acceptance "..."] [--tag new] [--importance 1..5] [--urgency 1..5] [--scope <path>] [--review|--no-review --reason "..."] [--no-needs-merge] [--as <id>]',
   'card edit':
-    'board card edit <ID> [--title ...] [--spec ...] [--acceptance ...] [--scope <path>] [--importance 0..3] [--urgency 0..3] [--review|--no-review] [--needs-merge|--no-needs-merge] [--tag ...|--clear-tags] [--as <id>]',
+    'board card edit <ID> [--title ...] [--spec ...] [--acceptance ...] [--scope <path>] [--importance 1..5] [--urgency 1..5] [--review|--no-review] [--needs-merge|--no-needs-merge] [--tag ...|--clear-tags] [--as <id>]',
   'card shape': 'board card shape <ID> --as <исполнитель> [--from card.json]',
   'card submit': 'board card submit <ID> --as <исполнитель> [--no-decisions]',
   'card spec-review':
@@ -133,7 +133,33 @@ async function main(argv: string[]): Promise<number> {
 
   const module = await loadCommand(args.command)
   if (!module) throw new UserError(3, `неизвестная команда ${args.command}`)
-  return (await module.default(args)) ?? 0
+  const code = (await module.default(args)) ?? 0
+  await flushAfterCommand(args.command)
+  return code
+}
+
+const NO_FLUSH = new Set(['adopt', 'backlog', 'init', 'upgrade', 'help', 'version'])
+
+/** После любой команды, меняющей доску, пересобрать бэклог при автообновлении. */
+async function flushAfterCommand(command: string): Promise<void> {
+  if (NO_FLUSH.has(command)) return
+  try {
+    const [{ findProject }, { openDb }, { refreshBacklogIfAuto }] = await Promise.all([
+      import('../src/core/project.ts'),
+      import('../src/core/db.ts'),
+      import('../src/core/backlog.ts'),
+    ])
+    const project = findProject(process.cwd())
+    if (!project) return
+    const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
+    try {
+      refreshBacklogIfAuto(db, project.root)
+    } finally {
+      db.close()
+    }
+  } catch {
+    // Пересборка бэклога не должна валить саму команду.
+  }
 }
 
 const COMMANDS_DIR = fileURLToPath(new URL('../src/cli/commands/', import.meta.url))

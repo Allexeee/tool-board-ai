@@ -297,7 +297,7 @@ test('setup --show: high печатает эффективный профиль'
   assert.match(shown.out, /Ревью в конце забега: subagent/)
   assert.match(shown.out, /Реревью: 2/)
   assert.match(shown.out, /Находки: critical \+ important/)
-  assert.match(shown.out, /Пакет ревью: требуется/)
+  assert.doesNotMatch(shown.out, /Пакет ревью/)
   assert.doesNotMatch(shown.out, /Порог max/)
 })
 
@@ -346,4 +346,13 @@ test('group add: область без карточки, повтор — оши
   assert.match(list.out, /SITE\s+0\s+Сайт/)
 
   assert.equal(run(fixture.root, ['group', 'add', 'SITE']).code, 3)
+})
+
+test('init говорит начать новую сессию, чтобы доска подхватилась', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'board-init-session-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  const result = run(root, ['init', '--no-git'], { BOARD_ALLOW_GLOBAL: '1' })
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /\/reload/)
 })

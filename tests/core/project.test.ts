@@ -55,7 +55,7 @@ test('makeBoard создаёт базу со всеми таблицами сх�
   const version = fixture.db.prepare("select value from meta where key = 'schemaVersion'").get() as
     | { value: string }
     | undefined
-  assert.equal(version?.value, '12')
+  assert.equal(version?.value, '14')
   assert.equal(fixture.db.prepare('pragma foreign_keys').get()?.foreign_keys, 1)
 })
 
@@ -124,7 +124,10 @@ test('initProject создаёт docs/board и дописывает .gitignore �
   assert.equal(lines.filter((line) => line === '.board/').length, 1)
   assert.equal(lines.filter((line) => line === '.worktrees/').length, 1)
   assert.ok(lines.includes('docs/board/Inter.ttf'))
+  assert.equal(lines.filter((line) => line === '.drafts/').length, 1)
   assert.ok(lines.includes('node_modules/'))
+  assert.match(readFileSync(join(root, '.drafts', 'README.md'), 'utf8'), /Черновики/)
+  assert.match(readFileSync(join(root, '.drafts', 'README.md'), 'utf8'), /в корне проекта/)
 })
 
 test('initProject снимает старый хук toolbox-al и новый не ставит', (t) => {

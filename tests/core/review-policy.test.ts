@@ -293,9 +293,9 @@ test('isLightRun: опасный путь в diff — тяжёлый', (t) => {
   assert.equal(isLightRun(db, run, repo.root), false)
 })
 
-test('пакет ревью обязателен везде, кроме low', () => {
+test('пакет ревью нужен всегда, профиль его не отменяет', () => {
   const low = { ...base, review: { ...base.review, profile: 'low' } }
   const high = { ...base, review: { ...base.review, profile: 'high' } }
-  assert.equal(packageReviewRequired(low, context(null)), false)
+  assert.equal(packageReviewRequired(low, context(null)), true)
   assert.equal(packageReviewRequired(high, context(null)), true)
 })

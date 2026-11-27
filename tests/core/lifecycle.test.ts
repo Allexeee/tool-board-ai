@@ -435,18 +435,43 @@ test('cancel отменяет карточку: держатель или вла
   assert.equal(byOwner.waiveDeps, false)
 })
 
-test('reopen — только владелец, не-owner не обходит review', (t) => {
+test('reopen: агент возвращает review и acceptance, done — только владелец', (t) => {
   const { db } = board(t)
-  const card = seedCard(db, { phase: 'task', status: 'review', position: 1 })
+  const review = seedCard(db, {
+    phase: 'task',
+    status: 'review',
+    position: 1,
+    holder: 'developer',
+  })
+  const acceptance = seedCard(db, { phase: 'task', status: 'acceptance', position: 2 })
+  const done = seedCard(db, { phase: 'task', status: 'done', position: 3 })
+
+  const reopenedReview = reopenCard(db, {
+    id: review.id,
+    actor: 'developer',
+    reason: 'правки владельца',
+  })
+  assert.equal(reopenedReview.status, 'ready')
+  assert.equal(reopenedReview.attempt, review.attempt + 1)
+
+  const reopenedAcceptance = reopenCard(db, {
+    id: acceptance.id,
+    actor: 'developer',
+    reason: 'правки владельца',
+  })
+  assert.equal(reopenedAcceptance.status, 'ready')
+  assert.equal(reopenedAcceptance.attempt, acceptance.attempt + 1)
 
   assert.throws(
-    () => reopenCard(db, { id: card.id, actor: 'developer', reason: 'обойти ревью' }),
+    () => reopenCard(db, { id: done.id, actor: 'developer', reason: 'правки' }),
     /владелец/,
   )
-  assert.equal(getCard(db, card.id)!.status, 'review')
+  assert.equal(getCard(db, done.id)!.status, 'done')
+
+  assert.equal(reopenCard(db, { id: done.id, actor: 'owner', reason: 'правки' }).status, 'ready')
 })
 
-test('reopen увеличивает попытку, пишет previous_holder и двигает в начало очереди', (t) => {
+test('reopen увеличивает попытку, пишет previous_holder и сохраняет позицию', (t) => {
   const { db } = board(t)
   const first = seedCard(db, { phase: 'task', status: 'ready', importance: 3, urgency: 3, position: 1 })
   const second = shapedRequest(t, db)
@@ -461,7 +486,7 @@ test('reopen увеличивает попытку, пишет previous_holder �
   assert.equal(reopened.attempt, 2)
   assert.equal(reopened.previousHolder, 'developer')
   assert.equal(reopened.holder, null)
-  assert.equal(reopened.position, 1)
+  assert.equal(reopened.position, 2)
 
   assert.equal(listEvents(db, second.id).at(-1)!.note, 'переделать')
 })
@@ -819,6 +844,34 @@ test('approve сбрасывает позицию запроса и ставит
   const approved = approveCard(db, { id: card.id, actor: 'owner' })
   assert.equal(approved.status, 'ready')
   assert.equal(approved.position, 1)
+})
+
+test('approve ставит новую задачу в конец, огромный пузырь — на позицию 4', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  for (let position = 1; position <= 4; position++) {
+    seedCard(db, { phase: 'task', status: 'ready', position, importance: 1, urgency: 1 })
+  }
+
+  const normal = seedCard(db, {
+    phase: 'task',
+    status: 'approval',
+    position: 9,
+    importance: 5,
+    urgency: 3,
+  })
+  db.prepare("update cards set skill = 'dev' where id = ?").run(normal.id)
+  assert.equal(approveCard(db, { id: normal.id, actor: 'owner' }).position, 5)
+
+  const huge = seedCard(db, {
+    phase: 'task',
+    status: 'approval',
+    position: 9,
+    importance: 4,
+    urgency: 5,
+  })
+  db.prepare("update cards set skill = 'dev' where id = ?").run(huge.id)
+  assert.equal(approveCard(db, { id: huge.id, actor: 'owner' }).position, 4)
 })
 
 test('запрос из shape-файла, resume и amend получают позицию', (t) => {

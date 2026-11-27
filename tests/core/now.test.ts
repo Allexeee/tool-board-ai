@@ -397,8 +397,7 @@ test('now 3: owner после --bottom идёт последним в своей
   )
 })
 
-test('now 1 показывает карточку без позиции после позиционных', (t) => {
-  const { db } = board(t)
+test('now 1 показывает карточку без позиции после позиционных', (t) => {  const { db } = board(t)
   seedExecutor(db, { id: 'developer', skills: ['dev'] })
   const queued = seedCard(db, {
     phase: 'task',
@@ -420,4 +419,49 @@ test('now 1 показывает карточку без позиции посл
   const ids = (view.cards ?? []).map((card) => card.id)
   assert.ok(ids.includes(loose.id))
   assert.ok(ids.indexOf(queued.id) < ids.indexOf(loose.id))
+})
+
+test('now 1: карточка на приёмке видна агенту-держателю', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const card = seedCard(db, {
+    phase: 'task',
+    status: 'acceptance',
+    skill: 'dev',
+    holder: 'developer',
+  })
+
+  const view = nowData(db, { view: 1, executorId: 'developer' })
+  assert.ok((view.cards ?? []).some((item) => item.id === card.id))
+  assert.match(stripAnsi(renderNow(view)), /ожидает приёмки/)
+})
+
+test('now 1: ревью и приёмка идут после очереди', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const review = seedCard(db, {
+    phase: 'task',
+    status: 'review',
+    skill: 'dev',
+    holder: 'developer',
+    position: 1,
+  })
+  const acceptance = seedCard(db, {
+    phase: 'task',
+    status: 'acceptance',
+    skill: 'dev',
+    holder: 'developer',
+    position: 2,
+  })
+  const ready = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 1,
+  })
+
+  const view = nowData(db, { view: 1, executorId: 'developer' })
+  const ids = (view.cards ?? []).map((card) => card.id)
+  assert.ok(ids.indexOf(ready.id) < ids.indexOf(review.id))
+  assert.ok(ids.indexOf(ready.id) < ids.indexOf(acceptance.id))
 })

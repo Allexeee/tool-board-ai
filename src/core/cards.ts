@@ -68,8 +68,8 @@ const OWNER_SKILL = 'owner'
 /** Навык меняется только до submit: дальше карточку отменяют и создают новую. */
 const SKILL_EDITABLE: readonly CardStatus[] = ['new', 'shaping']
 
-const SCORE_MIN = 0
-const SCORE_MAX = 3
+const SCORE_MIN = 1
+const SCORE_MAX = 5
 
 interface Row {
   id: string
@@ -85,6 +85,7 @@ interface Row {
   urgency: number | null
   position: number | null
   demons: number
+  bubbles: number
   needs_merge: number
   review_required: number
   plan_waived: number
@@ -135,6 +136,7 @@ const toCard = (row: Row): Card => ({
   urgency: row.urgency,
   position: row.position,
   demons: row.demons ?? 0,
+  bubbles: row.bubbles ?? 0,
   needsMerge: row.needs_merge === 1,
   reviewRequired: row.review_required === 1,
   planWaived: row.plan_waived === 1,

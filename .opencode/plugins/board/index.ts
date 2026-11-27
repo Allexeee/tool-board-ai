@@ -462,7 +462,14 @@ export default Plugin.define({
   async setup(ctx) {
     // Брейншторм — часть работы по доске; строка в системном промпте не зависит
     // от того, загрузился ли навык, и от содержимого AGENTS.md.
+    const boardConnected = existsSync(join(projectRoot(ctx), '.board', 'board.db'))
     await ctx.session.hook('context', (event) => {
+      if (boardConnected) {
+        event.system.push({
+          type: 'text',
+          text: 'В проекте подключена доска карточек. Правила — в AGENTS.md. Не говори, что не знаком с доской: сначала посмотри её состояние через board_now 0. В чат — простой язык без команд и внутренних параметров.',
+        })
+      }
       event.system.push({
         type: 'text',
         text: 'Перед любой работой по доске используй brainstorming; в этом проекте его spec пишется в карточку. Разговор без глагола работы карточек не создаёт.',
@@ -474,6 +481,10 @@ export default Plugin.define({
       event.system.push({
         type: 'text',
         text: 'После board upgrade или board init --refresh перескажи блок «Что нового» в чате человеческим языком: 3–5 пунктов, без флагов и CLI-жаргона. Если изменений нет — так и скажи. Затем одно действие: предложи board_adopt (он же board adopt --check), если проект ещё не приводили в порядок. adopt --check ничего не создаёт: покажи план, получи согласие и примени его обычными командами; повторный --check показывает остаток.',
+      })
+      event.system.push({
+        type: 'text',
+        text: 'Правка владельца к уже сделанной работе — это та же карточка: верни её в работу из review/acceptance или измени spec, но не заводи новую. Новая карточка — только для отдельной задачи.',
       })
     })
 

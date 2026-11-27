@@ -86,7 +86,7 @@ const REQUEST_LIMIT = 10
 const QUEUE_LIMIT = 15
 
 /** Карточки, которые агент уже держит. */
-const CURRENT_STATUSES: readonly CardStatus[] = ['booked', 'in_progress', 'blocked', 'review']
+const CURRENT_STATUSES: readonly CardStatus[] = ['booked', 'in_progress', 'blocked', 'review', 'acceptance']
 
 /** Незанятые задачи, которые стоят в очереди. */
 const OPEN_QUEUE_STATUSES: readonly CardStatus[] = ['ready', 'waiting']
@@ -97,13 +97,14 @@ const OPEN_REQUEST_STATUSES: readonly CardStatus[] = ['new', 'shaping', 'blocked
 /** Порядок карточек в едином списке: сначала в работе/ревью, затем доступные. */
 const CARD_ORDER: Record<string, number> = {
   in_progress: 0,
-  review: 1,
-  blocked: 2,
-  booked: 3,
-  ready: 4,
-  waiting: 5,
-  new: 6,
-  shaping: 7,
+  booked: 1,
+  ready: 2,
+  waiting: 3,
+  review: 4,
+  acceptance: 5,
+  blocked: 6,
+  new: 7,
+  shaping: 8,
 }
 
 /**
@@ -363,7 +364,7 @@ const STATUS_WORDS: Record<CardStatus, string> = {
   blocked: 'заблокирована',
   deferred: 'отложена',
   review: 'ждёт финального ревью',
-  acceptance: 'требует приёмки',
+  acceptance: 'ожидает приёмки',
   done: 'сделано',
   cancelled: 'отменена',
 }

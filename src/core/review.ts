@@ -5,7 +5,7 @@ import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { addDep, refreshReadiness } from './deps.ts'
 import { appendEvent, listEvents } from './events.ts'
-import { insertIntoQueue, moveCard } from './queue.ts'
+import { bubbleAfterLeave, insertIntoQueue, restoreQueuePosition } from './queue.ts'
 import { listSteps } from './steps.ts'
 import { isAncestor, refreshMergeState } from './git.ts'
 import type { Card, Severity } from './types.ts'
@@ -544,18 +544,16 @@ export function submitVerdict(
           card.id,
         )
       }
+      if (card.skill !== OWNER) bubbleAfterLeave(db, card)
     } else {
       db.prepare(
         `update cards set status = 'ready', previous_holder = ?, holder = null, run_id = null,
-         lease_until = null, attempt = attempt + 1, review_reopens = review_reopens + 1,
-         updated_at = ? where id = ?`,
+         lease_until = null, position = null, attempt = attempt + 1,
+         review_reopens = review_reopens + 1, updated_at = ? where id = ?`,
       ).run(card.holder, at, card.id)
 
-      // Переоткрытая карточка возвращается в начало очереди задач.
-      if (card.skill !== OWNER) {
-        if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
-        moveCard(db, card.id, { top: true })
-      }
+      // Переоткрытая карточка возвращается на своё место в очереди.
+      if (card.skill !== OWNER) restoreQueuePosition(db, card.id, card.position)
 
       for (const finding of findings) {
         if (finding.severity === 'critical') {

@@ -37,7 +37,6 @@ export const BUILTIN_PROFILES: Record<'low' | 'default' | 'high' | 'max', Review
     reopens: 0,
     run: 'none',
     findings: 'critical',
-    package: false,
   },
   default: {
     spec: 'auto',
@@ -46,7 +45,6 @@ export const BUILTIN_PROFILES: Record<'low' | 'default' | 'high' | 'max', Review
     reopens: 1,
     run: 'auto',
     findings: 'critical',
-    package: true,
   },
   high: {
     spec: 'auto',
@@ -55,7 +53,6 @@ export const BUILTIN_PROFILES: Record<'low' | 'default' | 'high' | 'max', Review
     reopens: 2,
     run: 'subagent',
     findings: 'critical+important',
-    package: true,
   },
   max: {
     spec: 'subagent',
@@ -64,7 +61,6 @@ export const BUILTIN_PROFILES: Record<'low' | 'default' | 'high' | 'max', Review
     reopens: 3,
     run: 'subagent',
     findings: 'critical+important',
-    package: true,
   },
 }
 
@@ -104,7 +100,6 @@ function customProfile(settings: BoardSettings): ReviewProfile {
     reopens: 1,
     run: settings.runReview.mode,
     findings: 'critical',
-    package: true,
   }
 }
 
@@ -211,10 +206,10 @@ export function findingsScope(
   return resolveReviewProfile(settings, context).profile.findings
 }
 
-/** Требуется ли пакетное ревью перед релизом (low — нет). */
+/** Пакетное ревью перед релизом требуется всегда; профиль его не отменяет. */
 export function packageReviewRequired(
-  settings: BoardSettings,
-  context: ModelContext,
+  _settings: BoardSettings,
+  _context: ModelContext,
 ): boolean {
-  return resolveReviewProfile(settings, context).profile.package
+  return true
 }

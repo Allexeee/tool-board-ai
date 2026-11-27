@@ -9,8 +9,8 @@ function columns(db: DatabaseSync, table: string): string[] {
 
 test('новый файл получает схему v3 с полями spec/review и tags', () => {
   const db = new DatabaseSync(':memory:')
-  assert.equal(migrate(db), 12)
-  assert.equal(SCHEMA_VERSION, 12)
+  assert.equal(migrate(db), 14)
+  assert.equal(SCHEMA_VERSION, 14)
   assert.ok(columns(db, 'cards').includes('acceptance'))
   assert.ok(columns(db, 'cards').includes('legacy_ids'))
   assert.ok(columns(db, 'cards').includes('main_commit'))
@@ -34,7 +34,7 @@ test('база v10 получает поля приёмки владельцем
     insert into meta values ('schemaVersion', '10');
     insert into cards (id) values ('UI-1');`)
 
-  assert.equal(migrate(db), 12)
+  assert.equal(migrate(db), 14)
   assert.ok(columns(db, 'cards').includes('owner_acceptance'))
   assert.ok(columns(db, 'cards').includes('owner_acceptance_manual'))
   const row = db
@@ -49,7 +49,7 @@ test('база v7 получает таблицу пакетного ревью'
   db.exec(`create table meta (key text primary key, value text not null);
     insert into meta values ('schemaVersion', '7');`)
 
-  assert.equal(migrate(db), 12)
+  assert.equal(migrate(db), 14)
   assert.ok(columns(db, 'review_packages').includes('findings'))
 })
 
@@ -60,7 +60,7 @@ test('база v9 получает реестр тегов из карточек
     insert into meta values ('schemaVersion', '9');
     insert into cards (id, tags) values ('UI-1', '["ui","backend"]');`)
 
-  assert.equal(migrate(db), 12)
+  assert.equal(migrate(db), 14)
   const names = (
     db.prepare('select name from tags order by name').all() as Array<{ name: string }>
   ).map((row) => row.name)
@@ -80,8 +80,8 @@ test('база v1 мигрирует без потери карточки', () =
     insert into cards values ('UI-1', 'spec', 'ready');
     insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'review', 'done', '2026-01-01');`)
 
-  assert.equal(migrate(db), 12)
-  assert.equal(schemaVersionOf(db), 12)
+  assert.equal(migrate(db), 14)
+  assert.equal(schemaVersionOf(db), 14)
   assert.equal((db.prepare('select count(*) as n from cards').get() as { n: number }).n, 1)
   assert.equal(columns(db, 'cards').includes('spec_rev'), true)
   assert.equal(columns(db, 'cards').includes('tags'), true)
@@ -96,7 +96,7 @@ test('база v5 мигрирует acceptance в reviews', () => {
     insert into meta values ('schemaVersion', '5');
     insert into reviews (card_id, reviewer, verdict, at) values ('UI-1', 'r', 'done', '2026-01-01');`)
 
-  assert.equal(migrate(db), 12)
+  assert.equal(migrate(db), 14)
   assert.ok(columns(db, 'reviews').includes('acceptance'))
   const row = db.prepare('select acceptance from reviews').get() as {
     acceptance: string | null
@@ -111,7 +111,7 @@ test('база v6 мигрирует legacy_ids', () => {
     insert into meta values ('schemaVersion', '6');
     insert into cards (id) values ('UI-1');`)
 
-  assert.equal(migrate(db), 12)
+  assert.equal(migrate(db), 14)
   assert.ok(columns(db, 'cards').includes('legacy_ids'))
   const row = db.prepare('select legacy_ids from cards where id = ?').get('UI-1') as {
     legacy_ids: string
@@ -127,7 +127,7 @@ test('база v2 мигрирует tags и помечает находки rev
     insert into cards values ('UI-1', 'UI-9');
     insert into cards values ('UI-2', null);`)
 
-  assert.equal(migrate(db), 12)
+  assert.equal(migrate(db), 14)
   const rows = db.prepare('select id, tags from cards order by id').all() as Array<{
     id: string
     tags: string
@@ -143,10 +143,48 @@ test('база v11 получает cards.demons=0', () => {
     insert into meta values ('schemaVersion', '11');
     insert into cards (id) values ('UI-1');`)
 
-  assert.equal(migrate(db), 12)
+  assert.equal(migrate(db), 14)
   assert.ok(columns(db, 'cards').includes('demons'))
   const row = db.prepare('select demons from cards where id = ?').get('UI-1') as {
     demons: number
   }
   assert.equal(row.demons, 0)
+})
+
+test('база v12 переводит нулевые оценки в 1', () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(`create table meta (key text primary key, value text not null);
+    create table cards (id text primary key, importance integer, urgency integer);
+    insert into meta values ('schemaVersion', '12');
+    insert into cards values ('UI-1', 0, 0);
+    insert into cards values ('UI-2', 3, 0);
+    insert into cards values ('UI-3', 5, 5);`)
+
+  assert.equal(migrate(db), 14)
+  const rows = db
+    .prepare('select id, importance, urgency from cards order by id')
+    .all() as Array<{ id: string; importance: number; urgency: number }>
+  assert.deepEqual(
+    rows.map((row) => [row.importance, row.urgency]),
+    [
+      [1, 1],
+      [3, 1],
+      [5, 5],
+    ],
+  )
+})
+
+test('база v13 получает bubbles=0', () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(`create table meta (key text primary key, value text not null);
+    create table cards (id text primary key, demons integer not null default 0);
+    insert into meta values ('schemaVersion', '13');
+    insert into cards values ('UI-1', 2);`)
+
+  assert.equal(migrate(db), 14)
+  assert.ok(columns(db, 'cards').includes('bubbles'))
+  const row = db.prepare('select bubbles from cards where id = ?').get('UI-1') as {
+    bubbles: number
+  }
+  assert.equal(row.bubbles, 0)
 })
