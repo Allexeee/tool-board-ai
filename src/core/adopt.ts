@@ -69,6 +69,7 @@ export interface AdoptPlan {
     suggested: AdoptAcceptanceSuggestion[]
     prompt: string | null
     examples: string[]
+    command: string | null
   }
   executors: {
     existing: Array<{ id: string; kind: string; skills: string[] }>
@@ -131,15 +132,6 @@ function ruleText(rule: AcceptanceRule): string {
   const include = summarizeConditions(rule.include)
   const exclude = rule.exclude ? `; кроме ${summarizeConditions(rule.exclude)}` : ''
   return `${rule.name} [${include}${exclude}]`
-}
-
-function acceptanceCommand(name: string, include: AcceptanceConditions): string {
-  const flags: string[] = []
-  for (const group of include.groups ?? []) flags.push('--include-group', group)
-  for (const tag of include.tags ?? []) flags.push('--include-tag', tag)
-  for (const skill of include.skills ?? []) flags.push('--include-skill', skill)
-  for (const path of include.paths ?? []) flags.push('--include-path', path)
-  return `board acceptance rule add ${quote(name)} ${flags.join(' ')}`.trim()
 }
 
 function normalizeTitle(value: string): string {
@@ -264,30 +256,17 @@ function sourceSteps(
   return sources
 }
 
-function acceptanceSuggestions(
-  settings: BoardSettings,
-  groups: CardGroup[],
-): AdoptAcceptanceSuggestion[] {
-  if (settings.acceptance.rules.length > 0) return []
-  const suggestions: AdoptAcceptanceSuggestion[] = []
-  // Одна область — понятное правило по группе; много областей — не угадываем.
-  if (groups.length === 1) {
-    const group = groups[0]
-    const name = `приёмка-${group.prefix.toLowerCase()}`
-    const include = { groups: [group.prefix] }
-    suggestions.push({ name, include, command: acceptanceCommand(name, include) })
-  }
-  return suggestions
-}
-
-/** Просьба к владельцу, когда правил приёмки ещё нет. */
+/** Просьба к владельцу: какие карточки он принимает сам. */
 const ACCEPTANCE_PROMPT =
-  'Напишите критерии, по которым я пойму, что задача должна быть принята Вами.'
+  'Какие карточки Вы будете принимать сами? Напишите критерии, по которым я пойму, что задачу принимаете Вы.'
 
 const ACCEPTANCE_EXAMPLES = [
-  'Приму, если на экране всё открывается без ошибок, кнопка работает, а тексты без опечаток.',
-  'Приму, когда команда на чистом проекте выполняется без ошибок и печатает понятный результат.',
+  'Все карточки области UI.',
+  'Задачи с тегом docs.',
+  'Всё, что меняет README или настройки.',
 ]
+
+const ACCEPTANCE_COMMAND = 'board acceptance rule add "Имя" --include-group UI'
 
 /**
  * Строит план и ничего не пишет. Повторный вызов на неизменённой доске даёт
@@ -359,9 +338,10 @@ export function buildAdoptPlan(
 
   const acceptance = {
     existing: settings.acceptance.rules.map(ruleText),
-    suggested: acceptanceSuggestions(settings, groups),
+    suggested: [] as AdoptAcceptanceSuggestion[],
     prompt: settings.acceptance.rules.length === 0 ? ACCEPTANCE_PROMPT : null,
     examples: settings.acceptance.rules.length === 0 ? ACCEPTANCE_EXAMPLES : [],
+    command: settings.acceptance.rules.length === 0 ? ACCEPTANCE_COMMAND : null,
   }
 
   const missingExecutors = executors.some((executor) => executor.id === 'developer')
@@ -501,10 +481,8 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
     for (const example of plan.acceptance.examples) {
       lines.push(`      • ${example}`)
     }
-    if (plan.acceptance.suggested.length > 0) {
-      lines.push(
-        `    предложить правила: ${plan.acceptance.suggested.map((rule) => rule.name).join(', ')}`,
-      )
+    if (plan.acceptance.command) {
+      lines.push(`    например: ${plan.acceptance.command}`)
     }
   }
   lines.push(
