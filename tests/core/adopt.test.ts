@@ -32,7 +32,6 @@ test('adopt --check: пустой проект получает план и ни
   assert.deepEqual(plan.acceptance.suggested, [])
   assert.match(plan.acceptance.prompt ?? '', /Какие карточки/)
   assert.equal(plan.acceptance.examples.length, 3)
-  assert.match(plan.acceptance.command ?? '', /board acceptance rule add/)
   assert.deepEqual(
     plan.tags.suggested.map((tag) => tag.name),
     ['ui', 'backend', 'docs', 'test'],

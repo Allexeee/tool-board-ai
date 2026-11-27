@@ -69,7 +69,6 @@ export interface AdoptPlan {
     suggested: AdoptAcceptanceSuggestion[]
     prompt: string | null
     examples: string[]
-    command: string | null
   }
   executors: {
     existing: Array<{ id: string; kind: string; skills: string[] }>
@@ -266,8 +265,6 @@ const ACCEPTANCE_EXAMPLES = [
   'Всё, что меняет README или настройки.',
 ]
 
-const ACCEPTANCE_COMMAND = 'board acceptance rule add "Имя" --include-group UI'
-
 /**
  * Строит план и ничего не пишет. Повторный вызов на неизменённой доске даёт
  * тот же план; после применения шагов они исчезают, дублей нет.
@@ -341,7 +338,6 @@ export function buildAdoptPlan(
     suggested: [] as AdoptAcceptanceSuggestion[],
     prompt: settings.acceptance.rules.length === 0 ? ACCEPTANCE_PROMPT : null,
     examples: settings.acceptance.rules.length === 0 ? ACCEPTANCE_EXAMPLES : [],
-    command: settings.acceptance.rules.length === 0 ? ACCEPTANCE_COMMAND : null,
   }
 
   const missingExecutors = executors.some((executor) => executor.id === 'developer')
@@ -480,9 +476,6 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
     lines.push(`    ${plan.acceptance.prompt}`)
     for (const example of plan.acceptance.examples) {
       lines.push(`      • ${example}`)
-    }
-    if (plan.acceptance.command) {
-      lines.push(`    например: ${plan.acceptance.command}`)
     }
   }
   lines.push(
