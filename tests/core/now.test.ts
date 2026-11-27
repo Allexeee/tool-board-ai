@@ -435,3 +435,33 @@ test('now 1: карточка на приёмке видна агенту-дер
   assert.ok((view.cards ?? []).some((item) => item.id === card.id))
   assert.match(stripAnsi(renderNow(view)), /ожидает приёмки/)
 })
+
+test('now 1: ревью и приёмка идут после очереди', (t) => {
+  const { db } = board(t)
+  seedExecutor(db, { id: 'developer', skills: ['dev'] })
+  const review = seedCard(db, {
+    phase: 'task',
+    status: 'review',
+    skill: 'dev',
+    holder: 'developer',
+    position: 1,
+  })
+  const acceptance = seedCard(db, {
+    phase: 'task',
+    status: 'acceptance',
+    skill: 'dev',
+    holder: 'developer',
+    position: 2,
+  })
+  const ready = seedCard(db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 1,
+  })
+
+  const view = nowData(db, { view: 1, executorId: 'developer' })
+  const ids = (view.cards ?? []).map((card) => card.id)
+  assert.ok(ids.indexOf(ready.id) < ids.indexOf(review.id))
+  assert.ok(ids.indexOf(ready.id) < ids.indexOf(acceptance.id))
+})
