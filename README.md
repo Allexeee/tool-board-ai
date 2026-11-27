@@ -140,7 +140,7 @@ board card add --group UI --title "Форма входа" --skill dev
 - После approve менять spec/acceptance/scope нельзя; изменение — `card amend UI-1 --as developer --reason "..."`, затем повторный review и approve.
 - `card reopen` — команда владельца; агент может вернуть в работу `review` или `acceptance` с причиной, если владелец просит правки; `done` — только владелец.
 
-`needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 0–3. Зависимости — `card dep`.
+`needs_merge=true` требует непустой `scope`; `importance`/`urgency` — 1–5. Зависимости — `card dep`.
 
 `needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done`, waiver или покрытия пакетным проходом.
 

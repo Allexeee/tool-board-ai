@@ -109,7 +109,7 @@ test('editCard меняет поля запроса до submit', (t) => {
       body: 'Что хочу и зачем',
       skill: 'marketer',
       importance: 3,
-      urgency: 0,
+      urgency: 2,
       needsMerge: false,
       reviewRequired: true,
       scope: ['src/**', 'tests/**'],
@@ -121,7 +121,7 @@ test('editCard меняет поля запроса до submit', (t) => {
   assert.equal(edited.body, 'Что хочу и зачем')
   assert.equal(edited.skill, 'marketer')
   assert.equal(edited.importance, 3)
-  assert.equal(edited.urgency, 0)
+  assert.equal(edited.urgency, 2)
   assert.equal(edited.needsMerge, false)
   assert.equal(edited.reviewRequired, true)
   assert.deepEqual(edited.scope, ['src/**', 'tests/**'])
@@ -247,7 +247,7 @@ test('навык меняется, пока карточка shaping', (t) => {
   assert.equal(edited.skill, 'marketer')
 })
 
-test('оценки важности и срочности — целые от 0 до 3', (t) => {
+test('оценки важности и срочности — целые от 1 до 5', (t) => {
   const { db, close } = makeBoard()
   t.after(close)
 
@@ -258,8 +258,15 @@ test('оценки важности и срочности — целые от 0 
     author: 'owner',
   })
 
+  editCard(db, { id: card.id, actor: 'owner', patch: { importance: 5, urgency: 5 } })
+  assert.equal(getCard(db, card.id)!.importance, 5)
+
   assert.throws(
-    () => editCard(db, { id: card.id, actor: 'owner', patch: { importance: 4 } }),
+    () => editCard(db, { id: card.id, actor: 'owner', patch: { importance: 6 } }),
+    /важность/,
+  )
+  assert.throws(
+    () => editCard(db, { id: card.id, actor: 'owner', patch: { importance: 0 } }),
     /важность/,
   )
   assert.throws(

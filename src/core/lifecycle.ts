@@ -105,8 +105,8 @@ function requireSummary(raw: string | undefined): string {
 }
 
 function assertScore(raw: number | null, label: string): void {
-  if (raw === null || !Number.isInteger(raw) || raw < 0 || raw > 3) {
-    throw new UserError(3, `${label} — целое число от 0 до 3`)
+  if (raw === null || !Number.isInteger(raw) || raw < 1 || raw > 5) {
+    throw new UserError(3, `${label} — целое число от 1 до 5`)
   }
 }
 

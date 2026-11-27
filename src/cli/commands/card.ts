@@ -126,12 +126,12 @@ export default async function command(args: ParsedArgs) {
 
     // Оценки валидируются до создания: ошибка ввода не должна оставлять карточку.
     const importance = numberFlag(args, 'importance')
-    if (importance !== undefined && (importance < 0 || importance > 3)) {
-      throw new UserError(3, 'важность — целое число от 0 до 3')
+    if (importance !== undefined && (importance < 1 || importance > 5)) {
+      throw new UserError(3, 'важность — целое число от 1 до 5')
     }
     const urgency = numberFlag(args, 'urgency')
-    if (urgency !== undefined && (urgency < 0 || urgency > 3)) {
-      throw new UserError(3, 'срочность — целое число от 0 до 3')
+    if (urgency !== undefined && (urgency < 1 || urgency > 5)) {
+      throw new UserError(3, 'срочность — целое число от 1 до 5')
     }
 
     const card = createCard(db, {

@@ -332,10 +332,10 @@ test('card add с невалидной оценкой не создаёт кар
   const dir = project(t)
 
   const bad = run(dir, [
-    'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--importance', '4',
+    'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--importance', '6',
   ])
   assert.equal(bad.code, 3)
-  assert.match(bad.err, /0 до 3/)
+  assert.match(bad.err, /1 до 5/)
 
   const negative = run(dir, [
     'card', 'add', '--group', 'UI', '--title', 'Плохая', '--skill', 'dev', '--urgency', '-1',
