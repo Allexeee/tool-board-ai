@@ -97,6 +97,7 @@ export default async function command(args: ParsedArgs) {
   }
   if (boardVersion !== null) lines.push('', ...whatsNewLines(whatsNew))
   lines.push('', 'Проект: ' + root)
+  lines.push('Если сессия уже была открыта, начните новую — доска подхватится при старте.')
 
   const setupRequired = settings.setupAt === null
   ok(

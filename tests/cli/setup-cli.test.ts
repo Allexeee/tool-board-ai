@@ -347,3 +347,12 @@ test('group add: область без карточки, повтор — оши
 
   assert.equal(run(fixture.root, ['group', 'add', 'SITE']).code, 3)
 })
+
+test('init говорит начать новую сессию, чтобы доска подхватилась', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'board-init-session-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  const result = run(root, ['init', '--no-git'], { BOARD_ALLOW_GLOBAL: '1' })
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /начните новую/)
+})
