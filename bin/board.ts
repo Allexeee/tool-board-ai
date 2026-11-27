@@ -133,7 +133,33 @@ async function main(argv: string[]): Promise<number> {
 
   const module = await loadCommand(args.command)
   if (!module) throw new UserError(3, `неизвестная команда ${args.command}`)
-  return (await module.default(args)) ?? 0
+  const code = (await module.default(args)) ?? 0
+  await flushAfterCommand(args.command)
+  return code
+}
+
+const NO_FLUSH = new Set(['adopt', 'backlog', 'init', 'upgrade', 'help', 'version'])
+
+/** После любой команды, меняющей доску, пересобрать бэклог при автообновлении. */
+async function flushAfterCommand(command: string): Promise<void> {
+  if (NO_FLUSH.has(command)) return
+  try {
+    const [{ findProject }, { openDb }, { refreshBacklogIfAuto }] = await Promise.all([
+      import('../src/core/project.ts'),
+      import('../src/core/db.ts'),
+      import('../src/core/backlog.ts'),
+    ])
+    const project = findProject(process.cwd())
+    if (!project) return
+    const db = openDb(project.dbPath, { allowOutdated: true, allowNewer: true })
+    try {
+      refreshBacklogIfAuto(db, project.root)
+    } finally {
+      db.close()
+    }
+  } catch {
+    // Пересборка бэклога не должна валить саму команду.
+  }
 }
 
 const COMMANDS_DIR = fileURLToPath(new URL('../src/cli/commands/', import.meta.url))
