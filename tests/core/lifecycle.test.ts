@@ -471,7 +471,7 @@ test('reopen: агент возвращает review и acceptance, done — т�
   assert.equal(reopenCard(db, { id: done.id, actor: 'owner', reason: 'правки' }).status, 'ready')
 })
 
-test('reopen увеличивает попытку, пишет previous_holder и двигает в начало очереди', (t) => {
+test('reopen увеличивает попытку, пишет previous_holder и сохраняет позицию', (t) => {
   const { db } = board(t)
   const first = seedCard(db, { phase: 'task', status: 'ready', importance: 3, urgency: 3, position: 1 })
   const second = shapedRequest(t, db)
@@ -486,7 +486,7 @@ test('reopen увеличивает попытку, пишет previous_holder �
   assert.equal(reopened.attempt, 2)
   assert.equal(reopened.previousHolder, 'developer')
   assert.equal(reopened.holder, null)
-  assert.equal(reopened.position, 1)
+  assert.equal(reopened.position, 2)
 
   assert.equal(listEvents(db, second.id).at(-1)!.note, 'переделать')
 })

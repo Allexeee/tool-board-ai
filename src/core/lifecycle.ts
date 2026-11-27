@@ -735,7 +735,6 @@ export function reopenCard(
     // Owner-карточка не встаёт в очередь: её закрывает и переоткрывает владелец.
     if (card.skill !== OWNER) {
       if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
-      moveCard(db, card.id, { top: true })
     }
 
     refreshReadiness(db)

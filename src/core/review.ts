@@ -5,7 +5,7 @@ import { nowIso } from './clock.ts'
 import { tx } from './db.ts'
 import { addDep, refreshReadiness } from './deps.ts'
 import { appendEvent, listEvents } from './events.ts'
-import { insertIntoQueue, moveCard } from './queue.ts'
+import { insertIntoQueue } from './queue.ts'
 import { listSteps } from './steps.ts'
 import { isAncestor, refreshMergeState } from './git.ts'
 import type { Card, Severity } from './types.ts'
@@ -551,10 +551,9 @@ export function submitVerdict(
          updated_at = ? where id = ?`,
       ).run(card.holder, at, card.id)
 
-      // Переоткрытая карточка возвращается в начало очереди задач.
+      // Переоткрытая карточка возвращается на своё место в очереди.
       if (card.skill !== OWNER) {
         if (getCard(db, card.id)!.position === null) insertIntoQueue(db, card.id)
-        moveCard(db, card.id, { top: true })
       }
 
       for (const finding of findings) {
