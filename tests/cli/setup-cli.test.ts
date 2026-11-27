@@ -354,5 +354,5 @@ test('init говорит начать новую сессию, чтобы до�
 
   const result = run(root, ['init', '--no-git'], { BOARD_ALLOW_GLOBAL: '1' })
   assert.equal(result.code, 0, result.err)
-  assert.match(result.out, /начните новую/)
+  assert.match(result.out, /перезагрузите/)
 })
