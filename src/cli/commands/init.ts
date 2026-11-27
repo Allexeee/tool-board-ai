@@ -97,7 +97,7 @@ export default async function command(args: ParsedArgs) {
   }
   if (boardVersion !== null) lines.push('', ...whatsNewLines(whatsNew))
   lines.push('', 'Проект: ' + root)
-  lines.push('Если сессия уже была открыта и доска не появилась, перезагрузите сессию.')
+  lines.push('Если сессия уже была открыта, перезагрузите её командой /reload — тогда появится доска.')
 
   const setupRequired = settings.setupAt === null
   ok(
