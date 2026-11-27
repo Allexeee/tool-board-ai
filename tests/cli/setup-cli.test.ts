@@ -297,7 +297,7 @@ test('setup --show: high печатает эффективный профиль'
   assert.match(shown.out, /Ревью в конце забега: subagent/)
   assert.match(shown.out, /Реревью: 2/)
   assert.match(shown.out, /Находки: critical \+ important/)
-  assert.match(shown.out, /Пакет ревью: требуется/)
+  assert.doesNotMatch(shown.out, /Пакет ревью/)
   assert.doesNotMatch(shown.out, /Порог max/)
 })
 

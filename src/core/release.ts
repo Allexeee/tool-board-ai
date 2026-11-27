@@ -173,8 +173,7 @@ export function release(
   const unreviewed = options.noReview ? [] : reviewGap(db, scoped, packageRequired)
   if (unreviewed.length > 0) {
     const detail = unreviewed.map((card) => card.id).join(', ')
-    const packageHint = packageRequired ? ' (нужен пакет: board review package)' : ''
-    throw new UserError(2, `релиз заблокирован: нет ревью, пакета или waiver: ${detail}${packageHint}`)
+    throw new UserError(2, `релиз заблокирован: нет ревью, пакета или waiver: ${detail}`)
   }
 
   const version = projectVersion(root)

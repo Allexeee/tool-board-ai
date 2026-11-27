@@ -44,7 +44,6 @@ test('профиль card:never: add и edit сами пишут waiver', (t) =>
     reopens: 1,
     run: 'none' as const,
     findings: 'critical' as const,
-    package: true,
   }
   updateSettings(dir, { review: { profile: 'quiet', profiles: { quiet } } })
 
