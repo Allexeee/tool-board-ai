@@ -464,6 +464,7 @@ export default Plugin.define({
     // от того, загрузился ли навык, и от содержимого AGENTS.md.
     const boardConnected = existsSync(join(projectRoot(ctx), '.board', 'board.db'))
     await ctx.session.hook('context', (event) => {
+      if (!boardConnected) return
       if (boardConnected) {
         event.system.push({
           type: 'text',

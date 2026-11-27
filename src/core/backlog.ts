@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isIdeaCard, listCards } from './cards.ts'
-import { listDeps } from './deps.ts'
+import { isSatisfied, listDeps } from './deps.ts'
 import { readSettings, type BoardSettings } from './settings.ts'
 import { renderBacklogPage } from './backlog-view.ts'
 import type { Card, CardStatus } from './types.ts'
@@ -134,13 +134,19 @@ function statusRank(card: Card): number {
 function sortCards(db: DatabaseSync, cards: Card[]): Card[] {
   const ids = new Set(cards.map((card) => card.id))
   // Зависимость в другой таблице здесь не поставить: такая карточка ждёт
-  // и уходит в конец своей секции.
-  const externalWaiting = (card: Card): boolean =>
-    card.status === 'waiting' &&
-    listDeps(db, card.id).some((id) => !ids.has(id))
+  // и уходит в конец своей секции. Закрытая внешняя зависимость не в счёт.
+  const external = new Set(
+    cards
+      .filter(
+        (card) =>
+          card.status === 'waiting' &&
+          listDeps(db, card.id).some((id) => !ids.has(id) && !isSatisfied(db, id)),
+      )
+      .map((card) => card.id),
+  )
   const base = [...cards].sort(
     (left, right) =>
-      Number(externalWaiting(left)) - Number(externalWaiting(right)) ||
+      Number(external.has(left.id)) - Number(external.has(right.id)) ||
       (left.position ?? Number.MAX_SAFE_INTEGER) -
         (right.position ?? Number.MAX_SAFE_INTEGER) ||
       statusRank(left) - statusRank(right) ||
@@ -151,7 +157,7 @@ function sortCards(db: DatabaseSync, cards: Card[]): Card[] {
   // Dependency-first: карточка не встаёт раньше своей незакрытой зависимости
   // из той же секции. Внешние зависимости и циклы не ломают порядок.
   const placed = new Set<string>()
-  const pending = base.filter((card) => !externalWaiting(card))
+  const pending = base.filter((card) => !external.has(card.id))
   const result: Card[] = []
   while (pending.length > 0) {
     const index = pending.findIndex((card) =>
@@ -167,7 +173,7 @@ function sortCards(db: DatabaseSync, cards: Card[]): Card[] {
     result.push(next)
     placed.add(next.id)
   }
-  return [...result, ...base.filter(externalWaiting)]
+  return [...result, ...base.filter((card) => external.has(card.id))]
 }
 
 /** Данные бэклога: таблицы по навыкам, отложенные и недавно готовые. */

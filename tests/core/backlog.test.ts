@@ -277,3 +277,38 @@ test('зависимость в другой секции уводит карт�
   const dev = buildBacklog(board.db).skills.find((section) => section.skill === 'dev')!
   assert.deepEqual(dev.rows.map((row) => row.id), [other.id, dependent.id])
 })
+
+test('закрытая зависимость в другой секции не уводит карточку вниз', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+
+  const dependent = seedCard(board.db, {
+    phase: 'task',
+    status: 'waiting',
+    skill: 'dev',
+    position: 1,
+  })
+  const blocker = seedCard(board.db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 2,
+  })
+  const other = seedCard(board.db, {
+    phase: 'task',
+    status: 'ready',
+    skill: 'dev',
+    position: 3,
+  })
+  const external = seedCard(board.db, {
+    phase: 'task',
+    status: 'done',
+    skill: 'marketing',
+    position: 1,
+  })
+  addDep(board.db, dependent.id, external.id, 'owner')
+  addDep(board.db, dependent.id, blocker.id, 'owner')
+
+  const dev = buildBacklog(board.db).skills.find((section) => section.skill === 'dev')!
+  assert.deepEqual(dev.rows.map((row) => row.id), [blocker.id, dependent.id, other.id])
+})

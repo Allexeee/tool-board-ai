@@ -225,21 +225,36 @@ export function bubbleAfterLeave(db: DatabaseSync, card: Card): void {
     const below = queue.filter((item) => (item.position ?? 0) > position)
     const top = below.filter((item) => (item.position ?? 0) <= 3)
     const rest = below.filter((item) => (item.position ?? 0) > 3)
-    const risers: Card[] = []
-    const stayers: Card[] = []
+    const risers = new Set<string>()
+    const stayers = new Set<string>()
+    const huge: Card[] = []
+    const normal: Card[] = []
     for (const item of rest) {
       const next = item.bubbles + 1
       if (next >= 1 + item.demons) {
         db.prepare('update cards set bubbles = 0 where id = ?').run(item.id)
-        risers.push(item)
+        if (isHuge(item)) huge.push(item)
+        else {
+          risers.add(item.id)
+          normal.push(item)
+        }
       } else {
         db.prepare('update cards set bubbles = ? where id = ?').run(next, item.id)
-        stayers.push(item)
+        stayers.add(item.id)
+        normal.push(item)
       }
     }
-    const huge = risers.filter(isHuge)
-    const normal = risers.filter((item) => !isHuge(item))
-    const ordered = [...above, ...top, ...normal, ...stayers]
+    // Демон пропускает ровно один шаг: riser обгоняет ближайшего stayer,
+    // а не всех сразу. Поэтому один проход снизу вверх, по одному обмену.
+    for (let index = normal.length - 1; index > 0; index--) {
+      const card = normal[index]
+      const previous = normal[index - 1]
+      if (risers.has(card.id) && stayers.has(previous.id)) {
+        normal[index - 1] = card
+        normal[index] = previous
+      }
+    }
+    const ordered = [...above, ...top, ...normal]
     // Огромный пузырь входит в первые три, но не вытесняет с первого места.
     let at = Math.min(2, ordered.length)
     for (const item of huge) {

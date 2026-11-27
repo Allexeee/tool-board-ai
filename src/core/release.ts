@@ -16,8 +16,6 @@ import {
 } from './git.ts'
 import { compareSemver, parseSemver } from './version.ts'
 import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
-import { findingsScope, modelContext } from './review-policy.ts'
-import { readSettings } from './settings.ts'
 import type { Card } from './types.ts'
 
 /** Версия проекта из package.json; если его нет — версия пакета board. */
@@ -146,10 +144,8 @@ export function release(
     throw new UserError(2, `релиз заблокирован: ждут приёмки владельцем: ${detail}`)
   }
 
-  const settings = readSettings(root)
-  const context = modelContext(process.env)
-  const scope = findingsScope(settings, context)
-  const severities = scope === 'critical+important' ? ['critical', 'important'] : ['critical']
+  // Релиз блокируют только критичные находки: важные чинятся сразу, но не ждут.
+  const severities = ['critical']
   const selectedIds = new Set(scoped.map((card) => card.id))
   const blocking = fresh.filter(
     (card) =>

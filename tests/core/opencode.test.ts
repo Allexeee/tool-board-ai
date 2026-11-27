@@ -676,7 +676,7 @@ test('board-work: целевые тесты на карточке, полный 
 
   const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8')
   assert.match(readme, /повторный — только дельта/)
-  assert.match(readme, /finding-карточка/)
+  assert.match(readme, /important чинится сразу/)
   assert.doesNotMatch(readme, /до 3 important/)
 })
 
@@ -701,13 +701,13 @@ test('AGENTS и board-work описывают ревью пакетом', () => 
   assert.match(agents, /Ревью идёт пакетом/)
   assert.match(agents, /одиночный `take` без забега/)
   assert.match(agents, /сборник в `deferred`/)
-  assert.match(agents, /finding-карточка/)
+  assert.match(agents, /important чинятся сразу же/)
   assert.doesNotMatch(agents, /findings становятся карточками/)
 
   assert.match(work, /только читает/)
   assert.match(work, /сборник/)
   assert.match(work, /только дельта/)
-  assert.match(work, /important — finding-карточка/)
+  assert.match(work, /important — чинятся сразу/)
   assert.doesNotMatch(work, /до 3 important/)
 })
 
