@@ -69,5 +69,5 @@ test('adopt --check: без варианта не советует auto, с фл
   ])
   assert.equal(withVariant.status, 0, withVariant.stderr)
   const known = JSON.parse(withVariant.stdout) as { profile: { command: string | null } }
-  assert.equal(known.profile.command, 'board setup --profile auto')
+  assert.equal(known.profile.command, 'board setup --profile auto --model-variant max')
 })

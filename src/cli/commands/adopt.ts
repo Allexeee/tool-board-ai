@@ -13,7 +13,8 @@ export default async function command(args: ParsedArgs) {
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
   if (!boolFlag(args, 'check')) throw new UserError(3, USAGE)
 
-  const variant = stringFlag(args, 'model-variant')
+  const variantRaw = stringFlag(args, 'model-variant')
+  const variant = variantRaw?.toLowerCase()
   if (variant !== undefined && !['low', 'default', 'high', 'max'].includes(variant)) {
     throw new UserError(3, '--model-variant: low, default, high или max')
   }

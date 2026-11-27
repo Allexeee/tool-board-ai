@@ -65,7 +65,8 @@ export default async function command(args: ParsedArgs) {
   if (!project) throw new UserError(3, 'проект не найден: выполните board init')
 
   const current = readSettings(project.root)
-  const variantFlag = stringFlag(args, 'model-variant')
+  const variantRaw = stringFlag(args, 'model-variant')
+  const variantFlag = variantRaw?.toLowerCase()
   if (variantFlag !== undefined && !['low', 'default', 'high', 'max'].includes(variantFlag)) {
     throw new UserError(3, '--model-variant: low, default, high или max')
   }
@@ -99,12 +100,6 @@ export default async function command(args: ParsedArgs) {
   const reviewerModel = stringFlag(args, 'reviewer-model')
   const profile = stringFlag(args, 'profile')
 
-  if (profile === 'auto' && context.variant === null) {
-    throw new UserError(
-      3,
-      'вариант модели неизвестен: укажите --model-variant low|default|high|max или явный --profile default|high|max',
-    )
-  }
 
   if (runMode !== undefined && (reviewAfterRun || noReviewAfterRun)) {
     throw new UserError(3, 'не сочетайте --run-review с устаревшими --review-after-run/--no-review-after-run')
@@ -153,6 +148,13 @@ export default async function command(args: ParsedArgs) {
 
   if (show && changes) {
     throw new UserError(3, '--show не сочетается с изменением настроек')
+  }
+
+  if (profile === 'auto' && context.variant === null) {
+    throw new UserError(
+      3,
+      'вариант модели неизвестен: укажите --model-variant low|default|high|max или явный --profile default|high|max|custom',
+    )
   }
 
   if (show || (!changes && isJsonMode())) {
