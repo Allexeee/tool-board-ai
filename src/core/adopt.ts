@@ -446,9 +446,15 @@ export function buildAdoptPlan(
   }
 }
 
-/** Человеческий план для терминала: без JSON-жаргона, но с готовыми командами. */
+/** Человеческий план для терминала: без JSON-жаргона и без команд. */
+function executorLabel(id: string): string {
+  if (id === 'owner') return 'владелец'
+  if (id === 'developer') return 'разработчик'
+  return id
+}
+
 export function renderAdoptPlan(plan: AdoptPlan): string {
-  const lines: string[] = ['План обновления доски (adopt):']
+  const lines: string[] = ['Что можно улучшить в доске:']
 
   lines.push(
     `  области: ${
@@ -464,10 +470,9 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
         : ''),
   )
   lines.push(
-    `  профиль: ${plan.profile.effective}` +
-      ` (spec ${plan.profile.spec}, забег ${plan.profile.run}, находки ${plan.profile.findings}, пакет ${
-        plan.profile.package ? 'да' : 'нет'
-      }); ${plan.profile.note}`,
+    plan.profile.effective.includes('неизвестен')
+      ? '  ревью: по умолчанию, вариант модели неизвестен — настройте профиль или запустите из сессии.'
+      : `  ревью: ${plan.profile.resolved}`,
   )
   lines.push(
     `  приёмка: ${plan.acceptance.existing.length > 0 ? plan.acceptance.existing.join('; ') : 'правил нет'}`,
@@ -481,14 +486,12 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
   lines.push(
     `  исполнители: ${
       plan.executors.existing.length > 0
-        ? plan.executors.existing.map((executor) => executor.id).join(', ')
-        : `нет → ${plan.executors.missing.map((executor) => executor.id).join(', ')}`
+        ? plan.executors.existing.map((executor) => executorLabel(executor.id)).join(', ')
+        : `нет → ${plan.executors.missing.map((executor) => executorLabel(executor.id)).join(', ')}`
     }`,
   )
   lines.push(
-    `  бэклог: ${plan.backlog.path} · ${plan.backlog.exists ? 'есть' : 'нет'} · ${
-      plan.backlog.auto ? `авто ${plan.backlog.refreshSeconds} с` : 'авто выключено'
-    }`,
+    `  бэклог: ${plan.backlog.exists ? 'есть' : 'ещё не собран'}${plan.backlog.auto ? ', обновляется сам' : ''}`,
   )
   lines.push(`  источники задач: ${plan.sources.length}`)
 
@@ -499,13 +502,10 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
 
   lines.push(
     '',
-    `Осталось шагов: ${plan.remaining} (обязательных: ${plan.required}). Доска ничего не создала.`,
+    `Что предлагаю сделать (сам, без ваших команд): ${plan.remaining} (обязательных: ${plan.required}). Пока ничего не менял.`,
   )
   for (const [index, step] of plan.steps.entries()) {
-    lines.push(
-      `  ${index + 1}. ${step.required ? '' : '[по желанию] '}${step.title}`,
-      `     ${step.command}`,
-    )
+    lines.push(`  ${index + 1}. ${step.required ? '' : '[по желанию] '}${step.title}`)
   }
   return lines.join('\n')
 }
