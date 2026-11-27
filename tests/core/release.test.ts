@@ -299,24 +299,37 @@ test('finish после reopen мержит новые коммиты ветки
   assert.equal(isAncestor(root, tip, 'dev'), true)
 })
 
-test('low не отменяет пакетное ревью перед релизом', (t) => {
+test('release всегда требует пакет, даже после run-ревью и при low', (t) => {
   const { root, db } = repoBoard(t)
   const card = merged(root, db, 'done', 'dev-a')
   db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+  db.prepare(
+    "insert into reviews (card_id, reviewer, verdict, at, kind) values (?, 'r', 'done', ?, 'run')",
+  ).run(card.id, new Date().toISOString())
   updateSettings(root, { review: { profile: 'low' } })
 
-  assert.equal(collectPackage(db, root).length, 1)
-  assert.throws(() => release(db, root, 'owner'), /нет ревью/)
-})
-
-test('release проходит с пакетным ревью вместо waiver', (t) => {  const { root, db } = repoBoard(t)
-  const card = merged(root, db, 'done', 'dev-a')
-  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+  assert.throws(() => release(db, root, 'owner'), /пакет|ревью/)
 
   const packed = collectPackage(db, root)
   assert.deepEqual(packed.map((item) => item.id), [card.id])
+  submitPackage(db, { actor: 'reviewer', verdict: 'done', cards: packed })
+  assert.equal(release(db, root, 'owner').commit.length, 40)
+})
+
+test('release требует и ревью карточки, и пакет', (t) => {
+  const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+
   assert.throws(() => release(db, root, 'owner'), /нет ревью/)
 
+  db.prepare(
+    "insert into reviews (card_id, reviewer, verdict, at, kind) values (?, 'r', 'done', ?, 'run')",
+  ).run(card.id, new Date().toISOString())
+  assert.throws(() => release(db, root, 'owner'), /пакет|ревью/)
+
+  const packed = collectPackage(db, root)
+  assert.deepEqual(packed.map((item) => item.id), [card.id])
   const pass = submitPackage(db, { actor: 'reviewer', verdict: 'done', cards: packed })
   assert.equal(pass.commits.length, 1)
   assert.deepEqual(collectPackage(db, root), [])

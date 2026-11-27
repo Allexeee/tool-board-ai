@@ -9,7 +9,7 @@ import { cardQueueClass, listQueue } from './queue.ts'
 import { isRepo, refreshMergeState, resolveBranches, runGit } from './git.ts'
 import { reclaimExpired } from './runs.ts'
 import { hasReviewVerdict, hasReviewWaiver, packageCovers } from './review.ts'
-import { findingsScope, modelContext, packageReviewRequired } from './review-policy.ts'
+import { findingsScope, modelContext } from './review-policy.ts'
 import { SCHEMA_VERSION, schemaVersionOf } from './schema.ts'
 import { readSettings } from './settings.ts'
 import { tagExists } from './tags.ts'
@@ -76,12 +76,7 @@ export function doctorData(
     checkWorktrees(root, warnings)
   }
 
-  checkCards(
-    db,
-    warnings,
-    findingsScope(settings, modelContext(process.env)),
-    packageReviewRequired(settings, modelContext(process.env)),
-  )
+  checkCards(db, warnings, findingsScope(settings, modelContext(process.env)))
   checkAcceptance(db, root, settings, warnings)
   checkQueues(db, warnings)
 
@@ -225,7 +220,6 @@ function checkCards(
   db: DatabaseSync,
   warnings: string[],
   findings: 'critical' | 'critical+important' = 'critical',
-  packageRequired = true,
 ): void {
   const cards = listCards(db)
 
@@ -264,23 +258,24 @@ function checkCards(
     warnings.push(`карточки на ревью: ${review.map((c) => c.id).join(', ')}`)
   }
 
-  const unreviewedDev = cards.filter(
-    (card) =>
-      card.inDev &&
-      !card.inMain &&
-      card.status === 'done' &&
-      card.revertedAt === null &&
-      !hasReviewVerdict(db, card.id) &&
-      !hasReviewWaiver(db, card.id) &&
-      !(
-        packageRequired &&
-        card.mergeCommit !== null &&
-        packageCovers(db, card.mergeCommit)
-      ),
-  )
+  const unreviewedDev = cards.filter((card) => {
+    if (
+      !card.inDev ||
+      card.inMain ||
+      card.status !== 'done' ||
+      card.revertedAt !== null
+    ) {
+      return false
+    }
+    const reviewMissing = !hasReviewVerdict(db, card.id) && !hasReviewWaiver(db, card.id)
+    const waived = hasReviewWaiver(db, card.id)
+    const packageMissing =
+      !waived && card.mergeCommit !== null && !packageCovers(db, card.mergeCommit)
+    return reviewMissing || packageMissing
+  })
   if (unreviewedDev.length > 0) {
     warnings.push(
-      `${packageRequired ? 'в dev без ревью, пакета и waiver' : 'в dev без ревью и waiver'}: ${unreviewedDev.map((c) => c.id).join(', ')}`,
+      `в dev без ревью, пакета или waiver: ${unreviewedDev.map((c) => c.id).join(', ')}`,
     )
   }
 
