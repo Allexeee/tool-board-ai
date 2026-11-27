@@ -495,7 +495,7 @@ export default Plugin.define({
 
       editor.add({
         name: 'setup',
-        description: 'Настройки доски: show|defaults|reviewer-model|spec-review|max-spec|large-spec|run-review',
+        description: 'Настройки доски: show|defaults|profile|reviewer-model|spec-review|max-spec|large-spec|run-review',
         input: schema({ action: { type: 'string' }, value: { type: 'string' } }),
         execute: (input, context) => {
           const action = input.action ?? 'show'
@@ -503,7 +503,7 @@ export default Plugin.define({
           if (action === 'defaults') return call(ctx, ['setup', '--defaults'], context)
           const value = input.value
           if (!value) return { content: 'для ' + action + ' нужен value', isError: true }
-          if (['reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'backlog-path', 'backlog-refresh', 'run-review'].includes(action)) {
+          if (['profile', 'reviewer-model', 'spec-review', 'max-spec', 'large-spec', 'branch-main', 'branch-dev', 'sync', 'backlog-path', 'backlog-refresh', 'run-review'].includes(action)) {
             return call(ctx, ['setup', '--' + action, value], context)
           }
           if (action === 'review-after-run' || action === 'no-review-after-run' || action === 'backlog-auto' || action === 'no-backlog-auto') {

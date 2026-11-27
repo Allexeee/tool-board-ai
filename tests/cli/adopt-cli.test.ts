@@ -7,17 +7,16 @@ import { makeBoard } from '../helpers/board.ts'
 
 const bin = resolve('bin/board.ts')
 
-function run(dir: string, args: string[]) {
+function run(dir: string, args: string[], env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
-    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1' },
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1', ...env },
     windowsHide: true,
   })
 }
 
-test('adopt --check: CLI отдаёт план и не пишет на диск', (t) => {
-  const board = makeBoard()
+test('adopt --check: CLI отдаёт план и не пишет на диск', (t) => {  const board = makeBoard()
   t.after(board.close)
   mkdirSync(join(board.root, 'docs', 'inbox'), { recursive: true })
   writeFileSync(join(board.root, 'docs', 'inbox', 'task.md'), '# Починить вход\n')
@@ -46,4 +45,29 @@ test('adopt без --check: понятная ошибка использован
   const result = run(board.root, ['adopt'])
   assert.equal(result.status, 3)
   assert.match(result.stderr, /board adopt --check/)
+})
+
+test('adopt --check: без варианта не советует auto, с флагом советует', (t) => {
+  const board = makeBoard()
+  t.after(board.close)
+  run(board.root, ['setup', '--profile', 'max'])
+
+  const plain = run(board.root, ['adopt', '--check', '--json'], { BOARD_MODEL_VARIANT: '' })
+  assert.equal(plain.status, 0, plain.stderr)
+  const withoutVariant = JSON.parse(plain.stdout) as {
+    profile: { command: string | null }
+    steps: Array<{ command: string }>
+  }
+  assert.equal(withoutVariant.profile.command, null)
+  assert.equal(
+    withoutVariant.steps.some((step) => step.command === 'board setup --profile auto'),
+    false,
+  )
+
+  const withVariant = run(board.root, [
+    'adopt', '--check', '--json', '--model-variant', 'max',
+  ])
+  assert.equal(withVariant.status, 0, withVariant.stderr)
+  const known = JSON.parse(withVariant.stdout) as { profile: { command: string | null } }
+  assert.equal(known.profile.command, 'board setup --profile auto')
 })

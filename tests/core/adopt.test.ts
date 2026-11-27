@@ -27,7 +27,7 @@ test('adopt --check: пустой проект получает план и ни
   assert.deepEqual(plan.groups.missing.map((group) => group.prefix), ['CARD'])
   assert.deepEqual(plan.executors.missing.map((executor) => executor.id), ['developer'])
   assert.equal(plan.profile.configured, 'auto')
-  assert.equal(plan.profile.effective, 'auto → default')
+  assert.equal(plan.profile.effective, 'auto → default (вариант неизвестен)')
   assert.equal(plan.acceptance.existing.length, 0)
   assert.deepEqual(plan.acceptance.suggested.map((rule) => rule.name), ['документация'])
   assert.deepEqual(
@@ -96,8 +96,16 @@ test('adopt --check: auto показывает эффективный профи
   const custom = buildAdoptPlan(board.db, board.root, NO_MODEL)
   assert.equal(custom.profile.configured, 'custom')
   assert.equal(custom.profile.effective, 'custom')
-  assert.equal(custom.profile.command, 'board setup --profile auto')
-  assert.ok(custom.steps.some((step) => step.area === 'profile'))
+  assert.equal(custom.profile.command, null)
+  assert.match(custom.profile.note, /вариант модели неизвестен/)
+  assert.equal(
+    custom.steps.some((step) => step.area === 'profile'),
+    false,
+  )
+
+  const known = buildAdoptPlan(board.db, board.root, { variant: 'max', sessionModel: null })
+  assert.equal(known.profile.command, 'board setup --profile auto')
+  assert.ok(known.steps.some((step) => step.area === 'profile'))
 })
 
 test('adopt --check: существующая карточка не дублирует задачу из inbox', (t) => {

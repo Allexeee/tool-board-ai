@@ -28,6 +28,7 @@ const KNOWN_FLAGS = new Set([
   'no-decisions', 'defaults', 'name', 'profile', 'merge', 'dry-run', 'since', 'package',
   'merge-commit', 'block', 'question', 'example', 'yes', 'show', 'refresh',
   'review-after-run', 'no-review-after-run', 'reviewer-model', 'spec-review',
+  'model-variant', 'session-model',
   'large-spec', 'max-spec', 'branch-main', 'branch-dev', 'no-git', 'standalone', 'sync', 'run-review', 'board-version', 'board-source', 'allow-downgrade',
   'format', 'out', 'md', 'events', 'description', 'owner-acceptance', 'no-owner-acceptance', 'reject', 'acceptance-only', 'check',
   'include-group', 'include-tag', 'include-skill', 'include-path',
