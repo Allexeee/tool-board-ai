@@ -41,7 +41,6 @@ function human(
           `Ревью в конце забега: ${profile.run}`,
           `Реревью: ${profile.reopens}`,
           `Находки: ${profile.findings === 'critical+important' ? 'critical + important' : 'critical'}`,
-          `Пакет ревью: ${profile.package ? 'требуется' : 'не требуется'}`,
         ]
   const lines = [
     ...review,

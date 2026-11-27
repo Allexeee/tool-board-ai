@@ -39,8 +39,6 @@ export interface ReviewProfile {
   reopens: number
   run: 'auto' | 'none' | 'self' | 'subagent'
   findings: ReviewFindings
-  /** Требуется ревью пакета перед релизом. */
-  package: boolean
 }
 
 export interface ReviewSettings {
@@ -127,7 +125,6 @@ function profileValue(raw: unknown): ReviewProfile | null {
     reopens,
     run,
     findings,
-    package: raw.package === true,
   }
 }
 

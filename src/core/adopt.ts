@@ -50,7 +50,6 @@ export interface AdoptProfilePlan {
   spec: string
   run: string
   findings: string
-  package: boolean
   reopens: number
   command: string | null
   note: string
@@ -317,7 +316,6 @@ export function buildAdoptPlan(
     spec: resolved.profile.spec,
     run: resolved.profile.run,
     findings: resolved.profile.findings,
-    package: resolved.profile.package,
     reopens: resolved.profile.reopens,
     command:
       settings.review.profile === 'auto' || variantUnknown

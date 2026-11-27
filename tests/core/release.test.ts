@@ -299,8 +299,17 @@ test('finish после reopen мержит новые коммиты ветки
   assert.equal(isAncestor(root, tip, 'dev'), true)
 })
 
-test('release проходит с пакетным ревью вместо waiver', (t) => {
+test('low не отменяет пакетное ревью перед релизом', (t) => {
   const { root, db } = repoBoard(t)
+  const card = merged(root, db, 'done', 'dev-a')
+  db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
+  updateSettings(root, { review: { profile: 'low' } })
+
+  assert.equal(collectPackage(db, root).length, 1)
+  assert.throws(() => release(db, root, 'owner'), /нет ревью/)
+})
+
+test('release проходит с пакетным ревью вместо waiver', (t) => {  const { root, db } = repoBoard(t)
   const card = merged(root, db, 'done', 'dev-a')
   db.prepare("delete from events where subject = ? and type = 'card.review_waived'").run(card.id)
 
