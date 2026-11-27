@@ -721,6 +721,10 @@ export default Plugin.define({
     await ctx.session.hook('context', (event) => {
       event.system.push({
         type: 'text',
+        text: 'В проекте подключена доска карточек. Правила — в AGENTS.md. Не говори, что не знаком с доской: сначала посмотри её состояние через board_now 0.',
+      })
+      event.system.push({
+        type: 'text',
         text: 'Перед любой работой по доске используй brainstorming; в этом проекте его spec пишется в карточку. Разговор без глагола работы карточек не создаёт.',
       })
       event.system.push({
