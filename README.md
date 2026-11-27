@@ -105,7 +105,8 @@ board now
 - `.opencode/agents/board-reviewer.md` — локальный read-only ревьюер на
   default-варианте модели (в git не попадает);
 - блок `board` в `AGENTS.md`;
-- записи `.board/`, `.worktrees/` в `.gitignore`.
+- каталог `.drafts/` для личных черновиков агентов — вне git;
+- записи `.board/`, `.worktrees/`, `.drafts/` в `.gitignore`.
 
 Скелет нужно закоммитить: `finish` мержит в `dev` и требует чистое основное
 дерево. `.board/` в git не попадает, `main` меняется только `release`.

@@ -127,6 +127,7 @@ test('initProject создаёт docs/board и дописывает .gitignore �
   assert.equal(lines.filter((line) => line === '.drafts/').length, 1)
   assert.ok(lines.includes('node_modules/'))
   assert.match(readFileSync(join(root, '.drafts', 'README.md'), 'utf8'), /Черновики/)
+  assert.match(readFileSync(join(root, '.drafts', 'README.md'), 'utf8'), /в корне проекта/)
 })
 
 test('initProject снимает старый хук toolbox-al и новый не ставит', (t) => {
