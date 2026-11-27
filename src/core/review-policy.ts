@@ -69,10 +69,10 @@ export const BUILTIN_PROFILES: Record<'low' | 'default' | 'high' | 'max', Review
 }
 
 export function modelContext(env: NodeJS.ProcessEnv = process.env): ModelContext {
-  const variant = env.BOARD_MODEL_VARIANT?.trim()
+  const variant = env.BOARD_MODEL_VARIANT?.trim().toLowerCase()
   const sessionModel = env.BOARD_SESSION_MODEL?.trim()
   return {
-    variant: variant ? variant : null,
+    variant: variant && ['low', 'default', 'high', 'max'].includes(variant) ? variant : null,
     sessionModel: sessionModel ? sessionModel : null,
   }
 }

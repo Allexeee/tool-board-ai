@@ -64,7 +64,12 @@ export interface AdoptPlan {
     suggested: Array<{ name: string; description: string; command: string }>
   }
   profile: AdoptProfilePlan
-  acceptance: { existing: string[]; suggested: AdoptAcceptanceSuggestion[] }
+  acceptance: {
+    existing: string[]
+    suggested: AdoptAcceptanceSuggestion[]
+    prompt: string | null
+    examples: string[]
+  }
   executors: {
     existing: Array<{ id: string; kind: string; skills: string[] }>
     missing: Array<{ id: string; kind: string; skills: string[]; command: string }>
@@ -126,15 +131,6 @@ function ruleText(rule: AcceptanceRule): string {
   const include = summarizeConditions(rule.include)
   const exclude = rule.exclude ? `; кроме ${summarizeConditions(rule.exclude)}` : ''
   return `${rule.name} [${include}${exclude}]`
-}
-
-function acceptanceCommand(name: string, include: AcceptanceConditions): string {
-  const flags: string[] = []
-  for (const group of include.groups ?? []) flags.push('--include-group', group)
-  for (const tag of include.tags ?? []) flags.push('--include-tag', tag)
-  for (const skill of include.skills ?? []) flags.push('--include-skill', skill)
-  for (const path of include.paths ?? []) flags.push('--include-path', path)
-  return `board acceptance rule add ${quote(name)} ${flags.join(' ')}`.trim()
 }
 
 function normalizeTitle(value: string): string {
@@ -259,27 +255,15 @@ function sourceSteps(
   return sources
 }
 
-function acceptanceSuggestions(
-  settings: BoardSettings,
-  groups: CardGroup[],
-): AdoptAcceptanceSuggestion[] {
-  if (settings.acceptance.rules.length > 0) return []
-  const suggestions: AdoptAcceptanceSuggestion[] = []
-  // Одна область — понятное правило по группе; много областей — не угадываем.
-  if (groups.length === 1) {
-    const group = groups[0]
-    const name = `приёмка-${group.prefix.toLowerCase()}`
-    const include = { groups: [group.prefix] }
-    suggestions.push({ name, include, command: acceptanceCommand(name, include) })
-  }
-  const docsInclude = { paths: ['docs/**', 'README.md'] }
-  suggestions.push({
-    name: 'документация',
-    include: docsInclude,
-    command: acceptanceCommand('документация', docsInclude),
-  })
-  return suggestions
-}
+/** Просьба к владельцу: какие карточки он принимает сам. */
+const ACCEPTANCE_PROMPT =
+  'Какие карточки Вы будете принимать сами? Напишите критерии, по которым я пойму, что задачу принимаете Вы.'
+
+const ACCEPTANCE_EXAMPLES = [
+  'Все карточки области UI.',
+  'Задачи с тегом docs.',
+  'Всё, что меняет README или настройки.',
+]
 
 /**
  * Строит план и ничего не пишет. Повторный вызов на неизменённой доске даёт
@@ -322,26 +306,38 @@ export function buildAdoptPlan(
   )
 
   const resolved = resolveReviewProfile(settings, context)
+  const variantUnknown = context.variant === null
   const profile: AdoptProfilePlan = {
     configured: settings.review.profile,
     resolved: resolved.name,
     effective:
-      settings.review.profile === 'auto' ? `auto → ${resolved.name}` : resolved.name,
+      settings.review.profile === 'auto'
+        ? `auto → ${resolved.name}${variantUnknown ? ' (вариант неизвестен)' : ''}`
+        : resolved.name,
     spec: resolved.profile.spec,
     run: resolved.profile.run,
     findings: resolved.profile.findings,
     package: resolved.profile.package,
     reopens: resolved.profile.reopens,
-    command: settings.review.profile === 'auto' ? null : 'board setup --profile auto',
+    command:
+      settings.review.profile === 'auto' || variantUnknown
+        ? null
+        : `board setup --profile auto --model-variant ${context.variant}`,
     note:
       settings.review.profile === 'auto'
-        ? 'auto пересчитывается при смене модели'
-        : 'сейчас профиль фиксирован; auto подстроится под модель',
+        ? variantUnknown
+          ? 'auto не разрешить: вариант модели не передан'
+          : 'auto пересчитывается при смене модели'
+        : variantUnknown
+          ? 'вариант модели неизвестен: укажите --model-variant или явный профиль'
+          : 'сейчас профиль фиксирован; auto подстроится под модель',
   }
 
   const acceptance = {
     existing: settings.acceptance.rules.map(ruleText),
-    suggested: acceptanceSuggestions(settings, groups),
+    suggested: [] as AdoptAcceptanceSuggestion[],
+    prompt: settings.acceptance.rules.length === 0 ? ACCEPTANCE_PROMPT : null,
+    examples: settings.acceptance.rules.length === 0 ? ACCEPTANCE_EXAMPLES : [],
   }
 
   const missingExecutors = executors.some((executor) => executor.id === 'developer')
@@ -450,9 +446,15 @@ export function buildAdoptPlan(
   }
 }
 
-/** Человеческий план для терминала: без JSON-жаргона, но с готовыми командами. */
+/** Человеческий план для терминала: без JSON-жаргона и без команд. */
+function executorLabel(id: string): string {
+  if (id === 'owner') return 'владелец'
+  if (id === 'developer') return 'разработчик'
+  return id
+}
+
 export function renderAdoptPlan(plan: AdoptPlan): string {
-  const lines: string[] = ['План обновления доски (adopt):']
+  const lines: string[] = ['Что можно улучшить в доске:']
 
   lines.push(
     `  области: ${
@@ -468,29 +470,28 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
         : ''),
   )
   lines.push(
-    `  профиль: ${plan.profile.effective}` +
-      ` (spec ${plan.profile.spec}, забег ${plan.profile.run}, находки ${plan.profile.findings}, пакет ${
-        plan.profile.package ? 'да' : 'нет'
-      }); ${plan.profile.note}`,
+    plan.profile.effective.includes('неизвестен')
+      ? '  ревью: по умолчанию, вариант модели неизвестен — настройте профиль или запустите из сессии.'
+      : `  ревью: ${plan.profile.resolved}`,
   )
   lines.push(
-    `  приёмка: ${
-      plan.acceptance.existing.length > 0
-        ? plan.acceptance.existing.join('; ')
-        : `правил нет; предложить: ${plan.acceptance.suggested.map((rule) => rule.name).join(', ')}`
-    }`,
+    `  приёмка: ${plan.acceptance.existing.length > 0 ? plan.acceptance.existing.join('; ') : 'правил нет'}`,
   )
+  if (plan.acceptance.prompt) {
+    lines.push(`    ${plan.acceptance.prompt}`)
+    for (const example of plan.acceptance.examples) {
+      lines.push(`      • ${example}`)
+    }
+  }
   lines.push(
     `  исполнители: ${
       plan.executors.existing.length > 0
-        ? plan.executors.existing.map((executor) => executor.id).join(', ')
-        : `нет → ${plan.executors.missing.map((executor) => executor.id).join(', ')}`
+        ? plan.executors.existing.map((executor) => executorLabel(executor.id)).join(', ')
+        : `нет → ${plan.executors.missing.map((executor) => executorLabel(executor.id)).join(', ')}`
     }`,
   )
   lines.push(
-    `  бэклог: ${plan.backlog.path} · ${plan.backlog.exists ? 'есть' : 'нет'} · ${
-      plan.backlog.auto ? `авто ${plan.backlog.refreshSeconds} с` : 'авто выключено'
-    }`,
+    `  бэклог: ${plan.backlog.exists ? 'есть' : 'ещё не собран'}${plan.backlog.auto ? ', обновляется сам' : ''}`,
   )
   lines.push(`  источники задач: ${plan.sources.length}`)
 
@@ -501,13 +502,10 @@ export function renderAdoptPlan(plan: AdoptPlan): string {
 
   lines.push(
     '',
-    `Осталось шагов: ${plan.remaining} (обязательных: ${plan.required}). Доска ничего не создала.`,
+    `Что предлагаю сделать (сам, без ваших команд): ${plan.remaining} (обязательных: ${plan.required}). Пока ничего не менял.`,
   )
   for (const [index, step] of plan.steps.entries()) {
-    lines.push(
-      `  ${index + 1}. ${step.required ? '' : '[по желанию] '}${step.title}`,
-      `     ${step.command}`,
-    )
+    lines.push(`  ${index + 1}. ${step.required ? '' : '[по желанию] '}${step.title}`)
   }
   return lines.join('\n')
 }

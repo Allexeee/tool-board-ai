@@ -27,9 +27,11 @@ test('adopt --check: пустой проект получает план и ни
   assert.deepEqual(plan.groups.missing.map((group) => group.prefix), ['CARD'])
   assert.deepEqual(plan.executors.missing.map((executor) => executor.id), ['developer'])
   assert.equal(plan.profile.configured, 'auto')
-  assert.equal(plan.profile.effective, 'auto → default')
+  assert.equal(plan.profile.effective, 'auto → default (вариант неизвестен)')
   assert.equal(plan.acceptance.existing.length, 0)
-  assert.deepEqual(plan.acceptance.suggested.map((rule) => rule.name), ['документация'])
+  assert.deepEqual(plan.acceptance.suggested, [])
+  assert.match(plan.acceptance.prompt ?? '', /Какие карточки/)
+  assert.equal(plan.acceptance.examples.length, 3)
   assert.deepEqual(
     plan.tags.suggested.map((tag) => tag.name),
     ['ui', 'backend', 'docs', 'test'],
@@ -96,8 +98,16 @@ test('adopt --check: auto показывает эффективный профи
   const custom = buildAdoptPlan(board.db, board.root, NO_MODEL)
   assert.equal(custom.profile.configured, 'custom')
   assert.equal(custom.profile.effective, 'custom')
-  assert.equal(custom.profile.command, 'board setup --profile auto')
-  assert.ok(custom.steps.some((step) => step.area === 'profile'))
+  assert.equal(custom.profile.command, null)
+  assert.match(custom.profile.note, /вариант модели неизвестен/)
+  assert.equal(
+    custom.steps.some((step) => step.area === 'profile'),
+    false,
+  )
+
+  const known = buildAdoptPlan(board.db, board.root, { variant: 'max', sessionModel: null })
+  assert.equal(known.profile.command, 'board setup --profile auto --model-variant max')
+  assert.ok(known.steps.some((step) => step.area === 'profile'))
 })
 
 test('adopt --check: существующая карточка не дублирует задачу из inbox', (t) => {
@@ -175,10 +185,13 @@ test('renderAdoptPlan: остаток и честная пометка, что �
   t.after(board.close)
   const plan = buildAdoptPlan(board.db, board.root, NO_MODEL)
   const text = renderAdoptPlan(plan)
-  assert.match(text, /План обновления доски/)
-  assert.match(text, /Осталось шагов: \d+/)
-  assert.match(text, /Доска ничего не создала/)
-  assert.match(text, /board group add CARD/)
+  assert.match(text, /Что можно улучшить/)
+  assert.match(text, /Что предлагаю сделать/)
+  assert.match(text, /Доска ничего не создала|Пока ничего не менял/)
+  assert.doesNotMatch(text, /board (group|tag|executor|setup|card|backlog)/)
+  assert.doesNotMatch(text, /spec|пакет|находки/)
+  assert.match(text, /Какие карточки Вы будете принимать сами/)
+  assert.equal(text.match(/•/g)?.length, 3)
 })
 
 test('settings не содержат правил после чтения плана', (t) => {

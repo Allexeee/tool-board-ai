@@ -18,7 +18,7 @@ function run(dir: string, args: string[], env: NodeJS.ProcessEnv = {}): Result {
   const result = spawnSync(process.execPath, [bin, ...args], {
     cwd: dir,
     encoding: 'utf8',
-    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1', ...env },
+    env: { ...process.env, BOARD_ALLOW_GLOBAL: '1', BOARD_MODEL_VARIANT: '', BOARD_SESSION_MODEL: '', ...env },
     windowsHide: true,
   })
   return { code: result.status, out: result.stdout ?? '', err: result.stderr ?? '' }
@@ -256,6 +256,33 @@ test('setup --profile меняет профиль, --show печатает', (t)
 
   const shown = run(fixture.root, ['setup', '--show'])
   assert.match(shown.out, /Профиль ревью: max/)
+})
+
+test('setup --profile auto: без варианта ошибка, с флагом — max', (t) => {
+  const fixture = makeBoard()
+  t.after(fixture.close)
+
+  const defaultShown = run(fixture.root, ['setup', '--show'])
+  assert.match(defaultShown.out, /auto → default \(вариант модели не передан\)/)
+
+  json(fixture.root, ['setup', '--profile', 'high'])
+  const failed = run(fixture.root, ['setup', '--profile', 'auto'])
+  assert.equal(failed.code, 3)
+  assert.match(failed.err, /вариант модели/)
+
+  const stillHigh = run(fixture.root, ['setup', '--show'])
+  assert.match(stillHigh.out, /Профиль ревью: high/)
+
+  const updated = json(fixture.root, [
+    'setup', '--profile', 'auto', '--model-variant', 'max',
+  ])
+  assert.equal((updated.review as { profile: string }).profile, 'auto')
+
+  const shownMax = run(fixture.root, ['setup', '--show', '--model-variant', 'max'])
+  assert.equal(shownMax.code, 0, shownMax.err)
+  assert.match(shownMax.out, /Профиль ревью: auto → max/)
+  assert.match(shownMax.out, /Реревью: 3/)
+  assert.match(shownMax.out, /Находки: critical \+ important/)
 })
 
 test('setup --show: high печатает эффективный профиль', (t) => {
