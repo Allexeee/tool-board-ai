@@ -545,6 +545,27 @@ test('пузыри: демон задерживает обгон, первая �
   assert.equal(getCard(db, fifth.id)!.position, 4)
 })
 
+test('пузыри: демон теряет ровно один шаг, а не падает ниже всех', (t) => {
+  const { db } = board(t)
+  const first = task(db, { skill: 'dev', position: 1 })
+  task(db, { skill: 'dev', position: 2 })
+  task(db, { skill: 'dev', position: 3 })
+  const demon = task(db, { skill: 'dev', position: 4 })
+  task(db, { skill: 'dev', position: 5 })
+  const sixth = task(db, { skill: 'dev', position: 6 })
+  const seventh = task(db, { skill: 'dev', position: 7 })
+  db.prepare('update cards set demons = 1 where id = ?').run(demon.id)
+
+  db.prepare("update cards set status = 'done' where id = ?").run(first.id)
+  bubbleAfterLeave(db, first)
+
+  // Демон должен был подняться на 3-е место, но пропустил шаг и остался на 4-м;
+  // остальные поднялись на один, а не перепрыгнули его всем хвостом.
+  assert.equal(getCard(db, demon.id)!.position, 4)
+  assert.equal(getCard(db, sixth.id)!.position, 5)
+  assert.equal(getCard(db, seventh.id)!.position, 6)
+})
+
 test('пузыри: огромный пузырь входит в первую тройку', (t) => {
   const { db } = board(t)
   const first = task(db, { skill: 'dev', position: 1 })

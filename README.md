@@ -144,7 +144,7 @@ board card add --group UI --title "Форма входа" --skill dev
 
 `needs_merge=true` по умолчанию включает ревью (`review_required`). Отказ — только владелец: `--no-review --reason "..." --as owner`, пишется событие `card.review_waived`. `release` блокируется, если в dev и не в main есть done без вердикта `done`, waiver или покрытия пакетным проходом.
 
-Профиль ревью: `board setup --profile auto|low|default|high|max|custom`. `auto` берёт профиль по варианту модели (`low/default/high/max`). Встроенные: `low` — spec self, run none, без реревью; `default` — spec auto 500 слов, run auto, реревью 1; `high` — spec auto 250 слов, run subagent, реревью 2, important чинятся сразу; `max` — spec subagent, run subagent, реревью 3, каждая карточка в ревью. Пакетное ревью перед релизом нужно всегда и от профиля не зависит; отменяет его только явный отказ владельца от ревью. Свои профили — `review.profiles` в `.board/settings.json`; старые флаги `--spec-review`/`--run-review` переключают на `custom`.
+Профиль ревью: `board setup --profile auto|low|default|high|max|custom`. `auto` берёт профиль по варианту модели (`low/default/high/max`). Встроенные: `low` — spec self, run none, без реревью; `default` — spec auto 500 слов, run auto, реревью 1; `high` — spec auto 250 слов, run subagent, реревью 2; `max` — spec subagent, run subagent, реревью 3, каждая карточка в ревью. Important-находки чинятся сразу во всех профилях и релиз не блокируют; блокирует только critical. Пакетное ревью перед релизом нужно всегда и от профиля не зависит; отменяет его только явный отказ владельца от ревью. Свои профили — `review.profiles` в `.board/settings.json`; старые флаги `--spec-review`/`--run-review` переключают на `custom`.
 
 Из shell контекст модели не виден: `setup --profile auto` и `adopt --check` принимают `--model-variant low|default|high|max` и `--session-model provider/model`. Без варианта `setup --profile auto` завершается ошибкой, `setup --show` поясняет «вариант модели не передан», а `adopt --check` не советует `auto`, пока вариант неизвестен.
 
@@ -187,7 +187,7 @@ board review submit UI-1 --plan done --verdict done --note "итоги: RUN-1" -
 board card ref add UI-1 --kind review --value RUN-1 --title "итоги прохода"
 ```
 
-Ревьюер только читает: карточек не создаёт. Итоги прохода — `run note` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка. Бюджет прохода: первый проход полный; повторный — только дельта (исправлены ли находки и нет ли регрессий от фикса), новых он не ищет. Critical и регрессии чинятся сразу; important — finding-карточка в очередь и не блокирует релиз; other — сборник `review notes` в `deferred`. Больше 7 находок на проход не перечисляют.
+Ревьюер только читает: карточек не создаёт. Итоги прохода — `run note` (или `review submit --note` для одиночной карточки), в карточке — вердикт и ссылка. Бюджет прохода: первый проход полный; повторный — только дельта (исправлены ли находки и нет ли регрессий от фикса), новых он не ищет. Critical чинится сразу и блокирует релиз; important чинится сразу же, но релиз не блокирует; other — сборник `review notes` в `deferred`. Больше 7 находок на проход не перечисляют.
 
 Перед релизом — пакетный проход по done-карточкам dev вне main:
 
