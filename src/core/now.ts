@@ -162,7 +162,7 @@ function ownerView(
     (left, right) =>
       (right.importance ?? -1) - (left.importance ?? -1) ||
       left.createdAt.localeCompare(right.createdAt) ||
-      left.id.localeCompare(right.id),
+      byGroupSeq(left, right),
   )
   const ownerCards = listCards(db, { skill: 'owner', status: ['ready', 'waiting'] }).sort(
     (left, right) =>
@@ -170,7 +170,7 @@ function ownerView(
         (right.position ?? Number.MAX_SAFE_INTEGER) ||
       (right.importance ?? -1) - (left.importance ?? -1) ||
       left.createdAt.localeCompare(right.createdAt) ||
-      left.id.localeCompare(right.id),
+      byGroupSeq(left, right),
   )
   const questions = openQuestions(db)
   const deferredCount = listCards(db, { status: 'deferred' }).length
@@ -280,6 +280,10 @@ function cardsForAgent(
   return [...byId.values()].sort(byCardOrder)
 }
 
+function byGroupSeq(left: Card, right: Card): number {
+  return left.groupSeq - right.groupSeq || left.id.localeCompare(right.id)
+}
+
 function byCardOrder(left: Card, right: Card): number {
   return (
     (CARD_ORDER[left.status] ?? 9) - (CARD_ORDER[right.status] ?? 9) ||
@@ -287,7 +291,7 @@ function byCardOrder(left: Card, right: Card): number {
     (left.position ?? 0) - (right.position ?? 0) ||
     score(right) - score(left) ||
     left.createdAt.localeCompare(right.createdAt) ||
-    left.id.localeCompare(right.id)
+    byGroupSeq(left, right)
   )
 }
 
@@ -321,7 +325,7 @@ function openCards(
             (left.position ?? Number.MAX_SAFE_INTEGER) -
               (right.position ?? Number.MAX_SAFE_INTEGER) ||
             left.createdAt.localeCompare(right.createdAt) ||
-            left.id.localeCompare(right.id),
+            byGroupSeq(left, right),
         )
     result.requests = requests.slice(0, limit)
     result.moreRequests = requests.length > limit ? requests.length - limit : 0
